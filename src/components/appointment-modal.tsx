@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { TriageQuestionnaire } from "./triage/TriageQuestionnaire";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface AppointmentModalProps {
     isOpen: boolean;
@@ -146,29 +146,18 @@ export function AppointmentModal({
         async function fetchData() {
             try {
                 // Fetch available staff
-                const staffRes = await fetch(`${API_BASE_URL}/api/appointments/available-staff`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                });
-                if (staffRes.ok) {
-                    const data = await staffRes.json();
-                    if (mounted && data.doctors) {
-                        setDoctors(data.doctors);
-                        setTherapists(data.therapists || []);
-                    }
+                const staffParams = isAdmin ? { allBranches: 'true' } : {};
+                const { data: staffData } = await apiClient.get<any>('/api/appointments/available-staff', staffParams);
+                if (mounted && staffData.doctors) {
+                    setDoctors(staffData.doctors);
+                    setTherapists(staffData.therapists || []);
                 }
 
                 // Fetch patients if admin
                 if (isAdmin) {
-                    const patientsRes = await fetch(`${API_BASE_URL}/api/user/list-patients`, {
-                        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                    });
-                    if (patientsRes.ok) {
-                        const pats = await patientsRes.json();
-                        console.log('Fetched patients:', pats); // Debug log
-                        if (mounted) setPatients(pats);
-                    } else {
-                        console.error('Failed to fetch patients:', patientsRes.status, patientsRes.statusText);
-                    }
+                    const { data: pats } = await apiClient.get<any[]>('/api/user/list-patients');
+                    console.log('Fetched patients:', pats); // Debug log
+                    if (mounted) setPatients(pats);
                 }
             } catch (error) {
                 console.error("Failed to fetch data:", error);
@@ -184,11 +173,8 @@ export function AppointmentModal({
     useEffect(() => {
         async function fetchPatientDetails(patId: string) {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/user/patient/${patId}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                });
-                if (res.ok) {
-                    const patientData = await res.json();
+                const { data: patientData } = await apiClient.get<any>(`/api/user/patient/${patId}`);
+                {
                     setContactDetails({
                         fullName: patientData.fullName || "",
                         phoneNumber: patientData.phoneNumber || "",
@@ -309,77 +295,49 @@ Medications: ${resp.medications || 'None'}`;
                 combinedTherapistDateTime.setMinutes(parseInt(selectedMinute));
             }
 
-            const url = isEditing
-                ? `${API_BASE_URL}/api/appointments/${appointment.id}`
-                : `${API_BASE_URL}/api/appointments`;
-            const method = isEditing ? "PUT" : "POST";
+            const body = {
+                ...formData,
+                date: combinedDateTime.toISOString(),
+                therapistDate: combinedTherapistDateTime?.toISOString() || null,
+                contactDetails,
+                triageSessionId: triageSessionId
+            };
 
-            // Get authentication token
-            const token = localStorage.getItem("accessToken");
-            if (!token) {
-                toast.error("You must be logged in to book an appointment. Please log in and try again.");
-                setLoading(false);
-                return;
-            }
-
-            const res = await fetch(url, {
-                method,
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    ...formData,
-                    date: combinedDateTime.toISOString(),
-                    therapistDate: combinedTherapistDateTime?.toISOString() || null,
-                    contactDetails,
-                    triageSessionId: triageSessionId
-                }),
-            });
-
-            if (res.ok) {
-                toast.success(
-                    isEditing ? "Appointment updated successfully" : "Appointment booked successfully"
-                );
-                // Reset form
-                setFormData({
-                    patientId: "",
-                    doctorId: "",
-                    therapistId: "",
-                    status: "SCHEDULED",
-                    notes: "",
-                    consultationType: "DOCTOR",
-                    consultationMode: "OFFLINE",
-                });
-                setContactDetails({
-                    fullName: "",
-                    phoneNumber: "",
-                    email: "",
-                });
-                setSelectedDate(undefined);
-                setSelectedHour("09");
-                setSelectedMinute("00");
-                onSuccess?.();
-                onClose();
+            if (isEditing) {
+                await apiClient.put(`/api/appointments/${appointment.id}`, body);
             } else {
-                const errorData = await res.json();
-                // Handle specific error cases
-                if (res.status === 401 || res.status === 403) {
-                    toast.error("Authentication failed. Please log in again.");
-                } else if (res.status === 400 && errorData.error === 'Validation failed' && errorData.details) {
-                    // Display all validation issues
-                    const detailMessages = errorData.details.map((d: any) => d.message).join(", ");
-                    toast.error(`Validation Error: ${detailMessages}`);
-                } else if (errorData.error) {
-                    toast.error(errorData.error);
-                } else if (errorData.message) {
-                    toast.error(errorData.message);
-                } else {
-                    toast.error("Failed to save appointment. Please try again.");
-                }
+                await apiClient.post('/api/appointments', body);
             }
-        } catch (error) {
-            toast.error("Failed to save appointment");
+
+            toast.success(isEditing ? "Appointment updated successfully" : "Appointment booked successfully");
+            // Reset form
+            setFormData({
+                patientId: "",
+                doctorId: "",
+                therapistId: "",
+                status: "SCHEDULED",
+                notes: "",
+                consultationType: "DOCTOR",
+                consultationMode: "OFFLINE",
+            });
+            setContactDetails({
+                fullName: "",
+                phoneNumber: "",
+                email: "",
+            });
+            setSelectedDate(undefined);
+            setSelectedHour("09");
+            setSelectedMinute("00");
+            onSuccess?.();
+            onClose();
+        } catch (error: any) {
+            // Handle specific error cases
+            if (error?.details?.length) {
+                const detailMessages = error.details.map((d: any) => d.message).join(", ");
+                toast.error(`Validation Error: ${detailMessages}`);
+            } else {
+                toast.error(error?.message || "Failed to save appointment. Please try again.");
+            }
         } finally {
             setLoading(false);
         }
@@ -548,8 +506,17 @@ Medications: ${resp.medications || 'None'}`;
                                         <SelectContent>
                                             {filteredDoctors.map((doctor) => (
                                                 <SelectItem key={doctor?.id || 'unknown'} value={doctor?.id || ''}>
-                                                    {doctor?.fullName || doctor?.user?.email || `Doctor-${doctor?.id?.slice(0, 8) || 'unknown'}`}
-                                                    {doctor?.user?.role === 'ADMIN_DOCTOR' && " (Admin Clinic)"}
+                                                    <div className="flex flex-col">
+                                                        <span>
+                                                            {doctor?.fullName || doctor?.user?.email || `Doctor-${doctor?.id?.slice(0, 8) || 'unknown'}`}
+                                                            {doctor?.user?.role === 'ADMIN_DOCTOR' && " (Senior)"}
+                                                        </span>
+                                                        {isAdmin && doctor?.user?.branch?.name && (
+                                                            <span className="text-[10px] text-muted-foreground">
+                                                                {doctor.user.branch.name}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
@@ -572,7 +539,16 @@ Medications: ${resp.medications || 'None'}`;
                                         <SelectContent>
                                             {Array.isArray(therapists) && therapists.map((therapist) => (
                                                 <SelectItem key={therapist.id} value={therapist.id}>
-                                                    {therapist.fullName || therapist.user?.email || `Therapist-${therapist.id.slice(0, 8)}`}
+                                                    <div className="flex flex-col">
+                                                        <span>
+                                                            {therapist.fullName || therapist.user?.email || `Therapist-${therapist.id.slice(0, 8)}`}
+                                                        </span>
+                                                        {isAdmin && therapist.user?.branch?.name && (
+                                                            <span className="text-[10px] text-muted-foreground">
+                                                                {therapist.user.branch.name}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

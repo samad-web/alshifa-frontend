@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 interface Message {
     id: string;
@@ -74,20 +73,11 @@ export function ChatWindow({ conversationId, className, header }: ChatWindowProp
         setError(null);
         try {
             console.log("[ChatWindow] Fetching messages for:", id);
-            const res = await fetch(`${API_BASE_URL}/api/chat/messages/${id}`, {
-                headers: { "Authorization": `Bearer ${localStorage.getItem("accessToken")}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setMessages(data);
-            } else {
-                const errData = await res.json().catch(() => ({}));
-                console.error("[ChatWindow] Failed to fetch messages:", res.status, errData);
-                setError(errData.error || "Failed to load messages");
-            }
-        } catch (err) {
+            const { data } = await apiClient.get<Message[]>(`/api/chat/messages/${id}`);
+            setMessages(data);
+        } catch (err: any) {
             console.error("[ChatWindow] Network error:", err);
-            setError("Connection error. Please try again.");
+            setError(err?.message || "Connection error. Please try again.");
         } finally {
             setLoading(false);
         }

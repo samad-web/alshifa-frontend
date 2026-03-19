@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Users, AlertTriangle, Sparkles, CheckCircle2, Pill } from "lucide-react";
 
 import { useEffect, useState } from "react";
+import { apiClient } from "@/lib/api-client";
 const initialStats = {
   recoveryProgress: 0,
   medicationAdherence: 0,
@@ -48,15 +49,8 @@ export default function DoctorDashboard() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/user/doctor/stats", {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setStats(data);
-      }
+      const { data } = await apiClient.get<any>('/api/user/doctor/stats');
+      setStats(data);
     } catch (error) {
       console.error("Failed to fetch doctor stats:", error);
     } finally {

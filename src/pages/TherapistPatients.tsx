@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Users, Search, Filter, MessageSquare } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api-client";
 
 export default function TherapistPatients() {
     const { profile } = useAuth();
@@ -21,13 +22,8 @@ export default function TherapistPatients() {
 
     const fetchPatients = async () => {
         try {
-            const res = await fetch("/api/user/assigned-patients", {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setPatients(data);
-            }
+            const { data } = await apiClient.get<any[]>('/api/user/assigned-patients');
+            setPatients(data);
         } catch (error) {
             console.error("Failed to fetch patients:", error);
         } finally {

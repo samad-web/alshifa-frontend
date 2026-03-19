@@ -41,7 +41,7 @@ export function PrescriptionList({
         window.open(`${API_BASE_URL}/api/prescriptions/download/${filename}`, "_blank");
     };
 
-    if (prescriptions.length === 0) {
+    if (!prescriptions?.length) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center border-2 border-dashed rounded-xl bg-secondary/5">
                 <FileText className="w-12 h-12 text-muted-foreground/20 mb-4" />
@@ -56,8 +56,8 @@ export function PrescriptionList({
                 const prescriber =
                     rx.doctor?.fullName ||
                     rx.therapist?.fullName ||
-                    rx.doctor?.user.email ||
-                    rx.therapist?.user.email ||
+                    rx.doctor?.user?.email ||
+                    rx.therapist?.user?.email ||
                     "Unknown";
                 const role = rx.doctor ? "Doctor" : "Therapist";
 

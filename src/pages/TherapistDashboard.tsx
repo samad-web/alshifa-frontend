@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api-client";
 
 const initialStats = {
     recoveryProgress: 0,
@@ -45,15 +46,8 @@ export default function TherapistDashboard() {
 
     const fetchStats = async () => {
         try {
-            const res = await fetch("/api/consultations/therapist/stats", {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setStats(data);
-            }
+            const { data } = await apiClient.get<any>('/api/consultations/therapist/stats');
+            setStats(data);
         } catch (error) {
             console.error("Failed to fetch statistics:", error);
         }
@@ -62,18 +56,11 @@ export default function TherapistDashboard() {
     const fetchAppointments = async () => {
         setLoading(true);
         try {
-            const res = await fetch("/api/appointments", {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.appointments) {
-                    setAppointments(data.appointments);
-                } else {
-                    setAppointments(data);
-                }
+            const { data } = await apiClient.get<any>('/api/appointments');
+            if (data.appointments) {
+                setAppointments(data.appointments);
+            } else {
+                setAppointments(data);
             }
         } catch (error) {
             console.error("Failed to fetch appointments:", error);
@@ -84,20 +71,12 @@ export default function TherapistDashboard() {
 
     const handleStartSession = async (appointment: any) => {
         try {
-            const res = await fetch(`/api/consultations/session/${appointment.id}/start`, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                const updated = await res.json();
-                toast.success("Session started!");
-                if (updated.meetingLink) {
-                    window.open(updated.meetingLink, "_blank");
-                }
-                fetchAppointments();
+            const { data: updated } = await apiClient.post<any>(`/api/consultations/session/${appointment.id}/start`, {});
+            toast.success("Session started!");
+            if (updated.meetingLink) {
+                window.open(updated.meetingLink, "_blank");
             }
+            fetchAppointments();
         } catch (error) {
             toast.error("Failed to start session");
         }
@@ -110,41 +89,22 @@ export default function TherapistDashboard() {
 
     const handleApprove = async (appointmentId: string) => {
         try {
-            const res = await fetch(`/api/appointments/${appointmentId}/approve`, {
-                method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                toast.success("Appointment approved!");
-                fetchAppointments();
-            } else {
-                const error = await res.json();
-                toast.error(error.error || "Failed to approve");
-            }
-        } catch (error) {
-            toast.error("Failed to approve");
+            await apiClient.put(`/api/appointments/${appointmentId}/approve`, {});
+            toast.success("Appointment approved!");
+            fetchAppointments();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to approve");
         }
     };
 
     const handleReject = async (appointmentId: string) => {
-        if (!confirm("Reject this appointment?")) return;
+        // Confirmation is handled by the themed dialog in AppointmentList
         try {
-            const res = await fetch(`/api/appointments/${appointmentId}/reject`, {
-                method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                toast.success("Appointment rejected");
-                fetchAppointments();
-            } else {
-                toast.error("Failed to reject");
-            }
-        } catch (error) {
-            toast.error("Failed to reject");
+            await apiClient.put(`/api/appointments/${appointmentId}/reject`, {});
+            toast.success("Appointment rejected");
+            fetchAppointments();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to reject");
         }
     };
 

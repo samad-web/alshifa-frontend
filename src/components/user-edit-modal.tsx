@@ -12,8 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface UserEditModalProps {
     isOpen: boolean;
@@ -47,26 +46,12 @@ export function UserEditModal({ isOpen, onClose, user, type, onSuccess }: UserEd
 
         setLoading(true);
         try {
-            const token = localStorage.getItem("accessToken");
-            const res = await fetch(`${API_BASE_URL}/api/user/${type}/${user.id}`, {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify(formData),
-            });
-
-            if (res.ok) {
-                toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} updated successfully`);
-                onSuccess();
-                onClose();
-            } else {
-                const err = await res.json();
-                toast.error(err.error || "Failed to update user");
-            }
-        } catch (error) {
-            toast.error("An error occurred while updating");
+            await apiClient.put(`/api/user/${type}/${user.id}`, formData);
+            toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} updated successfully`);
+            onSuccess();
+            onClose();
+        } catch (error: any) {
+            toast.error(error?.message || "An error occurred while updating");
             console.error("Update error:", error);
         } finally {
             setLoading(false);

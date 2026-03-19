@@ -5,6 +5,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { apiClient } from "@/lib/api-client";
 import {
     Video,
     MessageSquare,
@@ -14,10 +15,12 @@ import {
     ArrowLeft,
     User,
     Clock,
-    ExternalLink
+    ExternalLink,
+    ClipboardList
 } from "lucide-react";
 import { toast } from "sonner";
 import { ChatWrapper } from "@/components/chat/ChatWrapper";
+import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
 
 export default function ConsultationRoom() {
     const { appointmentId } = useParams();
@@ -26,6 +29,7 @@ export default function ConsultationRoom() {
     const [loading, setLoading] = useState(true);
     const [notes, setNotes] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const [showChecklist, setShowChecklist] = useState(false);
 
     useEffect(() => {
         fetchAppointment();
@@ -33,14 +37,9 @@ export default function ConsultationRoom() {
 
     const fetchAppointment = async () => {
         try {
-            const res = await fetch(`/api/appointments/${appointmentId}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setAppointment(data);
-                setNotes(data.sessionNotes || "");
-            }
+            const { data } = await apiClient.get<any>(`/api/appointments/${appointmentId}`);
+            setAppointment(data);
+            setNotes(data.sessionNotes || "");
         } catch (error) {
             toast.error("Failed to fetch appointment details");
         } finally {
@@ -51,17 +50,8 @@ export default function ConsultationRoom() {
     const handleSaveNotes = async () => {
         setIsSaving(true);
         try {
-            const res = await fetch(`/api/consultations/session/${appointmentId}/notes`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-                body: JSON.stringify({ sessionNotes: notes }),
-            });
-            if (res.ok) {
-                toast.success("Notes saved successfully");
-            }
+            await apiClient.post(`/api/consultations/session/${appointmentId}/notes`, { sessionNotes: notes });
+            toast.success("Notes saved successfully");
         } catch (error) {
             toast.error("Failed to save notes");
         } finally {
@@ -76,14 +66,9 @@ export default function ConsultationRoom() {
             // First save notes
             await handleSaveNotes();
 
-            const res = await fetch(`/api/consultations/session/${appointmentId}/complete`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                toast.success("Session completed!");
-                navigate("/therapist");
-            }
+            await apiClient.post(`/api/consultations/session/${appointmentId}/complete`, {});
+            toast.success("Session completed!");
+            navigate("/therapist");
         } catch (error) {
             toast.error("Failed to complete session");
         }
@@ -238,6 +223,40 @@ export default function ConsultationRoom() {
                                 </Button>
                             </div>
                         </Panel>
+
+                        {/* Retention Checklist — follow-up adherence tracking */}
+                        <div className="space-y-2 pt-2 border-t border-border/50">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-black text-foreground uppercase tracking-tight flex items-center gap-1.5">
+                                        <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                                        Retention Checklist
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                                        Record patient follow-up adherence across 5 structured categories.
+                                    </p>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setShowChecklist(true)}
+                                    className="gap-1.5 text-primary border-primary/30 hover:bg-primary/5 shrink-0"
+                                >
+                                    <ClipboardList className="w-3 h-3" />
+                                    Open
+                                </Button>
+                            </div>
+                        </div>
+
+                        {appointmentId && (
+                            <RetentionChecklistModal
+                                isOpen={showChecklist}
+                                onClose={() => setShowChecklist(false)}
+                                appointmentId={appointmentId}
+                                patientName={appointment?.patient?.fullName || appointment?.patient?.user?.email}
+                                onSuccess={() => toast.success("Retention checklist saved")}
+                            />
+                        )}
                     </div>
                 </div>
             </div>

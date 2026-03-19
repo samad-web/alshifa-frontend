@@ -11,6 +11,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { PrescriptionList } from "@/components/prescription-list";
 import { AdherenceTracker } from "@/components/adherence-tracker";
+import { apiClient } from "@/lib/api-client";
 
 // Mock data aligned with backend models
 type JourneyStatus = "ON_TRACK" | "AT_RISK" | "COMPLETED";
@@ -42,15 +43,18 @@ export default function PatientScreen() {
   const [showMedicineSuccess, setShowMedicineSuccess] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // H-4: Use Bearer token auth; depend only on stable patient id (not whole profile object)
+  const patientId = profile?.patient?.id;
   useEffect(() => {
+    if (!patientId) return;
     async function fetchPrescriptions() {
-      const res = await fetch(`/api/prescriptions/patient/${profile?.patient?.id || profile?.id}/view`, { credentials: "include" });
-      if (res.ok) setPrescriptions(await res.json());
+      try {
+        const { data } = await apiClient.get<any[]>(`/api/prescriptions/patient/${patientId}/view`);
+        setPrescriptions(data);
+      } catch { /* show empty list */ }
     }
-    if (profile?.id) {
-      fetchPrescriptions();
-    }
-  }, [profile]);
+    fetchPrescriptions();
+  }, [patientId]);
 
   const progress = Math.round((patientData.completedSittings / patientData.totalSittings) * 100);
 
@@ -93,9 +97,9 @@ export default function PatientScreen() {
               <p className="text-lg text-muted-foreground">
                 {greeting.subtitle}
               </p>
-              {profile?.full_name && (
+              {(profile?.patient?.fullName || profile?.fullName) && (
                 <p className="text-base text-primary font-medium mt-2">
-                  {profile.full_name}
+                  {profile.patient?.fullName || profile.fullName}
                 </p>
               )}
             </div>
@@ -206,18 +210,12 @@ export default function PatientScreen() {
                 fd.append("duration", form.duration);
                 fd.append("notes", form.notes);
                 if (form.file) fd.append("file", form.file);
-                const res = await fetch("/api/prescriptions/add", {
-                  method: "POST",
-                  body: fd,
-                  credentials: "include",
-                });
-                if (res.ok) {
-                  setShowAddModal(false);
-                  setForm({ medicationName: "", dosage: "", frequency: "", duration: "", notes: "", file: null });
-                  // Refresh prescriptions
-                  const rxRes = await fetch(`/api/prescriptions/patient/${profile?.patient?.id || profile?.id}`, { credentials: "include" });
-                  if (rxRes.ok) setPrescriptions(await rxRes.json());
-                }
+                await apiClient.upload('/api/prescriptions/add', fd);
+                setShowAddModal(false);
+                setForm({ medicationName: "", dosage: "", frequency: "", duration: "", notes: "", file: null });
+                // Refresh prescriptions
+                const { data } = await apiClient.get<any[]>(`/api/prescriptions/patient/${patientId}/view`);
+                setPrescriptions(data);
               }}
             >
               <Input placeholder="Medicine Name" value={form.medicationName} onChange={e => setForm(f => ({ ...f, medicationName: e.target.value }))} required />

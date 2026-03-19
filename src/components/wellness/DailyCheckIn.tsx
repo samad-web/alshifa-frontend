@@ -22,8 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 interface DailyCheckInProps {
     isOpen: boolean;
@@ -50,32 +49,13 @@ export function DailyCheckIn({ isOpen, onClose, onSuccess }: DailyCheckInProps) 
     const handleSubmit = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wellness/check-in`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-                body: JSON.stringify(formData),
-            });
-
-            if (res.ok) {
-                toast.success("Daily check-in completed! +10 Zen Points");
-                onSuccess(10);
-                onClose();
-            } else {
-                const text = await res.text();
-                console.error("Submission failed with status:", res.status, "Body:", text);
-                try {
-                    const data = JSON.parse(text);
-                    toast.error(data.error || "Failed to submit check-in");
-                } catch (e) {
-                    toast.error(`Error ${res.status}: Failed to submit check-in`);
-                }
-            }
+            await apiClient.post('/api/wellness/check-in', formData);
+            toast.success("Daily check-in completed! +10 Zen Points");
+            onSuccess(10);
+            onClose();
         } catch (error: any) {
             console.error("Submission error:", error);
-            toast.error(`Submission error: ${error.message || "Unknown error"}`);
+            toast.error(error?.message || "Failed to submit check-in");
         } finally {
             setLoading(false);
         }

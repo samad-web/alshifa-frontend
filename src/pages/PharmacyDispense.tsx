@@ -9,52 +9,52 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@
 import { Search, Plus, Trash2, ShoppingCart, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
 
 export default function PharmacyDispense() {
     const [patients, setPatients] = useState([]);
     const [medicines, setMedicines] = useState([]);
     const [selectedPatientId, setSelectedPatientId] = useState("");
     const [patientSearch, setPatientSearch] = useState("");
+    const [branches, setBranches] = useState<any[]>([]);
+    const [dispenseBranchFilter, setDispenseBranchFilter] = useState("all");
     const [cart, setCart] = useState<any[]>([]);
     const [submitting, setSubmitting] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [patientsLoading, setPatientsLoading] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem("accessToken");
-        const headers = { Authorization: `Bearer ${token}` };
-
         // Fetch patients
-        fetch("/api/user/list-patients", { headers })
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data)) setPatients(data);
-                else {
-                    console.error("Patients data is not an array:", data);
-                    setPatients([]);
-                }
-            })
-            .catch(err => toast.error("Failed to load patients"));
+        setPatientsLoading(true);
+        apiClient.get<any[]>('/api/user/list-patients')
+            .then(({ data }) => setPatients(Array.isArray(data) ? data : []))
+            .catch(err => toast.error(`Failed to load patients: ${err.message}`))
+            .finally(() => setPatientsLoading(false));
 
         // Fetch medicines
-        fetch("/api/pharmacy/medicines", {
-            headers,
-            credentials: "include"
-        })
-            .then(res => res.json())
-            .then(data => {
+        apiClient.get<any[]>('/api/pharmacy/medicines')
+            .then(({ data }) => {
                 if (Array.isArray(data)) setMedicines(data);
                 else {
                     console.error("Medicines data is not an array:", data);
                     setMedicines([]);
                 }
             })
-            .catch(err => toast.error("Failed to load medicines"));
+            .catch(() => toast.error("Failed to load medicines"));
+
+        // Fetch branches for patient classification filter
+        apiClient.get<any[]>('/api/branches')
+            .then(({ data }) => { if (Array.isArray(data)) setBranches(data); })
+            .catch(() => {});
     }, []);
 
     const filteredPatients = patients.filter((p: any) => {
+        if (!p.id) return false; // guard: Radix SelectItem crashes on empty value
         const q = patientSearch.toLowerCase();
-        return (p.fullName?.toLowerCase() || "").includes(q) ||
+        const matchesSearch = (p.fullName?.toLowerCase() || "").includes(q) ||
             (p.phoneNumber || "").includes(q);
+        const matchesBranch = dispenseBranchFilter === "all" || p.branchId === dispenseBranchFilter;
+        return matchesSearch && matchesBranch;
     });
 
     const addToCart = (medicine: any) => {
@@ -95,32 +95,14 @@ export default function PharmacyDispense() {
 
         setSubmitting(true);
         try {
-            const token = localStorage.getItem("accessToken");
-            const res = await fetch("/api/pharmacy/dispense", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                credentials: "include",
-                body: JSON.stringify({
-                    patientId: selectedPatientId,
-                    items: cart
-                })
-            });
-
-            if (res.ok) {
-                setSuccess(true);
-                setCart([]);
-                setSelectedPatientId("");
-                toast.success("Medicines dispensed successfully!");
-                setTimeout(() => setSuccess(false), 3000);
-            } else {
-                const err = await res.json();
-                toast.error(err.error || "Failed to dispense medicines");
-            }
-        } catch (error) {
-            toast.error("A network error occurred");
+            await apiClient.post('/api/pharmacy/dispense', { patientId: selectedPatientId, items: cart });
+            setSuccess(true);
+            setCart([]);
+            setSelectedPatientId("");
+            toast.success("Medicines dispensed successfully!");
+            setTimeout(() => setSuccess(false), 3000);
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to dispense medicines");
         } finally {
             setSubmitting(false);
         }
@@ -150,9 +132,22 @@ export default function PharmacyDispense() {
                                         onChange={(e) => setPatientSearch(e.target.value)}
                                     />
                                 </div>
-                                <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
+                                {branches.length > 0 && (
+                                    <Select value={dispenseBranchFilter} onValueChange={setDispenseBranchFilter}>
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Filter by branch (all)" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All branches</SelectItem>
+                                            {branches.map((b: any) => (
+                                                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                                <Select value={selectedPatientId} onValueChange={setSelectedPatientId} disabled={patientsLoading}>
                                     <SelectTrigger>
-                                        <SelectValue placeholder="Select patient..." />
+                                        <SelectValue placeholder={patientsLoading ? "Loading patients..." : filteredPatients.length === 0 ? "No patients found" : "Select patient..."} />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {filteredPatients.map((p: any) => (

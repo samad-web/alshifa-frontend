@@ -11,47 +11,46 @@ import { DoctorPerformanceBadge } from "@/components/ui/doctor-performance-badge
 import { Users, Award, Activity, TrendingUp, TrendingDown, Minus, MapPin, Filter } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
-
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { apiClient } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { LeaderboardDetailModal } from "@/components/gamification/LeaderboardDetailModal";
 
 export default function DoctorGamification() {
   const { role } = useAuth();
+  // Only admins can cross-branch filter; clinicians are always scoped to their branch by the backend.
+  const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
   const [stats, setStats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  // Branch selector state is only meaningful for admin roles.
   const [branches, setBranches] = useState<any[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("all");
 
   useEffect(() => {
-    // Fetch branches
-    fetch(`${API_BASE_URL}/api/branches`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-    })
-      .then((res) => res.ok ? res.json() : [])
-      .then(setBranches)
+    // Only admins need a branch list; clinicians see only their own branch.
+    if (!isAdmin) return;
+    apiClient.get<any[]>('/api/branches')
+      .then(({ data }) => setBranches(data))
       .catch(err => console.error("Failed to fetch branches", err));
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     setLoading(true);
-    const url = new URL(`${API_BASE_URL}/api/leaderboard`);
-    if (selectedBranchId !== "all") {
-      url.searchParams.append("branchId", selectedBranchId);
+    const params: Record<string, string> = {};
+    // Admins may filter by branch; for clinicians the backend enforces their branch from the JWT.
+    if (isAdmin && selectedBranchId !== "all") {
+      params.branchId = selectedBranchId;
     }
 
-    fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-    })
-      .then((res) => res.ok ? res.json() : Promise.reject(res))
-      .then(setStats)
+    apiClient.get<any[]>('/api/leaderboard', params)
+      .then(({ data }) => setStats(data))
       .catch(() => setError("Failed to load clinical statistics"))
       .finally(() => setLoading(false));
-  }, [selectedBranchId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId, isAdmin]);
 
   const isTherapist = role === "THERAPIST";
 
@@ -123,28 +122,37 @@ export default function DoctorGamification() {
             : "Visualize clinical quality, patient recovery trajectories, and specialized performance bands."
           }
         >
-          <div className="flex items-center gap-3">
-            <div className="flex flex-col items-end mr-2">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Performance Segment</span>
-              <p className="text-xs font-bold text-foreground/70">Branch-wise Filtering</p>
+          {isAdmin ? (
+            // Admins can filter leaderboard by branch
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col items-end mr-2">
+                <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Performance Segment</span>
+                <p className="text-xs font-bold text-foreground/70">Branch-wise Filtering</p>
+              </div>
+              <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                <SelectTrigger className="w-[200px] h-10 border-border/60 bg-card/50 backdrop-blur-sm shadow-sm ring-offset-background focus:ring-primary/20">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-primary" />
+                    <SelectValue placeholder="All Branches" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border shadow-elevated">
+                  <SelectItem value="all" className="text-xs font-bold py-2.5">All Branches (Global)</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} className="text-xs font-bold py-2.5">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
-              <SelectTrigger className="w-[200px] h-10 border-border/60 bg-card/50 backdrop-blur-sm shadow-sm ring-offset-background focus:ring-primary/20">
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-3.5 h-3.5 text-primary" />
-                  <SelectValue placeholder="All Branches" />
-                </div>
-              </SelectTrigger>
-              <SelectContent className="bg-card border-border shadow-elevated">
-                <SelectItem value="all" className="text-xs font-bold py-2.5">All Branches (Global)</SelectItem>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-xs font-bold py-2.5">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          ) : (
+            // Clinicians see only their own branch — no selector exposed
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-card/50">
+              <MapPin className="w-3.5 h-3.5 text-primary" />
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Branch</span>
+            </div>
+          )}
         </PageHeader>
 
         {/* Global Stats Bar */}

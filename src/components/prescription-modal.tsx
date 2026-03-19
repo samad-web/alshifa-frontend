@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { FileUp, Loader2 } from "lucide-react";
+import { FileUp, Loader2, Video, X } from "lucide-react";
 import { toast } from "sonner";
 
 interface PrescriptionModalProps {
@@ -29,12 +30,49 @@ export function PrescriptionModal({
         frequency: "",
         duration: "",
         notes: "",
+        videoUrl: "",
     });
     const [file, setFile] = useState<File | null>(null);
+    const [showVideoUrl, setShowVideoUrl] = useState(false);
+    const [videoUrlError, setVideoUrlError] = useState<string | null>(null);
+
+    const validateVideoUrl = (url: string): boolean => {
+        if (!url) return true; // optional field
+        try {
+            const parsed = new URL(url);
+            if (!['http:', 'https:'].includes(parsed.protocol)) {
+                setVideoUrlError('URL must start with http:// or https://');
+                return false;
+            }
+            setVideoUrlError(null);
+            return true;
+        } catch {
+            setVideoUrlError('Please enter a valid URL (e.g., https://youtube.com/watch?v=...)');
+            return false;
+        }
+    };
+
+    const handleVideoUrlChange = (value: string) => {
+        setFormData((prev) => ({ ...prev, videoUrl: value }));
+        if (value) validateVideoUrl(value);
+        else setVideoUrlError(null);
+    };
+
+    const handleRemoveVideoUrl = () => {
+        setShowVideoUrl(false);
+        setFormData((prev) => ({ ...prev, videoUrl: '' }));
+        setVideoUrlError(null);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
+
+        // Client-side URL validation before submit
+        if (formData.videoUrl && !validateVideoUrl(formData.videoUrl)) {
+            setLoading(false);
+            return;
+        }
 
         try {
             const formDataToSend = new FormData();
@@ -44,35 +82,31 @@ export function PrescriptionModal({
             formDataToSend.append("frequency", formData.frequency);
             formDataToSend.append("duration", formData.duration);
             formDataToSend.append("notes", formData.notes);
+            // Only append videoUrl when the field is visible and has a value
+            if (showVideoUrl && formData.videoUrl.trim()) {
+                formDataToSend.append("videoUrl", formData.videoUrl.trim());
+            }
             if (file) {
                 formDataToSend.append("file", file);
             }
 
-            const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
-            const res = await fetch(`${API_BASE_URL}/api/prescriptions/add`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                body: formDataToSend,
+            await apiClient.upload(`/api/prescriptions/add`, formDataToSend);
+            toast.success("Prescription added successfully");
+            setFormData({
+                medicationName: "",
+                dosage: "",
+                frequency: "",
+                duration: "",
+                notes: "",
+                videoUrl: "",
             });
-
-            if (res.ok) {
-                toast.success("Prescription added successfully");
-                setFormData({
-                    medicationName: "",
-                    dosage: "",
-                    frequency: "",
-                    duration: "",
-                    notes: "",
-                });
-                setFile(null);
-                onSuccess?.();
-                onClose();
-            } else {
-                const error = await res.json();
-                toast.error(error.error || "Failed to add prescription");
-            }
-        } catch (error) {
-            toast.error("Failed to add prescription");
+            setFile(null);
+            setShowVideoUrl(false);
+            setVideoUrlError(null);
+            onSuccess?.();
+            onClose();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to add prescription");
         } finally {
             setLoading(false);
         }
@@ -173,6 +207,60 @@ export function PrescriptionModal({
                             </div>
                         )}
                     </div>
+
+                    {/* Video URL — revealed on demand */}
+                    {!showVideoUrl ? (
+                        <div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowVideoUrl(true)}
+                                className="gap-2 text-primary border-primary/30 hover:bg-primary/5"
+                            >
+                                <Video className="w-4 h-4" />
+                                Add Video URL
+                            </Button>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                Optionally attach an exercise guidance or medication explanation video.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <Label htmlFor="videoUrl" className="flex items-center gap-2">
+                                    <Video className="w-4 h-4 text-primary" />
+                                    Video URL
+                                    <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                                </Label>
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveVideoUrl}
+                                    className="text-muted-foreground hover:text-foreground p-0.5 rounded"
+                                    aria-label="Remove video URL"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+                            <Input
+                                id="videoUrl"
+                                type="url"
+                                value={formData.videoUrl}
+                                onChange={(e) => handleVideoUrlChange(e.target.value)}
+                                placeholder="https://youtube.com/watch?v=... or any video link"
+                                className={videoUrlError ? 'border-destructive focus-visible:ring-destructive' : ''}
+                                autoFocus
+                            />
+                            {videoUrlError && (
+                                <p className="text-xs text-destructive">{videoUrlError}</p>
+                            )}
+                            {formData.videoUrl && !videoUrlError && (
+                                <p className="text-xs text-primary/70">
+                                    ✓ Valid URL — the patient will see an embedded video in their prescription.
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex gap-3 justify-end pt-4 border-t">
                         <Button

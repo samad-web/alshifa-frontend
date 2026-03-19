@@ -6,8 +6,7 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface ScheduleItem {
     prescriptionId: string;
@@ -33,12 +32,8 @@ export function AdherenceTracker({ patientId }: { patientId: string }) {
 
     const fetchSchedule = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/adherence/today`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                setSchedule(await res.json());
-            }
+            const { data } = await apiClient.get<ScheduleItem[]>('/api/adherence/today');
+            setSchedule(data);
         } catch (error) {
             console.error("Failed to fetch schedule", error);
         } finally {
@@ -49,28 +44,11 @@ export function AdherenceTracker({ patientId }: { patientId: string }) {
     const handleLog = async (prescriptionId: string, slot: string, scheduledTime: string, taken: boolean) => {
         setLoggingId(`${prescriptionId}-${slot}`);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/adherence/log`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: JSON.stringify({
-                    prescriptionId,
-                    slot,
-                    scheduledTime,
-                    taken
-                }),
-            });
-
-            if (res.ok) {
-                toast.success(taken ? "Medication marked as taken" : "Medication marked as not taken");
-                fetchSchedule();
-            } else {
-                toast.error("Failed to log adherence");
-            }
+            await apiClient.post('/api/adherence/log', { prescriptionId, slot, scheduledTime, taken });
+            toast.success(taken ? "Medication marked as taken" : "Medication marked as not taken");
+            fetchSchedule();
         } catch (error) {
-            toast.error("An error occurred");
+            toast.error("Failed to log adherence");
         } finally {
             setLoggingId(null);
         }

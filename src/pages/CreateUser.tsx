@@ -10,8 +10,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { UserPlus, ShieldCheck, Mail, Lock, Loader2, ArrowLeft, Building2 } from "lucide-react";
 import { useBranches } from "@/hooks/useBranches";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 const roles = [
   { value: "ADMIN", label: "System Admin" },
@@ -58,23 +57,11 @@ export default function CreateUser() {
     setSuccess(null);
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/user/create`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-        },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Failed to create user");
-      } else {
-        setSuccess("User identity created successfully!");
-        setForm({ email: "", password: "", fullName: "", role: "PATIENT", branchId: "" });
-      }
-    } catch (err) {
-      setError("Network connectivity error. Please try again.");
+      await apiClient.post('/api/user/create', form);
+      setSuccess("User identity created successfully!");
+      setForm({ email: "", password: "", fullName: "", role: "PATIENT", branchId: "" });
+    } catch (err: any) {
+      setError(err?.message || "Failed to create user");
     }
     setLoading(false);
   };

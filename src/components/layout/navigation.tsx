@@ -14,12 +14,14 @@ import {
   ShoppingCart,
   History,
   MessageSquare,
-  Building2
+  Building2,
+  BarChart3,
+  Gift
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth, AppRole } from "@/hooks/useAuth";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { UserProfileMenu } from "@/components/layout/UserProfileMenu";
 
 // Role-based navigation items
 const getRoleNavItems = (role: AppRole | null) => {
@@ -33,6 +35,7 @@ const getRoleNavItems = (role: AppRole | null) => {
         { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
         { path: "/doctor-gamification", label: "Doctor Gamification", icon: Activity },
         { path: "/doctor-availability", label: "Availability", icon: CalendarDays },
+        { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
       ];
     case "ADMIN_DOCTOR":
@@ -46,6 +49,7 @@ const getRoleNavItems = (role: AppRole | null) => {
         { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
         { path: "/doctor-gamification", label: "Doctor Gamification", icon: Activity },
         { path: "/doctor-availability", label: "Availability", icon: CalendarDays },
+        { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
       ];
     case "DOCTOR":
@@ -55,6 +59,7 @@ const getRoleNavItems = (role: AppRole | null) => {
         { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
         { path: "/doctor-gamification", label: "Doctor Gamification", icon: Activity },
         { path: "/doctor-availability", label: "Availability", icon: CalendarDays },
+        { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
       ];
     case "THERAPIST":
@@ -64,6 +69,7 @@ const getRoleNavItems = (role: AppRole | null) => {
         { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
         { path: "/doctor-gamification", label: "Therapist Gamification", icon: Activity },
         { path: "/doctor-availability", label: "Availability", icon: CalendarDays },
+        { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
       ];
     case "PATIENT":
@@ -71,6 +77,7 @@ const getRoleNavItems = (role: AppRole | null) => {
         { path: "/patient", label: "My Journey", icon: Activity },
         { path: "/wellness", label: "Wellness", icon: Heart },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
+        { path: "/referrals", label: "Referrals", icon: Gift },
         { path: "/chat", label: "Chat", icon: MessageSquare },
       ];
     case "PHARMACIST":
@@ -94,6 +101,15 @@ export function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = getRoleNavItems(role);
+
+  // Resolve display name from the role-specific sub-profile (mirrors UserProfileMenu logic).
+  const displayName =
+    profile?.doctor?.fullName ??
+    profile?.therapist?.fullName ??
+    profile?.patient?.fullName ??
+    profile?.pharmacist?.fullName ??
+    user?.email ??
+    "User";
 
   const handleSignOut = async () => {
     await signOut();
@@ -142,21 +158,9 @@ export function Navigation() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <LanguageSwitcher />
+        <div className="flex items-center gap-2">
           <NotificationBell />
-          {profile?.full_name && (
-            <span className="text-sm text-muted-foreground">
-              {profile.full_name}
-            </span>
-          )}
-          <button
-            onClick={handleSignOut}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            Sign Out
-          </button>
+          <UserProfileMenu />
         </div>
       </nav>
 
@@ -171,7 +175,7 @@ export function Navigation() {
 
         <div className="flex items-center gap-1 sm:gap-2">
           <NotificationBell />
-          <LanguageSwitcher />
+          <UserProfileMenu />
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
             className="p-2 rounded-lg hover:bg-secondary transition-colors"
@@ -190,12 +194,11 @@ export function Navigation() {
         <div className="md:hidden fixed inset-0 z-40 bg-background/95 backdrop-blur-sm pt-14">
           <div className="flex flex-col p-4 gap-2">
             {/* User Info */}
-            {profile?.full_name && (
-              <div className="px-4 py-3 border-b border-border mb-2">
-                <p className="text-sm text-muted-foreground">Signed in as</p>
-                <p className="font-medium text-foreground">{profile.full_name}</p>
-              </div>
-            )}
+            <div className="px-4 py-3 border-b border-border mb-2">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Signed in as</p>
+              <p className="font-semibold text-foreground mt-0.5">{displayName}</p>
+              <p className="text-xs text-muted-foreground">{user?.email}</p>
+            </div>
 
             {navItems.map((item) => {
               const Icon = item.icon;

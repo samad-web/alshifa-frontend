@@ -21,8 +21,7 @@ import { BodyMap } from "@/components/ui/BodyMap";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 export default function PatientOnboarding() {
   const { t } = useTranslation();
@@ -98,29 +97,15 @@ export default function PatientOnboarding() {
   const submitOnboarding = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/user/patient/onboarding`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("accessToken")}`,
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        // --- CRITICAL FIX: Refresh profile so ProtectedRoute sees we are done ---
-        await refreshProfile();
-
-        setIsComplete(true);
-        setTimeout(() => {
-          navigate("/patient", { replace: true });
-        }, 2000);
-      } else {
-        const data = await res.json();
-        toast.error(data.error || "Failed to save onboarding data");
-      }
-    } catch (error) {
-      toast.error("An error occurred. Please try again.");
+      await apiClient.put('/api/user/patient/onboarding', formData);
+      // --- CRITICAL FIX: Refresh profile so ProtectedRoute sees we are done ---
+      await refreshProfile();
+      setIsComplete(true);
+      setTimeout(() => {
+        navigate("/patient", { replace: true });
+      }, 2000);
+    } catch (error: any) {
+      toast.error(error?.message || "An error occurred. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
@@ -7,11 +7,13 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { AppointmentModal } from "@/components/appointment-modal";
 import { AppointmentList } from "@/components/appointment-list";
-import { Calendar, Users, UserPlus, Activity } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Calendar, Users, UserPlus, Activity, MapPin, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { useBranches } from "@/hooks/useBranches";
+import { appointmentsApi, type GetAppointmentsParams } from "@/services/appointments.service";
+import { apiClient } from "@/lib/api-client";
 
 export default function AdminDashboard() {
   const [counts, setCounts] = useState({ doctors: 0, patients: 0 });
@@ -20,14 +22,17 @@ export default function AdminDashboard() {
   const [editingAppointment, setEditingAppointment] = useState<any>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
   const [loadingCounts, setLoadingCounts] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [sortByBranch, setSortByBranch] = useState<boolean>(false);
+  const { branches } = useBranches();
 
   useEffect(() => {
     async function fetchCounts() {
       setLoadingCounts(true);
       try {
-        const [doctors, patients] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/user/list-doctors`, { headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` } }).then(r => r.json()),
-          fetch(`${API_BASE_URL}/api/user/list-patients`, { headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` } }).then(r => r.json()),
+        const [{ data: doctors }, { data: patients }] = await Promise.all([
+          apiClient.get<any[]>('/api/user/list-doctors'),
+          apiClient.get<any[]>('/api/user/list-patients'),
         ]);
         setCounts({ doctors: doctors.length, patients: patients.length });
       } catch (error) {
@@ -37,27 +42,28 @@ export default function AdminDashboard() {
       }
     }
     fetchCounts();
-    fetchAppointments();
   }, []);
 
-  const fetchAppointments = async () => {
+  // Re-fetch appointments whenever branch filter or sort order changes (including initial mount)
+  const fetchAppointments = useCallback(async () => {
     setLoadingAppointments(true);
     try {
-      const res = await fetch("/api/appointments", { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.appointments) {
-          setAppointments(data.appointments);
-        } else {
-          setAppointments(data);
-        }
-      }
+      const params: GetAppointmentsParams = {};
+      if (selectedBranch) params.branchId = selectedBranch;
+      if (sortByBranch) params.sort = "branch";
+      const data = await appointmentsApi.list(params);
+      setAppointments(data.appointments);
     } catch (error) {
       console.error("Failed to fetch appointments:", error);
+      toast.error("Failed to fetch appointments");
     } finally {
       setLoadingAppointments(false);
     }
-  };
+  }, [selectedBranch, sortByBranch]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
 
   const handleAppointmentSuccess = () => {
     fetchAppointments();
@@ -74,20 +80,11 @@ export default function AdminDashboard() {
     if (!confirm("Are you sure you want to cancel this appointment?")) return;
 
     try {
-      const res = await fetch(`/api/appointments/${appointmentId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-
-      if (res.ok) {
-        toast.success("Appointment cancelled successfully");
-        fetchAppointments();
-      } else {
-        const error = await res.json();
-        toast.error(error.error || "Failed to cancel appointment");
-      }
-    } catch (error) {
-      toast.error("Failed to cancel appointment");
+      await apiClient.delete(`/api/appointments/${appointmentId}`);
+      toast.success("Appointment cancelled successfully");
+      fetchAppointments();
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to cancel appointment");
     }
   };
 
@@ -98,37 +95,22 @@ export default function AdminDashboard() {
 
   const handleApprove = async (appointmentId: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/appointments/${appointmentId}/approve`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-      });
-      if (res.ok) {
-        toast.success("Appointment approved");
-        fetchAppointments();
-      } else {
-        const error = await res.json();
-        toast.error(error.error || "Failed to approve");
-      }
-    } catch (error) {
-      toast.error("Failed to approve");
+      await apiClient.put(`/api/appointments/${appointmentId}/approve`, {});
+      toast.success("Appointment approved");
+      fetchAppointments();
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to approve");
     }
   };
 
   const handleReject = async (appointmentId: string) => {
-    if (!confirm("Reject this appointment?")) return;
+    // Confirmation is handled by the themed dialog in AppointmentList
     try {
-      const res = await fetch(`${API_BASE_URL}/api/appointments/${appointmentId}/reject`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-      });
-      if (res.ok) {
-        toast.success("Appointment rejected");
-        fetchAppointments();
-      } else {
-        toast.error("Failed to reject");
-      }
-    } catch (error) {
-      toast.error("Failed to reject");
+      await apiClient.put(`/api/appointments/${appointmentId}/reject`, {});
+      toast.success("Appointment rejected");
+      fetchAppointments();
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to reject");
     }
   };
 
@@ -224,7 +206,34 @@ export default function AdminDashboard() {
           subtitle="View and manage all appointments"
         >
           <div className="space-y-4">
-            <div className="flex justify-end">
+            {/* Toolbar: branch filter + sort (left) and book button (right) */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <MapPin className="w-4 h-4" />
+                  <span>Branch:</span>
+                </div>
+                <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                  <SelectTrigger className="w-44 h-9 text-sm">
+                    <SelectValue placeholder="All Branches" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">All Branches</SelectItem>
+                    {(branches as any[]).map((b: any) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant={sortByBranch ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSortByBranch((prev) => !prev)}
+                  className="gap-1.5 h-9 text-sm"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  {sortByBranch ? "Sorted by Branch" : "Sort by Branch"}
+                </Button>
+              </div>
               <Button onClick={() => setShowModal(true)} className="gap-2">
                 <Calendar className="w-4 h-4" />
                 Book Appointment

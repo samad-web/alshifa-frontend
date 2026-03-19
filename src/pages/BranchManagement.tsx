@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { MapPin, Phone, Mail, Plus, Trash2, Edit2, Building2, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { DeleteBranchModal } from "@/components/delete-branch-modal";
+import { apiClient } from "@/lib/api-client";
 
 export default function BranchManagement() {
     const [branches, setBranches] = useState([]);
@@ -18,28 +20,22 @@ export default function BranchManagement() {
     const [showSuccess, setShowSuccess] = useState(false);
     const [editingBranch, setEditingBranch] = useState(null);
     const [formData, setFormData] = useState({ name: "", address: "", phone: "", email: "" });
+
+    // Delete Modal State
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [branchToDelete, setBranchToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+
     const { toast } = useToast();
 
     const fetchBranches = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            const token = localStorage.getItem('accessToken');
-            if (!token) throw new Error("No access token found. Please relogin.");
-
-            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/branches`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || "Failed to fetch branches");
-            }
-
-            const data = await res.json();
+            const { data } = await apiClient.get<any[]>('/api/branches');
             if (!Array.isArray(data)) throw new Error("Invalid data format");
             setBranches(data);
-        } catch (error) {
+        } catch (error: any) {
             setError(error.message);
             toast({ title: "Fetch failed", description: error.message, variant: "destructive" });
         } finally {
@@ -75,50 +71,48 @@ export default function BranchManagement() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const method = editingBranch ? 'PUT' : 'POST';
-            const url = editingBranch
-                ? `${import.meta.env.VITE_API_BASE_URL}/api/branches/${editingBranch.id}`
-                : `${import.meta.env.VITE_API_BASE_URL}/api/branches`;
-
-            const res = await fetch(url, {
-                method,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-                },
-                body: JSON.stringify(formData)
-            });
-
-            if (res.ok) {
-                // toast({ title: "Success", description: editingBranch ? "Branch updated" : "Branch created" });
-                handleCloseDialog();
-                setShowSuccess(true);
-                fetchBranches();
-            } else {
-                const err = await res.json();
-                toast({ title: "Error", description: err.error, variant: "destructive" });
+            // Strip empty strings so optional-field validators never see blank values
+            const payload: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(formData)) {
+                if (value !== "") payload[key] = value;
             }
-        } catch (error) {
-            toast({ title: "Error", description: "Operation failed", variant: "destructive" });
+
+            if (editingBranch) {
+                await apiClient.put(`/api/branches/${editingBranch.id}`, payload);
+            } else {
+                await apiClient.post('/api/branches', payload);
+            }
+            handleCloseDialog();
+            setShowSuccess(true);
+            fetchBranches();
+        } catch (error: any) {
+            // Surface Zod field-level detail messages when available, otherwise the top-level error
+            const message = error?.details?.map((d: any) => `${d.path}: ${d.message}`).join('; ')
+                ?? error?.message
+                ?? 'Operation failed';
+            toast({ title: "Error", description: message, variant: "destructive" });
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!confirm("Are you sure? This will permanently delete the branch records.")) return;
+    const handleDelete = (branch) => {
+        setBranchToDelete(branch);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!branchToDelete) return;
+
+        setDeleting(true);
         try {
-            const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/branches/${id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
-            });
-            if (res.ok) {
-                toast({ title: "Deleted", description: "Branch removed" });
-                fetchBranches();
-            } else {
-                const err = await res.json();
-                toast({ title: "Error", description: err.error, variant: "destructive" });
-            }
-        } catch (error) {
-            toast({ title: "Error", description: "Delete failed", variant: "destructive" });
+            await apiClient.delete(`/api/branches/${branchToDelete.id}`);
+            toast({ title: "Deleted", description: "Branch removed" });
+            setIsDeleteModalOpen(false);
+            fetchBranches();
+        } catch (error: any) {
+            toast({ title: "Error", description: error?.message || "Delete failed", variant: "destructive" });
+        } finally {
+            setDeleting(false);
+            setBranchToDelete(null);
         }
     };
 
@@ -201,7 +195,7 @@ export default function BranchManagement() {
                                             <Edit2 className="w-3.5 h-3.5 mr-2" />
                                             Edit
                                         </Button>
-                                        <Button variant="ghost" size="sm" className="h-9 px-4 rounded-lg font-medium text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(branch.id)}>
+                                        <Button variant="ghost" size="sm" className="h-9 px-4 rounded-lg font-medium text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(branch)}>
                                             <Trash2 className="w-3.5 h-3.5 mr-2" />
                                             Delete
                                         </Button>
@@ -291,6 +285,17 @@ export default function BranchManagement() {
                         </DialogHeader>
                     </DialogContent>
                 </Dialog>
+
+                <DeleteBranchModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={() => {
+                        setIsDeleteModalOpen(false);
+                        setBranchToDelete(null);
+                    }}
+                    onConfirm={confirmDelete}
+                    branchName={branchToDelete?.name || ""}
+                    loading={deleting}
+                />
             </div>
         </AppLayout>
     );

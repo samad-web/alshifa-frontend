@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { ErrorBoundary } from "../common/ErrorBoundary";
 import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
 
 interface UploadedFile {
     id: string;
@@ -78,23 +79,13 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
         uploadData.append("description", ""); // Initial empty description
 
         try {
-            const res = await fetch("/api/triage/upload", {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: uploadData
-            });
-
-            if (res.ok) {
-                const doc = await res.json();
-                setUploadedDocuments(prev => [...prev, {
-                    id: doc.id,
-                    fileName: doc.fileName,
-                    description: "",
-                    fileUrl: doc.fileUrl
-                }]);
-            }
+            const { data: doc } = await apiClient.upload('/api/triage/upload', uploadData);
+            setUploadedDocuments(prev => [...prev, {
+                id: doc.id,
+                fileName: doc.fileName,
+                description: "",
+                fileUrl: doc.fileUrl
+            }]);
         } catch (error) {
             console.error("Upload failed:", error);
         } finally {
@@ -116,32 +107,17 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
         setLoading(true);
         console.log("[Triage] Submitting form data:", formData, "Documents:", uploadedDocuments);
         try {
-            const res = await fetch("/api/triage/submit", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: JSON.stringify({
-                    ...formData,
-                    documentIds: uploadedDocuments.map(d => d.id)
-                })
+            const { data } = await apiClient.post('/api/triage/submit', {
+                ...formData,
+                documentIds: uploadedDocuments.map(d => d.id)
             });
-
-            if (res.ok) {
-                const data = await res.json();
-                console.log("[Triage] Submission successful:", data);
-                setResult(data);
-                setStep(4);
-                toast.success("Assessment completed successfully.");
-            } else {
-                const errorData = await res.json();
-                console.error("[Triage] Submission failed:", errorData);
-                toast.error(errorData.error || "Failed to submit assessment. Please try again.");
-            }
-        } catch (error) {
+            console.log("[Triage] Submission successful:", data);
+            setResult(data);
+            setStep(4);
+            toast.success("Assessment completed successfully.");
+        } catch (error: any) {
             console.error("[Triage] Network/Server error:", error);
-            toast.error("A network error occurred. Please check your connection and try again.");
+            toast.error(error?.message || "A network error occurred. Please check your connection and try again.");
         } finally {
             setLoading(false);
         }

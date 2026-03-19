@@ -15,8 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { TriageQuestionnaire } from "../triage/TriageQuestionnaire";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface ClientBookingModalProps {
     isOpen: boolean;
@@ -41,6 +40,8 @@ export function ClientBookingModal({
     const [triageSessionId, setTriageSessionId] = useState<string | null>(null);
     const [triageResult, setTriageResult] = useState<any>(null);
     const [suggestedSlot, setSuggestedSlot] = useState<string | null>(null);
+    // For COMBINED type: tracks whether we're picking the doctor or the therapist
+    const [clinicianSubStep, setClinicianSubStep] = useState<"doctor" | "therapist">("doctor");
 
     const [formData, setFormData] = useState({
         branchId: "",
@@ -61,6 +62,7 @@ export function ClientBookingModal({
             setStep("branch");
             setTriageSessionId(null);
             setTriageResult(null);
+            setClinicianSubStep("doctor");
             setFormData({
                 branchId: "",
                 consultationType: "DOCTOR",
@@ -75,11 +77,13 @@ export function ClientBookingModal({
         }
     }, [isOpen]);
 
+    // Fetch staff when entering the clinician step or when branchId changes while on it.
+    // No longer depends on date/slot because clinician is now chosen BEFORE date selection.
     useEffect(() => {
-        if (formData.branchId && (step === "clinician" || (formData.date && formData.slot))) {
+        if (formData.branchId && step === "clinician") {
             fetchStaff();
         }
-    }, [formData.branchId, formData.date, formData.slot, step]);
+    }, [formData.branchId, step]);
 
     useEffect(() => {
         if (formData.date && (formData.doctorId || formData.therapistId)) {
@@ -89,13 +93,8 @@ export function ClientBookingModal({
 
     const fetchBranches = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/branches`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setBranches(data || []);
-            }
+            const { data } = await apiClient.get<any[]>('/api/branches');
+            setBranches(data || []);
         } catch (error) {
             console.error("Failed to fetch branches:", error);
         }
@@ -103,33 +102,28 @@ export function ClientBookingModal({
 
     const fetchStaff = async () => {
         try {
-            const params = new URLSearchParams();
-            if (formData.branchId) params.append("branchId", formData.branchId);
-            if (formData.date) params.append("date", formData.date.toISOString());
-            if (formData.slot) params.append("slot", formData.slot);
+            const params: Record<string, string> = {};
+            if (formData.branchId) params.branchId = formData.branchId;
+            if (formData.date) params.date = formData.date.toISOString();
+            if (formData.slot) params.slot = formData.slot;
 
-            const res = await fetch(`${API_BASE_URL}/api/appointments/available-staff?${params.toString()}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setDoctors(data.doctors || []);
-                setTherapists(data.therapists || []);
+            const { data } = await apiClient.get<any>('/api/appointments/available-staff', params);
+            setDoctors(data.doctors || []);
+            setTherapists(data.therapists || []);
 
-                // If currently selected doctor/therapist is no longer in the list, clear it
-                if (formData.doctorId && !data.doctors.some((d: any) => d.id === formData.doctorId)) {
-                    setFormData(prev => ({ ...prev, doctorId: "" }));
-                    if (step === "confirm") {
-                        toast.error("Selected doctor is no longer available for this time. Please choose another.");
-                        setStep("clinician");
-                    }
+            // If currently selected doctor/therapist is no longer in the list, clear it
+            if (formData.doctorId && !data.doctors.some((d: any) => d.id === formData.doctorId)) {
+                setFormData(prev => ({ ...prev, doctorId: "" }));
+                if (step === "confirm") {
+                    toast.error("Selected doctor is no longer available for this time. Please choose another.");
+                    setStep("clinician");
                 }
-                if (formData.therapistId && !data.therapists.some((t: any) => t.id === formData.therapistId)) {
-                    setFormData(prev => ({ ...prev, therapistId: "" }));
-                    if (step === "confirm") {
-                        toast.error("Selected therapist is no longer available for this time. Please choose another.");
-                        setStep("clinician");
-                    }
+            }
+            if (formData.therapistId && !data.therapists.some((t: any) => t.id === formData.therapistId)) {
+                setFormData(prev => ({ ...prev, therapistId: "" }));
+                if (step === "confirm") {
+                    toast.error("Selected therapist is no longer available for this time. Please choose another.");
+                    setStep("clinician");
                 }
             }
         } catch (error) {
@@ -139,19 +133,26 @@ export function ClientBookingModal({
 
     const fetchSlots = async () => {
         if (!formData.date) return;
+
+        // Resolve which clinician's schedule to query
+        const clinicianId = formData.consultationType === "THERAPIST"
+            ? formData.therapistId
+            : formData.doctorId;
+
+        // Guard: backend returns 400 if clinicianId is falsy — skip silently
+        if (!clinicianId) return;
+
         setFetchingSlots(true);
         try {
-            const clinicianId = formData.consultationType === "THERAPIST" ? formData.therapistId : formData.doctorId;
-            const res = await fetch(`${API_BASE_URL}/api/appointments/available-slots?clinicianId=${clinicianId}&date=${formData.date.toISOString()}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const slots = await res.json();
-                setAvailableSlots(slots);
-            }
-        } catch (error) {
+            // Send as YYYY-MM-DD (no time / no timezone offset) so the backend always
+            // queries the calendar date the user sees, regardless of the server's UTC offset.
+            const dateParam = format(formData.date, "yyyy-MM-dd");
+            const { data: slots } = await apiClient.get<any[]>('/api/appointments/available-slots', { clinicianId, date: dateParam });
+            setAvailableSlots(Array.isArray(slots) ? slots : []);
+        } catch (error: any) {
             console.error("Failed to fetch slots:", error);
-            toast.error("Failed to fetch available time slots");
+            setAvailableSlots([]);
+            toast.error(error?.message || "Network error — could not load available time slots.");
         } finally {
             setFetchingSlots(false);
         }
@@ -162,6 +163,10 @@ export function ClientBookingModal({
             toast.error("Please select a date and time slot");
             return;
         }
+        if (formData.consultationType === "COMBINED" && (!formData.doctorId || !formData.therapistId)) {
+            toast.error("Combined appointments require both a doctor and a therapist. Please go back and select both.");
+            return;
+        }
 
         setLoading(true);
         try {
@@ -170,37 +175,26 @@ export function ClientBookingModal({
             const [hours, minutes] = startTime.split(":");
             appointmentDate.setHours(parseInt(hours), parseInt(minutes));
 
-            const res = await fetch(`${API_BASE_URL}/api/appointments`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-                body: JSON.stringify({
-                    consultationType: formData.consultationType,
-                    consultationMode: formData.consultationMode,
-                    doctorId: formData.doctorId || null,
-                    therapistId: formData.therapistId || null,
-                    date: appointmentDate.toISOString(),
-                    notes: formData.notes,
-                    triageSessionId: triageSessionId,
-                    branchId: formData.branchId
-                }),
+            await apiClient.post('/api/appointments', {
+                consultationType: formData.consultationType,
+                consultationMode: formData.consultationMode,
+                doctorId: formData.doctorId || null,
+                therapistId: formData.therapistId || null,
+                date: appointmentDate.toISOString(),
+                notes: formData.notes,
+                triageSessionId: triageSessionId,
+                branchId: formData.branchId
             });
-            if (res.ok) {
-                toast.success("Appointment request submitted successfully!");
-                onSuccess?.();
-                onClose();
-            } else if (res.status === 409) {
-                const err = await res.json();
-                setSuggestedSlot(err.suggestedSlot || null);
+            toast.success("Appointment request submitted successfully!");
+            onSuccess?.();
+            onClose();
+        } catch (error: any) {
+            if (error?.status === 409) {
+                setSuggestedSlot(error?.details?.suggestedSlot || null);
                 toast.error("That slot was just taken! We found another one for you.");
             } else {
-                const err = await res.json();
-                toast.error(err.error || "Failed to book appointment");
+                toast.error(error?.message || "An error occurred. Please try again.");
             }
-        } catch (error) {
-            toast.error("An error occurred. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -209,21 +203,34 @@ export function ClientBookingModal({
     const nextStep = () => {
         if (step === "branch") setStep("type");
         else if (step === "type") setStep("triage");
-        else if (step === "triage") setStep("time");
-        else if (step === "time") setStep("clinician");
-        else if (step === "clinician") setStep("confirm");
+        else if (step === "triage") setStep("clinician");  // pick clinician BEFORE date/time
+        else if (step === "clinician") setStep("time");    // slots fetched once clinician is known
+        else if (step === "time") setStep("confirm");
     };
 
     const prevStep = () => {
         if (step === "type") setStep("branch");
         else if (step === "triage") setStep("type");
-        else if (step === "time") setStep("triage");
-        else if (step === "clinician") setStep("time");
-        else if (step === "confirm") setStep("clinician");
+        else if (step === "clinician") {
+            // For COMBINED, go back from therapist pick → doctor pick before leaving clinician step
+            if (formData.consultationType === "COMBINED" && clinicianSubStep === "therapist") {
+                setClinicianSubStep("doctor");
+                setFormData(prev => ({ ...prev, therapistId: "" }));
+            } else {
+                setStep("triage");
+                setClinicianSubStep("doctor");
+                setFormData(prev => ({ ...prev, doctorId: "", therapistId: "" }));
+            }
+        }
+        else if (step === "time") setStep("clinician");
+        else if (step === "confirm") setStep("time");
     };
 
     const selectedDoctor = doctors.find(d => d.id === formData.doctorId);
     const selectedTherapist = therapists.find(t => t.id === formData.therapistId);
+    // Whether the clinician step is currently showing therapists
+    const showingTherapists = formData.consultationType === "THERAPIST" ||
+        (formData.consultationType === "COMBINED" && clinicianSubStep === "therapist");
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -236,12 +243,12 @@ export function ClientBookingModal({
                         </DialogTitle>
                     </DialogHeader>
                     <div className="flex gap-1.5 mt-4">
-                        {(["branch", "type", "triage", "time", "clinician", "confirm"] as Step[]).map((s, i) => (
+                    {(["branch", "type", "triage", "clinician", "time", "confirm"] as Step[]).map((s, i) => (
                             <div
                                 key={s}
                                 className={cn(
                                     "h-1 flex-1 rounded-full transition-all duration-300",
-                                    step === s ? "bg-primary" : (i < ["branch", "type", "triage", "time", "clinician", "confirm"].indexOf(step) ? "bg-primary/40" : "bg-muted")
+                                    step === s ? "bg-primary" : (i < ["branch", "type", "triage", "clinician", "time", "confirm"].indexOf(step) ? "bg-primary/40" : "bg-muted")
                                 )}
                             />
                         ))}
@@ -363,24 +370,50 @@ export function ClientBookingModal({
                                 </div>
                             )}
 
+                            {/* COMBINED sub-step progress indicator */}
+                            {formData.consultationType === "COMBINED" && (
+                                <div className="flex items-center gap-2 text-[11px]">
+                                    <div className={cn(
+                                        "px-2.5 py-1 rounded-full font-bold border transition-colors",
+                                        clinicianSubStep === "doctor"
+                                            ? "bg-primary text-primary-foreground border-primary"
+                                            : "bg-primary/10 text-primary border-primary/30"
+                                    )}>
+                                        {formData.doctorId ? "✓ Doctor" : "1. Doctor"}
+                                    </div>
+                                    <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                                    <div className={cn(
+                                        "px-2.5 py-1 rounded-full font-bold border transition-colors",
+                                        clinicianSubStep === "therapist"
+                                            ? "bg-primary text-primary-foreground border-primary"
+                                            : "bg-muted text-muted-foreground border-border"
+                                    )}>
+                                        2. Therapist
+                                    </div>
+                                </div>
+                            )}
+
                             <Label className="text-base font-bold text-foreground">
-                                {triageResult?.classification === 'Escalation Required'
+                                {triageResult?.classification === 'Escalation Required' && !showingTherapists
                                     ? "Consult with a Senior Specialist"
-                                    : (formData.consultationType === "DOCTOR" ? "Choose your Doctor" : "Choose your Therapist")}
+                                    : showingTherapists
+                                        ? "Choose your Therapist"
+                                        : "Choose your Doctor"}
                             </Label>
 
                             <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1 customize-scrollbar">
-                                {(formData.consultationType === "THERAPIST" ? therapists : doctors)
+                                {(showingTherapists ? therapists : doctors)
                                     .filter(staff => {
+                                        // Therapist selection doesn't use the doctor-specific triage escalation filter
+                                        if (showingTherapists) return true;
                                         if (!triageResult) return true;
 
-                                        // 1. Escalation enforcement
+                                        // 1. Escalation enforcement (doctors only)
                                         if (triageResult.classification === 'Escalation Required') {
                                             return staff.user?.role === 'ADMIN_DOCTOR';
                                         }
 
-                                        // 2. Specialist Preference (Non-mandatory filtering for standard/specialist cases)
-                                        // We show the specialized ones first or exclusively if specified
+                                        // 2. Specialist preference
                                         if (triageResult.classification === 'Specialist Required' && triageResult.suggestedSpecialty) {
                                             return staff.specialization?.toLowerCase() === triageResult.suggestedSpecialty.toLowerCase() ||
                                                 staff.specialization?.toLowerCase().includes(triageResult.suggestedSpecialty.toLowerCase());
@@ -394,14 +427,26 @@ export function ClientBookingModal({
                                             onClick={() => {
                                                 if (formData.consultationType === "THERAPIST") {
                                                     setFormData({ ...formData, therapistId: staff.id });
+                                                    nextStep();
+                                                } else if (formData.consultationType === "COMBINED") {
+                                                    if (clinicianSubStep === "doctor") {
+                                                        // First pick doctor, then stay on clinician to pick therapist
+                                                        setFormData({ ...formData, doctorId: staff.id });
+                                                        setClinicianSubStep("therapist");
+                                                    } else {
+                                                        // Second pick therapist, then advance to time
+                                                        setFormData({ ...formData, therapistId: staff.id });
+                                                        nextStep();
+                                                    }
                                                 } else {
                                                     setFormData({ ...formData, doctorId: staff.id });
+                                                    nextStep();
                                                 }
-                                                nextStep();
                                             }}
                                             className={cn(
                                                 "w-full flex items-center justify-between p-3.5 rounded-lg border transition-all hover:border-primary/50",
-                                                (formData.doctorId === staff.id || formData.therapistId === staff.id) ? "border-primary bg-primary/5 shadow-sm" : "border-border"
+                                                (showingTherapists ? formData.therapistId === staff.id : formData.doctorId === staff.id)
+                                                    ? "border-primary bg-primary/5 shadow-sm" : "border-border"
                                             )}
                                         >
                                             <div className="flex items-center gap-3">
@@ -411,7 +456,7 @@ export function ClientBookingModal({
                                                 <div>
                                                     <p className="text-sm font-bold">{staff.fullName}</p>
                                                     <p className="text-[11px] text-muted-foreground">
-                                                        {staff.specialization || (staff.user?.role === 'ADMIN_DOCTOR' ? 'Senior Consultant' : (formData.consultationType === "THERAPIST" ? "Wellness Specialist" : "Medical Practitioner"))}
+                                                        {staff.specialization || (staff.user?.role === 'ADMIN_DOCTOR' ? 'Senior Consultant' : (showingTherapists ? "Wellness Specialist" : "Medical Practitioner"))}
                                                     </p>
                                                 </div>
                                             </div>
@@ -421,7 +466,10 @@ export function ClientBookingModal({
                             </div>
 
                             <Button variant="ghost" size="sm" className="w-full gap-2 text-muted-foreground" onClick={prevStep}>
-                                <ChevronLeft className="w-3.5 h-3.5" /> Back to assessment
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                                {formData.consultationType === "COMBINED" && clinicianSubStep === "therapist"
+                                    ? "Back to Doctor selection"
+                                    : "Back to assessment"}
                             </Button>
                         </div>
                     )}
@@ -523,7 +571,11 @@ export function ClientBookingModal({
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/40 pb-2">
                                     <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Clinician</span>
-                                    <span className="text-sm font-bold">{selectedDoctor?.fullName || selectedTherapist?.fullName}</span>
+                                    <span className="text-sm font-bold">
+                                        {formData.consultationType === "COMBINED"
+                                            ? `${selectedDoctor?.fullName || "—"} & ${selectedTherapist?.fullName || "—"}`
+                                            : selectedDoctor?.fullName || selectedTherapist?.fullName}
+                                    </span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/40 pb-2">
                                     <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Date</span>

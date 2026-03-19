@@ -14,8 +14,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 export default function PrescriptionManagement() {
     const { role } = useAuth();
@@ -24,25 +23,25 @@ export default function PrescriptionManagement() {
     const [prescriptions, setPrescriptions] = useState<any[]>([]);
     const [showModal, setShowModal] = useState(false);
     const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
+    const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+    const [prescriptionSearchQuery, setPrescriptionSearchQuery] = useState("");
+    const [prescriptionBranchFilter, setPrescriptionBranchFilter] = useState("all");
 
-    // Fetch list of patients
+    // Fetch patients and available branches in parallel
     useEffect(() => {
-        async function fetchPatients() {
+        async function fetchInitialData() {
             try {
-                const res = await fetch(`/api/user/list-patients`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                });
-                console.log("[PrescriptionManagement] Patients fetch status:", res.status);
-                if (res.ok) {
-                    const data = await res.json();
-                    console.log("[PrescriptionManagement] Patients count:", data.length);
-                    setPatients(data);
-                }
+                const [{ data: patientsData }, { data: branchesData }] = await Promise.all([
+                    apiClient.get<any[]>('/api/user/list-patients'),
+                    apiClient.get<any[]>('/api/branches'),
+                ]);
+                setPatients(patientsData);
+                setBranches(branchesData);
             } catch (error) {
-                console.error("Failed to fetch patients:", error);
+                console.error("Failed to fetch initial data:", error);
             }
         }
-        fetchPatients();
+        fetchInitialData();
     }, []);
 
     // Fetch prescriptions when patient is selected
@@ -54,18 +53,13 @@ export default function PrescriptionManagement() {
             }
             setLoadingPrescriptions(true);
             try {
-                const res = await fetch(
-                    `/api/prescriptions/patient/${selectedPatient}`,
-                    {
-                        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                    }
-                );
-                if (res.ok) {
-                    const data = await res.json();
-                    setPrescriptions(data);
-                }
-            } catch (error) {
-                console.error("Failed to fetch prescriptions:", error);
+                const { data } = await apiClient.get<any[]>(`/api/prescriptions/patient/${selectedPatient}`);
+                // Guard: ensure we always set an array even if the API shape changes
+                setPrescriptions(Array.isArray(data) ? data : []);
+            } catch (error: any) {
+                // Non-2xx (e.g. 403 for unassigned doctor/therapist) — clear stale data
+                setPrescriptions([]);
+                console.warn("Prescriptions fetch failed:", error?.message);
             } finally {
                 setLoadingPrescriptions(false);
             }
@@ -76,11 +70,8 @@ export default function PrescriptionManagement() {
     const handlePrescriptionAdded = () => {
         // Refresh prescriptions list
         if (selectedPatient) {
-            fetch(`/api/prescriptions/patient/${selectedPatient}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            })
-                .then((res) => res.json())
-                .then(setPrescriptions)
+            apiClient.get<any[]>(`/api/prescriptions/patient/${selectedPatient}`)
+                .then(({ data }) => setPrescriptions(Array.isArray(data) ? data : []))
                 .catch(console.error);
         }
     };
@@ -99,6 +90,17 @@ export default function PrescriptionManagement() {
 
     const selectedPatientData = patients.find((p) => p.id === selectedPatient);
 
+    // Client-side filter: branch classification + text search applied to the already-fetched list
+    const filteredPatients = patients.filter((p: any) => {
+        const q = prescriptionSearchQuery.toLowerCase();
+        const matchesSearch = !q ||
+            (p.fullName  || "").toLowerCase().includes(q) ||
+            (p.patientId || "").toLowerCase().includes(q) ||
+            (p.email     || "").toLowerCase().includes(q);
+        const matchesBranch = prescriptionBranchFilter === "all" || p.branchId === prescriptionBranchFilter;
+        return matchesSearch && matchesBranch;
+    });
+
     return (
         <AppLayout>
             <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
@@ -109,6 +111,27 @@ export default function PrescriptionManagement() {
 
                 {/* Patient Selection */}
                 <Panel title="Select Patient" subtitle="Choose a patient to manage their prescriptions">
+                    {/* Branch + Search Filter — augments the existing patient dropdown without changing layout */}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <input
+                            type="text"
+                            placeholder="Search by name, patient ID, or email..."
+                            value={prescriptionSearchQuery}
+                            onChange={(e) => setPrescriptionSearchQuery(e.target.value)}
+                            className="flex-1 min-w-[160px] h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        />
+                        <Select value={prescriptionBranchFilter} onValueChange={setPrescriptionBranchFilter}>
+                            <SelectTrigger className="w-[160px] h-9 shrink-0">
+                                <SelectValue placeholder="All branches" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All branches</SelectItem>
+                                {branches.map((b) => (
+                                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
                     <div className="flex items-center gap-4">
                         <div className="flex-1">
                             <Select value={selectedPatient} onValueChange={setSelectedPatient}>
@@ -116,7 +139,7 @@ export default function PrescriptionManagement() {
                                     <SelectValue placeholder="Select a patient..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {patients.map((patient) => (
+                                    {filteredPatients.map((patient) => (
                                         <SelectItem key={patient.id} value={patient.id}>
                                             <div className="flex items-center gap-2">
                                                 <User className="w-4 h-4" />

@@ -23,8 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface AppointmentRecord {
     id: string;
@@ -55,21 +54,15 @@ export function MonthlyCompletedAppointments() {
     const fetchData = async (targetPage: number) => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/reports/monthly-completed-appointments?page=${targetPage}&limit=${limit}`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                const result = await res.json();
-                setData(result.data);
-                setMeta(result.meta);
-            } else {
-                toast.error("Failed to fetch monthly report");
-            }
+            const { data: result } = await apiClient.get<{ data: AppointmentRecord[]; meta: MetaData }>(
+                '/api/reports/monthly-completed-appointments',
+                { page: targetPage, limit }
+            );
+            setData(result.data);
+            setMeta(result.meta);
         } catch (error) {
             console.error("Error fetching report:", error);
-            toast.error("Error connecting to server");
+            toast.error("Failed to fetch monthly report");
         } finally {
             setLoading(false);
         }
