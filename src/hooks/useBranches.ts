@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiClient } from '@/lib/api-client';
 
 export function useBranches() {
     const [branches, setBranches] = useState([]);
@@ -8,14 +9,10 @@ export function useBranches() {
     useEffect(() => {
         const fetchBranches = async () => {
             try {
-                const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/branches`, {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
-                });
-                if (!res.ok) throw new Error('Failed to fetch branches');
-                const data = await res.json();
+                const { data } = await apiClient.get<any[]>('/api/branches');
                 setBranches(data);
-            } catch (err) {
-                setError(err.message);
+            } catch (err: any) {
+                setError(err?.message || 'Failed to fetch branches');
             } finally {
                 setLoading(false);
             }

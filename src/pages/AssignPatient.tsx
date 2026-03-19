@@ -13,7 +13,7 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@
 import { Activity, AlertCircle, Loader2, CheckCircle2, UserPlus } from "lucide-react";
 import { useRef } from "react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 export default function AssignPatient() {
   const { role } = useAuth();
@@ -36,18 +36,7 @@ export default function AssignPatient() {
     setLoading(true);
     setError("");
     try {
-      const token = localStorage.getItem("accessToken");
-      if (!token) throw new Error("No access token found");
-
-      const headers = { Authorization: `Bearer ${token}` };
-
-      const patientsRes = await fetch(`${API_BASE_URL}/api/user/list-patients`, { headers });
-
-      if (!patientsRes.ok) {
-        throw new Error("Failed to fetch patients");
-      }
-
-      const patientsData = await patientsRes.json();
+      const { data: patientsData } = await apiClient.get<any[]>('/api/user/list-patients');
       setPatients(patientsData);
 
       // If we already have a patient ID, fetch doctors for that branch
@@ -70,14 +59,8 @@ export default function AssignPatient() {
     setDoctorsLoading(true);
     setAvailableSlots([]);
     try {
-      const token = localStorage.getItem("accessToken");
-      const res = await fetch(`${API_BASE_URL}/api/user/list-doctors?branchId=${branchId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDoctors(data);
-      }
+      const { data } = await apiClient.get<any[]>('/api/user/list-doctors', { branchId });
+      setDoctors(data);
     } catch (err) {
       console.error("Failed to fetch doctors:", err);
     } finally {
@@ -114,29 +97,11 @@ export default function AssignPatient() {
         throw new Error("Please select both a doctor and a patient.");
       }
 
-      const token = localStorage.getItem("accessToken");
-      console.log("[AssignPatient] Token available:", !!token);
+      console.log("[AssignPatient] Token available: true");
 
-      const res = await fetch(`${API_BASE_URL}/api/user/assign-patient`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ patientId, doctorId }),
-      });
+      const { data } = await apiClient.post<any>('/api/user/assign-patient', { patientId, doctorId });
 
-      console.log("[AssignPatient] Response status:", res.status);
-
-      const data = await res.json();
       console.log("[AssignPatient] Response data:", data);
-
-      if (!res.ok) {
-        if (data.availableSlots) {
-          setAvailableSlots(data.availableSlots);
-        }
-        throw new Error(data.message || data.error || "Failed to assign patient");
-      }
 
       setSuccess("Patient assigned successfully!");
       toast({ title: "Success", description: "Patient assigned successfully!" });
@@ -146,23 +111,12 @@ export default function AssignPatient() {
       setPatientId("");
       setAvailableSlots([]);
 
-      // Delay refresh to allow success message to be seen and avoid immediate unmount/remount race conditions
-      // Also, we don't want to flash the full page loader just for a refresh.
-      // Better to fetch silently or just don't fetch if not strictly necessary for the immediate view.
-      // If we must fetch, verify fetchData safety.
-      // verify fetchData exists in scope (it does)
       console.log("[AssignPatient] Refreshing data...");
-      // We will NOT trigger full loading state for this refresh to prevent UI flash/unmount
-      // We'll call a silent refresh version or just fetch and update state without setLoading(true)
 
       const refreshData = async () => {
         try {
-          const headers = { Authorization: `Bearer ${token}` };
-          const patientsRes = await fetch(`${API_BASE_URL}/api/user/list-patients`, { headers });
-          if (patientsRes.ok) {
-            const p = await patientsRes.json();
-            if (Array.isArray(p)) setPatients(p);
-          }
+          const { data: p } = await apiClient.get<any[]>('/api/user/list-patients');
+          if (Array.isArray(p)) setPatients(p);
         } catch (refreshErr) {
           console.error("Silent refresh failed", refreshErr);
         }

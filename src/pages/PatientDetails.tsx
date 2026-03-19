@@ -3,8 +3,7 @@ import { useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Activity, ShoppingCart } from "lucide-react";
 import { MedicineOrderForm } from "@/components/pharmacy/MedicineOrderForm";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 export default function PatientDetails() {
   const { role } = useAuth();
@@ -15,11 +14,8 @@ export default function PatientDetails() {
 
   useEffect(() => {
     if (!id) return;
-    fetch(`${API_BASE_URL}/api/user/patient/${id}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-    })
-      .then((res) => res.ok ? res.json() : Promise.reject(res))
-      .then(setPatient)
+    apiClient.get<any>(`/api/user/patient/${id}`)
+      .then(({ data }) => setPatient(data))
       .catch(() => setError("Failed to load patient details"))
       .finally(() => setLoading(false));
   }, [id]);

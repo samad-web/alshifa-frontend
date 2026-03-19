@@ -3,6 +3,7 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { ShoppingCart, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiClient } from "@/lib/api-client";
 
 interface MedicineOrderFormProps {
     patientId: string;
@@ -20,13 +21,8 @@ export function MedicineOrderForm({ patientId, onOrderPlaced }: MedicineOrderFor
     useEffect(() => {
         async function fetchPrescriptions() {
             try {
-                const res = await fetch(`/api/prescription/patient/${patientId}`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setPrescriptions(data);
-                }
+                const { data } = await apiClient.get<any[]>(`/api/prescription/patient/${patientId}`);
+                setPrescriptions(data);
             } catch (err) {
                 console.error("Failed to fetch prescriptions", err);
             } finally {
@@ -69,31 +65,18 @@ export function MedicineOrderForm({ patientId, onOrderPlaced }: MedicineOrderFor
 
         setSubmitting(true);
         try {
-            const res = await fetch("/api/pharmacy/orders", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: JSON.stringify({
-                    patientId,
-                    items: selectedItems.map(({ medicineId, quantity }) => ({ medicineId, quantity })),
-                    urgency,
-                    notes
-                })
+            await apiClient.post('/api/pharmacy/orders', {
+                patientId,
+                items: selectedItems.map(({ medicineId, quantity }) => ({ medicineId, quantity })),
+                urgency,
+                notes
             });
-
-            if (res.ok) {
-                toast.success("Medicine order placed successfully!");
-                setSelectedItems([]);
-                setNotes("");
-                if (onOrderPlaced) onOrderPlaced();
-            } else {
-                const err = await res.json();
-                toast.error(err.message || "Failed to place order.");
-            }
-        } catch (err) {
-            toast.error("An error occurred.");
+            toast.success("Medicine order placed successfully!");
+            setSelectedItems([]);
+            setNotes("");
+            if (onOrderPlaced) onOrderPlaced();
+        } catch (err: any) {
+            toast.error(err?.message || "Failed to place order.");
         } finally {
             setSubmitting(false);
         }

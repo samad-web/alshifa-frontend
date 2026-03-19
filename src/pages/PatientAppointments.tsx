@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Clock, History } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 export default function PatientAppointments() {
     const { role } = useAuth();
@@ -23,16 +22,11 @@ export default function PatientAppointments() {
 
     const fetchAppointments = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/appointments`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.appointments) {
-                    setAppointments(data.appointments);
-                } else {
-                    setAppointments(data);
-                }
+            const { data } = await apiClient.get<any>('/api/appointments');
+            if (data.appointments) {
+                setAppointments(data.appointments);
+            } else {
+                setAppointments(data);
             }
         } catch (error) {
             console.error("Failed to fetch appointments:", error);

@@ -16,8 +16,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { AppLayout } from "@/components/layout/app-layout";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 interface Message {
     id: string;
@@ -69,16 +68,8 @@ export default function Chat() {
                     setSelectedConv(existing);
                 } else {
                     try {
-                        const initRes = await fetch(`${API_BASE_URL}/api/chat/initiate`, {
-                            method: "POST",
-                            headers: {
-                                "Content-Type": "application/json",
-                                "Authorization": `Bearer ${localStorage.getItem("accessToken")}`
-                            },
-                            body: JSON.stringify({ partnerId })
-                        });
-                        if (initRes.ok) {
-                            const newConv = await initRes.json();
+                        const { data: newConv } = await apiClient.post<any>('/api/chat/initiate', { partnerId });
+                        {
                             // Refresh conversations and select the new one
                             const updatedList = await fetchConversations();
                             if (updatedList) {
@@ -120,14 +111,9 @@ export default function Chat() {
 
     const fetchConversations = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/chat/conversations`, {
-                headers: { "Authorization": `Bearer ${localStorage.getItem("accessToken")}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setConversations(data);
-                return data;
-            }
+            const { data } = await apiClient.get<Conversation[]>('/api/chat/conversations');
+            setConversations(data);
+            return data;
         } catch (err) {
             console.error(err);
         } finally {

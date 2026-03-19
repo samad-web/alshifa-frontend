@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { useEffect, useState } from "react";
+import { apiClient } from "@/lib/api-client";
 const initialStats = {
   atRisk: 0,
   wellnessEligible: 0,
@@ -45,15 +46,8 @@ export default function DoctorAdminDashboard() {
 
   const fetchDoctors = async () => {
     try {
-      const res = await fetch("/api/user/doctor-gamification", {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDoctors(data);
-      }
+      const { data } = await apiClient.get<any[]>('/api/user/doctor-gamification');
+      setDoctors(data);
     } catch (error) {
       console.error("Failed to fetch doctors:", error);
     }
@@ -62,15 +56,8 @@ export default function DoctorAdminDashboard() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/user/admin/stats", {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDashboardStats(data);
-      }
+      const { data } = await apiClient.get<any>('/api/user/admin/stats');
+      setDashboardStats(data);
     } catch (error) {
       console.error("Failed to fetch admin stats:", error);
     } finally {

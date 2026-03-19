@@ -11,15 +11,15 @@ import {
     Smile,
     Plus,
     PlayCircle,
-    ChevronRight
+    ChevronRight,
+    Flame
 } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { DailyCheckIn } from "@/components/wellness/DailyCheckIn";
 import { ProgressRing } from "@/components/ui/progress-ring";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 export default function PatientWellness() {
     const [stats, setStats] = useState<any>(null);
@@ -32,13 +32,8 @@ export default function PatientWellness() {
 
     const fetchStats = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wellness/stats`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setStats(data);
-            }
+            const { data } = await apiClient.get<any>('/api/wellness/stats');
+            setStats(data);
         } catch (error) {
             console.error("Failed to fetch wellness stats:", error);
         } finally {
@@ -94,6 +89,20 @@ export default function PatientWellness() {
                                     </div>
                                 </ProgressRing>
 
+                                {(stats?.adherenceStreak ?? 0) > 0 && (
+                                    <div className="w-full flex items-center gap-3 p-3 bg-attention/10 border border-attention/20 rounded-2xl">
+                                        <Flame className="w-5 h-5 text-attention flex-none" />
+                                        <div className="text-left">
+                                            <p className="text-sm font-black text-foreground">{stats.adherenceStreak}-day streak</p>
+                                            <p className="text-[10px] text-muted-foreground">Medication adherence</p>
+                                        </div>
+                                        {[7, 14, 30].find(m => stats.adherenceStreak < m) && (
+                                            <span className="ml-auto text-[10px] text-attention font-bold">
+                                                {[7, 14, 30].find(m => stats.adherenceStreak < m)! - stats.adherenceStreak}d to bonus
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
                                 <div className="w-full p-4 bg-secondary/20 rounded-2xl border border-border/50 text-sm">
                                     Next tier at <strong>500 points</strong>
                                     <p className="text-muted-foreground text-xs mt-1">Keep checking in daily to level up!</p>

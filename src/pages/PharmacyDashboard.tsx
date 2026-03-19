@@ -14,6 +14,7 @@ import {
     ShoppingCart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api-client";
 
 export default function PharmacyDashboard() {
     const [stats, setStats] = useState({
@@ -26,45 +27,28 @@ export default function PharmacyDashboard() {
 
     useEffect(() => {
         async function fetchStats() {
-            const token = localStorage.getItem("accessToken");
-            const headers = { Authorization: `Bearer ${token}` };
-
             try {
                 // Fetch medicines to calculate total and low stock
-                const res = await fetch("/api/pharmacy/medicines", {
-                    credentials: "include",
-                    headers
-                });
-                if (res.ok) {
-                    const medicines = await res.json();
-                    if (Array.isArray(medicines)) {
-                        const lowStock = medicines.filter((m: any) => m.totalStock <= 10).length;
-
-                        setStats(prev => ({
-                            ...prev,
-                            totalMedicines: medicines.length,
-                            lowStock
-                        }));
-                    }
+                const { data: medicines } = await apiClient.get<any[]>('/api/pharmacy/medicines');
+                if (Array.isArray(medicines)) {
+                    const lowStock = medicines.filter((m: any) => m.totalStock <= 10).length;
+                    setStats(prev => ({
+                        ...prev,
+                        totalMedicines: medicines.length,
+                        lowStock
+                    }));
                 }
 
                 // Fetch dispenses for today
-                const dispRes = await fetch("/api/pharmacy/dispenses", {
-                    credentials: "include",
-                    headers
-                });
-                if (dispRes.ok) {
-                    const dispenses = await dispRes.json();
-                    if (Array.isArray(dispenses)) {
-                        const today = new Date().toISOString().split('T')[0];
-                        const todayDispenses = dispenses.filter((d: any) => d.createdAt.startsWith(today));
-
-                        setStats(prev => ({
-                            ...prev,
-                            dispensedToday: todayDispenses.length,
-                            revenueToday: todayDispenses.reduce((sum: number, d: any) => sum + d.totalAmount, 0)
-                        }));
-                    }
+                const { data: dispenses } = await apiClient.get<any[]>('/api/pharmacy/dispenses');
+                if (Array.isArray(dispenses)) {
+                    const today = new Date().toISOString().split('T')[0];
+                    const todayDispenses = dispenses.filter((d: any) => d.createdAt.startsWith(today));
+                    setStats(prev => ({
+                        ...prev,
+                        dispensedToday: todayDispenses.length,
+                        revenueToday: todayDispenses.reduce((sum: number, d: any) => sum + d.totalAmount, 0)
+                    }));
                 }
             } catch (error) {
                 console.error("Failed to fetch pharmacy stats:", error);

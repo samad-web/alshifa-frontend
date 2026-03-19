@@ -8,7 +8,7 @@ import { Plus, CalendarDays, Clock, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 type AppointmentStatus = "ALL" | "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED";
 
@@ -31,24 +31,16 @@ export default function Appointments() {
     const fetchAppointments = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/appointments`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.appointments) {
-                    setAppointments(data.appointments);
-                    setPagination(data.pagination);
-                } else {
-                    setAppointments(data);
-                }
+            const { data } = await apiClient.get<any>('/api/appointments');
+            if (data.appointments) {
+                setAppointments(data.appointments);
+                setPagination(data.pagination);
             } else {
-                const errorData = await res.json();
-                toast.error(errorData.error || "Failed to fetch appointments");
+                setAppointments(data);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Failed to fetch appointments:", error);
-            toast.error("Could not connect to the server. Please check your internet connection.");
+            toast.error(error?.message || "Could not connect to the server. Please check your internet connection.");
         } finally {
             setLoading(false);
         }
@@ -63,82 +55,52 @@ export default function Appointments() {
         if (!confirm("Are you sure you want to cancel this appointment?")) return;
 
         try {
-            const res = await fetch(`${API_BASE_URL}/api/appointments/${appointmentId}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                toast.success("Appointment cancelled successfully");
-                fetchAppointments();
-            } else {
-                toast.error("Failed to cancel appointment");
-            }
-        } catch (error) {
-            toast.error("Failed to cancel appointment");
+            await apiClient.delete(`/api/appointments/${appointmentId}`);
+            toast.success("Appointment cancelled successfully");
+            fetchAppointments();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to cancel appointment");
         }
     };
 
     const handleApprove = async (appointmentId: string) => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/appointments/${appointmentId}/approve`, {
-                method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
+            const { data: updatedAppointment } = await apiClient.put<any>(`/api/appointments/${appointmentId}/approve`, {});
+            toast.success("Appointment approved successfully");
+
+            // Trigger notification for the patient
+            addNotification({
+                type: "appointment_confirmed",
+                title: "Appointment Confirmed",
+                message: `Your appointment on ${new Date(updatedAppointment.date).toLocaleDateString()} has been approved.`,
+                data: { appointmentId: updatedAppointment.id },
+                priority: 'MEDIUM'
             });
-            if (res.ok) {
-                const updatedAppointment = await res.json();
-                toast.success("Appointment approved successfully");
 
-                // Trigger notification for the patient
-                addNotification({
-                    type: "appointment_confirmed",
-                    title: "Appointment Confirmed",
-                    message: `Your appointment on ${new Date(updatedAppointment.date).toLocaleDateString()} has been approved.`,
-                    data: { appointmentId: updatedAppointment.id },
-                    priority: 'MEDIUM'
-                });
-
-                fetchAppointments();
-            } else {
-                const error = await res.json();
-                toast.error(error.error || "Failed to approve appointment");
-            }
-        } catch (error) {
-            toast.error("Failed to approve appointment");
+            fetchAppointments();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to approve appointment");
         }
     };
 
     const handleReject = async (appointmentId: string) => {
-        if (!confirm("Are you sure you want to reject this appointment?")) return;
-
+        // Confirmation is handled by the themed dialog in AppointmentList
         try {
-            const res = await fetch(`${API_BASE_URL}/api/appointments/${appointmentId}/reject`, {
-                method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
+            const { data: updatedAppointment } = await apiClient.put<any>(`/api/appointments/${appointmentId}/reject`, {});
+            toast.success("Appointment rejected successfully");
+
+            // Trigger notification for the patient
+            addNotification({
+                type: "appointment_rejected",
+                title: "Appointment Not Approved",
+                message: `Your appointment request for ${new Date(updatedAppointment.date).toLocaleDateString()} was not approved.`,
+                data: { appointmentId: updatedAppointment.id },
+                priority: 'MEDIUM'
             });
-            if (res.ok) {
-                const updatedAppointment = await res.json();
-                toast.success("Appointment rejected successfully");
 
-                // Trigger notification for the patient
-                addNotification({
-                    type: "appointment_rejected",
-                    title: "Appointment Not Approved",
-                    message: `Your appointment request for ${new Date(updatedAppointment.date).toLocaleDateString()} was not approved.`,
-                    data: { appointmentId: updatedAppointment.id },
-                    priority: 'MEDIUM'
-                });
-
-                fetchAppointments();
-            } else {
-                const error = await res.json();
-                toast.error(error.error || "Failed to reject appointment");
-            }
-        } catch (error) {
-            toast.error("Failed to reject appointment");
+            fetchAppointments();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to reject appointment");
         }
     };
 

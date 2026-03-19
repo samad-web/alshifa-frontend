@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { WebSocketProvider } from "@/contexts/WebSocketContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ProtectedRoute, getRoleRedirectPath } from "@/components/auth/ProtectedRoute";
+import ErrorBoundary from "@/components/common/ErrorBoundary";
 import Login from "./pages/Login";
 import Index from "./pages/Index";
 import DoctorAdminDashboard from "./pages/DoctorAdminDashboard";
@@ -21,6 +22,9 @@ const PatientWellness = lazy(() => import("./pages/PatientWellness"));
 const PatientAppointments = lazy(() => import("./pages/PatientAppointments"));
 const ExerciseLibrary = lazy(() => import("./pages/ExerciseLibrary"));
 const Chat = lazy(() => import("./pages/Chat"));
+const PatientTimeline = lazy(() => import("./pages/PatientTimeline"));
+const FeatureFlags = lazy(() => import("./pages/FeatureFlags"));
+const ReferralPage = lazy(() => import("./pages/ReferralPage"));
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 import CreateUser from "./pages/CreateUser";
@@ -38,13 +42,13 @@ import PharmacyDispense from "./pages/PharmacyDispense";
 import PharmacyHistory from "./pages/PharmacyHistory";
 import PharmacyOrders from "./pages/PharmacyOrders";
 import BranchManagement from "./pages/BranchManagement";
+import Reports from "./pages/Reports";
 
 const queryClient = new QueryClient();
 
 // Redirect authenticated users to their role-specific dashboard
 function AuthenticatedRedirect() {
   const { user, role, loading } = useAuth();
-  console.log("[App] AuthenticatedRedirect:", { user, role, loading });
 
   if (loading) {
     return (
@@ -55,9 +59,7 @@ function AuthenticatedRedirect() {
   }
 
   if (user && role) {
-    const path = getRoleRedirectPath(role);
-    console.log("[App] Redirecting to:", path);
-    return <Navigate to={path} replace />;
+    return <Navigate to={getRoleRedirectPath(role)} replace />;
   }
 
   return <Index />;
@@ -65,7 +67,6 @@ function AuthenticatedRedirect() {
 
 function LoginRedirect() {
   const { user, role, loading } = useAuth();
-  console.log("[App] LoginRedirect:", { user, role, loading });
 
   if (loading) {
     return (
@@ -76,9 +77,7 @@ function LoginRedirect() {
   }
 
   if (user && role) {
-    const path = getRoleRedirectPath(role);
-    console.log("[App] Redirecting from login to:", path);
-    return <Navigate to={path} replace />;
+    return <Navigate to={getRoleRedirectPath(role)} replace />;
   }
 
   return <Login />;
@@ -297,6 +296,38 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/patients/:id/timeline"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT"]}>
+            <PatientTimeline />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/feature-flags"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+            <FeatureFlags />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/referrals"
+        element={
+          <ProtectedRoute allowedRoles={["PATIENT"]}>
+            <ReferralPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+            <Reports />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
@@ -311,13 +342,15 @@ const App = () => (
             <TooltipProvider>
               <Toaster />
               <Sonner />
-              <Suspense fallback={
-                <div className="min-h-screen flex items-center justify-center bg-background">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              }>
-                <AppRoutes />
-              </Suspense>
+              <ErrorBoundary>
+                <Suspense fallback={
+                  <div className="min-h-screen flex items-center justify-center bg-background">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                }>
+                  <AppRoutes />
+                </Suspense>
+              </ErrorBoundary>
             </TooltipProvider>
           </NotificationProvider>
         </WebSocketProvider>

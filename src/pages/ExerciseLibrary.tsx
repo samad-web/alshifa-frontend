@@ -7,8 +7,7 @@ import { Button } from "@/components/common/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 export default function ExerciseLibrary() {
     const [prescriptions, setPrescriptions] = useState<any[]>([]);
@@ -21,14 +20,9 @@ export default function ExerciseLibrary() {
 
     const fetchPrescriptions = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wellness/my-prescriptions`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setPrescriptions(data);
-                if (data.length > 0) setSelectedVideo(data[0]);
-            }
+            const { data } = await apiClient.get<any[]>('/api/wellness/my-prescriptions');
+            setPrescriptions(data);
+            if (data.length > 0) setSelectedVideo(data[0]);
         } catch (error) {
             console.error("Failed to fetch prescriptions:", error);
         } finally {

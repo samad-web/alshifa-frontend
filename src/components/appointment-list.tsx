@@ -1,4 +1,5 @@
-import { Calendar, Clock, User, Edit2, XCircle, CheckCircle2, Video, MessageSquare, Activity } from "lucide-react";
+import { Calendar, Clock, User, Edit2, XCircle, CheckCircle2, Video, MessageSquare, Activity, MapPin, ClipboardList } from "lucide-react";
+import { RetentionChecklistModal } from "./RetentionChecklistModal";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ProgressAnalysisReport } from "./ProgressAnalysisReport";
 import { useState } from "react";
 import { toast } from "sonner";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface Appointment {
     id: string;
@@ -44,6 +45,11 @@ interface Appointment {
     meetingLink?: string;
     doctorApproved: boolean;
     therapistApproved: boolean;
+    branch?: {
+        id: string;
+        name: string;
+        address?: string | null;
+    } | null;
     triageSession?: {
         id: string;
         severity: string;
@@ -79,25 +85,20 @@ export function AppointmentList({
     const [reportData, setReportData] = useState<any>(null);
     const [loadingReport, setLoadingReport] = useState(false);
     const [reviewedPatients, setReviewedPatients] = useState<Set<string>>(new Set());
+    // Tracks which appointment id is awaiting rejection confirmation in the themed dialog
+    const [pendingRejectId, setPendingRejectId] = useState<string | null>(null);
+    // Tracks which appointment's retention checklist modal is open
+    const [checklistAppointmentId, setChecklistAppointmentId] = useState<string | null>(null);
 
     const fetchProgressReport = async (patientId: string) => {
         setLoadingReport(true);
         setSelectedPatientId(patientId);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/reports/patient/${patientId}/progress`, {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-            });
-            if (res.ok) {
-                const result = await res.json();
-                setReportData(result.data);
-                setReviewedPatients(prev => new Set(prev).add(patientId));
-            } else {
-                toast.error("Failed to fetch progress report");
-            }
+            const { data: result } = await apiClient.get<any>(`/api/reports/patient/${patientId}/progress`);
+            setReportData(result.data);
+            setReviewedPatients(prev => new Set(prev).add(patientId));
         } catch (error) {
-            toast.error("Error fetching progress report");
+            toast.error("Failed to fetch progress report");
         } finally {
             setLoadingReport(false);
         }
@@ -267,6 +268,13 @@ export function AppointmentList({
                                             <span className="text-muted-foreground">{therapistName}</span>
                                         </div>
                                     )}
+                                    {appointment.branch?.name && (
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <MapPin className="w-4 h-4 text-muted-foreground" />
+                                            <span className="font-medium text-foreground">Branch:</span>
+                                            <span className="text-muted-foreground">{appointment.branch.name}</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Notes */}
@@ -352,7 +360,7 @@ export function AppointmentList({
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        onClick={() => onReject(appointment.id)}
+                                                        onClick={() => setPendingRejectId(appointment.id)}
                                                         className="gap-2 text-risk hover:bg-risk/10 border-risk/30"
                                                     >
                                                         <XCircle className="w-3 h-3" />
@@ -445,6 +453,21 @@ export function AppointmentList({
                                                 {hasReviewed ? "View Progress Again" : "Review Progress"}
                                             </Button>
                                         )}
+
+                                        {/* Retention Checklist — doctors, therapists, and admin doctors only */}
+                                        {['DOCTOR', 'THERAPIST', 'ADMIN_DOCTOR'].includes(role ?? '') &&
+                                            appointment.patient &&
+                                            ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'].includes(appointment.status) && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => setChecklistAppointmentId(appointment.id)}
+                                                className="gap-2 text-primary border-primary/30 hover:bg-primary/5"
+                                            >
+                                                <ClipboardList className="w-3 h-3" />
+                                                Retention Checklist
+                                            </Button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -467,6 +490,61 @@ export function AppointmentList({
                     ) : (
                         <div className="py-20 text-center text-muted-foreground">No data available for this patient.</div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Retention Checklist Modal */}
+            {checklistAppointmentId && (() => {
+                const appt = appointments.find(a => a.id === checklistAppointmentId);
+                const pName = appt?.patient?.fullName || appt?.patient?.user?.email;
+                return (
+                    <RetentionChecklistModal
+                        isOpen={!!checklistAppointmentId}
+                        onClose={() => setChecklistAppointmentId(null)}
+                        appointmentId={checklistAppointmentId}
+                        patientName={pName}
+                    />
+                );
+            })()}
+
+            {/* Themed rejection confirmation dialog — replaces native window.confirm() */}
+            <Dialog open={!!pendingRejectId} onOpenChange={(open) => !open && setPendingRejectId(null)}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-risk">
+                            <XCircle className="w-5 h-5" />
+                            Reject Appointment
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="py-2 space-y-2">
+                        <p className="text-sm text-foreground">
+                            Are you sure you want to <span className="font-bold text-risk">reject and cancel</span> this appointment?
+                        </p>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            This will permanently cancel the appointment and notify the patient that their request was not approved. This action cannot be undone.
+                        </p>
+                    </div>
+                    <div className="flex gap-3 pt-1">
+                        <Button
+                            variant="outline"
+                            className="flex-1"
+                            onClick={() => setPendingRejectId(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            className="flex-1 bg-risk hover:bg-risk/90 text-white border-0"
+                            onClick={() => {
+                                if (pendingRejectId && onReject) {
+                                    onReject(pendingRejectId);
+                                    setPendingRejectId(null);
+                                }
+                            }}
+                        >
+                            <XCircle className="w-4 h-4 mr-1.5" />
+                            Confirm Rejection
+                        </Button>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

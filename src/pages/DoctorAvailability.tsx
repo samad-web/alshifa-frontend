@@ -13,8 +13,7 @@ import { format } from "date-fns";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface BlockedSlot {
     id: string;
@@ -60,17 +59,10 @@ export default function DoctorAvailability() {
 
     const fetchClinicians = async () => {
         try {
-            const [docsRes, thersRes] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/user/list-doctors`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                }),
-                fetch(`${API_BASE_URL}/api/user/list-therapists`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-                })
+            const [{ data: docs }, { data: thers }] = await Promise.all([
+                apiClient.get<any[]>('/api/user/list-doctors'),
+                apiClient.get<any[]>('/api/user/list-therapists'),
             ]);
-
-            const docs = docsRes.ok ? await docsRes.json() : [];
-            const thers = thersRes.ok ? await thersRes.json() : [];
 
             setClinicians([
                 ...docs.map((d: any) => ({ ...d, type: 'Doctor' })),
@@ -84,12 +76,8 @@ export default function DoctorAvailability() {
     const fetchBlockedSlots = async (clinicianId: string) => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/availability/${clinicianId}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                setBlockedSlots(await res.json());
-            }
+            const { data } = await apiClient.get<BlockedSlot[]>(`/api/availability/${clinicianId}`);
+            setBlockedSlots(data);
         } catch (error) {
             toast.error("Failed to fetch availability");
         } finally {
@@ -135,26 +123,12 @@ export default function DoctorAvailability() {
         }
 
         try {
-            const res = await fetch(`${API_BASE_URL}/api/availability/block`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: JSON.stringify(payload)
-            });
-
-            const data = await res.json();
-
-            if (res.ok) {
-                toast.success("Availability blocked successfully");
-                fetchBlockedSlots(selectedClinicianId);
-                setReason("");
-            } else {
-                toast.error(data.message || data.error || "Failed to block slot");
-            }
-        } catch (error) {
-            toast.error("Failed to save block");
+            await apiClient.post('/api/availability/block', payload);
+            toast.success("Availability blocked successfully");
+            fetchBlockedSlots(selectedClinicianId);
+            setReason("");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to block slot");
         } finally {
             setLoading(false);
         }
@@ -163,19 +137,11 @@ export default function DoctorAvailability() {
     const handleDelete = async (id: string) => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/availability/block/${id}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
-            });
-            if (res.ok) {
-                toast.success("Block removed");
-                setBlockedSlots(prev => prev.filter(b => b.id !== id));
-            } else {
-                const err = await res.json();
-                toast.error(err.message || "Failed to remove block");
-            }
-        } catch (error) {
-            toast.error("Failed to remove block");
+            await apiClient.delete(`/api/availability/block/${id}`);
+            toast.success("Block removed");
+            setBlockedSlots(prev => prev.filter(b => b.id !== id));
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to remove block");
         } finally {
             setLoading(false);
         }

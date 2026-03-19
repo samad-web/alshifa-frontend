@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { ChatWindow } from "./ChatWindow";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { apiClient } from "@/lib/api-client";
 
 interface ChatWrapperProps {
     patientId: string;
@@ -25,18 +24,8 @@ export function ChatWrapper({ patientId, doctorId, therapistId, pharmacistId, cl
     const getOrCreateConversation = async () => {
         try {
             console.log("[ChatWrapper] Initiating conversation for:", { patientId, doctorId, therapistId, pharmacistId });
-            const res = await fetch(`${API_BASE_URL}/api/chat/conversation`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: JSON.stringify({ patientId, doctorId, therapistId, pharmacistId })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setConversationId(data.id);
-            }
+            const { data } = await apiClient.post<any>('/api/chat/conversation', { patientId, doctorId, therapistId, pharmacistId });
+            setConversationId(data.id);
         } catch (err) {
             console.error(err);
         } finally {

@@ -21,6 +21,7 @@ import {
     CommandList,
 } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
+import { apiClient } from "@/lib/api-client";
 import {
     Select,
     SelectContent,
@@ -112,13 +113,8 @@ export function MultiplePrescriptionForm({
 
     const fetchVideos = async () => {
         try {
-            const res = await fetch("/api/wellness/videos", {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setVideos(data);
-            }
+            const { data } = await apiClient.get<ExternalVideo[]>('/api/wellness/videos');
+            setVideos(data);
         } catch (error) {
             console.error("Failed to fetch videos:", error);
         }
@@ -126,13 +122,8 @@ export function MultiplePrescriptionForm({
 
     const fetchMedicines = async () => {
         try {
-            const res = await fetch("/api/pharmacy/medicines", {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setMedicines(data);
-            }
+            const { data } = await apiClient.get<Medicine[]>('/api/pharmacy/medicines');
+            setMedicines(data);
         } catch (error) {
             console.error("Failed to fetch medicines:", error);
         }
@@ -206,27 +197,14 @@ export function MultiplePrescriptionForm({
         setLoading(true);
 
         try {
-            const res = await fetch("/api/prescriptions/batch-add", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-                },
-                body: JSON.stringify({
-                    patientId,
-                    medicines: prescriptionItems,
-                }),
+            await apiClient.post('/api/prescriptions/batch-add', {
+                patientId,
+                medicines: prescriptionItems,
             });
-
-            if (res.ok) {
-                toast.success("Prescriptions added successfully");
-                onSuccess?.();
-            } else {
-                const error = await res.json();
-                toast.error(error.error || "Failed to add prescriptions");
-            }
-        } catch (error) {
-            toast.error("Failed to add prescriptions");
+            toast.success("Prescriptions added successfully");
+            onSuccess?.();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to add prescriptions");
         } finally {
             setLoading(false);
         }

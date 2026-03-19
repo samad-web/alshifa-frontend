@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Trash2, AlertTriangle, Loader2, Pencil } from "lucide-react";
+import { Users, Trash2, AlertTriangle, Loader2, Pencil, Search } from "lucide-react";
 import { toast } from "sonner";
 import { UserEditModal } from "@/components/user-edit-modal";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { DeleteConfirmationModal } from "@/components/delete-confirmation-modal";
+import { apiClient } from "@/lib/api-client";
 
 interface Doctor {
     id: string;
@@ -51,73 +53,152 @@ export default function ManageUsers() {
     const [therapists, setTherapists] = useState<Therapist[]>([]);
     const [patients, setPatients] = useState<Patient[]>([]);
     const [pharmacists, setPharmacists] = useState<Pharmacist[]>([]);
+    const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState<string | null>(null);
     const [deleting, setDeleting] = useState<string | null>(null);
+
+    // Branch + text search filter state per tab
+    const [doctorSearch,          setDoctorSearch]          = useState("");
+    const [doctorBranchFilter,    setDoctorBranchFilter]    = useState("all");
+    const [therapistSearch,       setTherapistSearch]       = useState("");
+    const [therapistBranchFilter, setTherapistBranchFilter] = useState("all");
+    const [patientSearch,         setPatientSearch]         = useState("");
+    const [patientBranchFilter,   setPatientBranchFilter]   = useState("all");
+
+    // Guard: prevents duplicate queries on initial mount
+    const searchFiltersReady = useRef(false);
+    const doctorDebounce     = useRef<NodeJS.Timeout | null>(null);
+    const therapistDebounce  = useRef<NodeJS.Timeout | null>(null);
+    const patientDebounce    = useRef<NodeJS.Timeout | null>(null);
 
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [userToEdit, setUserToEdit] = useState<any>(null);
     const [editType, setEditType] = useState<"doctor" | "therapist" | "patient" | null>(null);
 
+    // Delete Modal State
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [deleteData, setDeleteData] = useState<{
+        type: "doctor" | "therapist" | "patient" | "pharmacist";
+        id: string;
+        name: string;
+    } | null>(null);
+
     useEffect(() => {
         fetchUsers();
     }, []);
 
+    // Debounced per-tab re-fetch — only fires after initial load completes (searchFiltersReady guard)
+    useEffect(() => {
+        if (!searchFiltersReady.current) return;
+        if (doctorDebounce.current) clearTimeout(doctorDebounce.current);
+        doctorDebounce.current = setTimeout(async () => {
+            try {
+                const params: Record<string, string> = {};
+                if (doctorSearch) params.search = doctorSearch;
+                if (doctorBranchFilter && doctorBranchFilter !== "all") params.branchId = doctorBranchFilter;
+                const { data } = await apiClient.get<Doctor[]>('/api/user/list-doctors', params);
+                setDoctors(Array.isArray(data) ? data : []);
+            } catch (err) {
+                console.error("Failed to filter doctors:", err);
+            }
+        }, 300);
+        return () => { if (doctorDebounce.current) clearTimeout(doctorDebounce.current); };
+    }, [doctorSearch, doctorBranchFilter]);
+
+    useEffect(() => {
+        if (!searchFiltersReady.current) return;
+        if (therapistDebounce.current) clearTimeout(therapistDebounce.current);
+        therapistDebounce.current = setTimeout(async () => {
+            try {
+                const params: Record<string, string> = {};
+                if (therapistSearch) params.search = therapistSearch;
+                if (therapistBranchFilter && therapistBranchFilter !== "all") params.branchId = therapistBranchFilter;
+                const { data } = await apiClient.get<Therapist[]>('/api/user/list-therapists', params);
+                setTherapists(Array.isArray(data) ? data : []);
+            } catch (err) {
+                console.error("Failed to filter therapists:", err);
+            }
+        }, 300);
+        return () => { if (therapistDebounce.current) clearTimeout(therapistDebounce.current); };
+    }, [therapistSearch, therapistBranchFilter]);
+
+    useEffect(() => {
+        if (!searchFiltersReady.current) return;
+        if (patientDebounce.current) clearTimeout(patientDebounce.current);
+        patientDebounce.current = setTimeout(async () => {
+            try {
+                const params: Record<string, string> = {};
+                if (patientSearch) params.search = patientSearch;
+                if (patientBranchFilter && patientBranchFilter !== "all") params.branchId = patientBranchFilter;
+                const { data } = await apiClient.get<Patient[]>('/api/user/list-patients', params);
+                setPatients(Array.isArray(data) ? data : []);
+            } catch (err) {
+                console.error("Failed to filter patients:", err);
+            }
+        }, 300);
+        return () => { if (patientDebounce.current) clearTimeout(patientDebounce.current); };
+    }, [patientSearch, patientBranchFilter]);
+
     const fetchUsers = async () => {
         setLoading(true);
+        setFetchError(null);
         try {
-            const token = localStorage.getItem("accessToken");
-            const headers = { Authorization: `Bearer ${token}` };
-
-            const [doctorsRes, therapistsRes, patientsRes, pharmacistsRes] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/user/list-doctors`, { headers }),
-                fetch(`${API_BASE_URL}/api/user/list-therapists`, { headers }),
-                fetch(`${API_BASE_URL}/api/user/list-patients`, { headers }),
-                fetch(`${API_BASE_URL}/api/user/list-pharmacists`, { headers }),
+            const [{ data: doctorsData }, { data: therapistsData }, { data: patientsData }, { data: pharmacistsData }, { data: branchesData }] = await Promise.all([
+                apiClient.get<Doctor[]>('/api/user/list-doctors'),
+                apiClient.get<Therapist[]>('/api/user/list-therapists'),
+                apiClient.get<Patient[]>('/api/user/list-patients'),
+                apiClient.get<Pharmacist[]>('/api/user/list-pharmacists'),
+                apiClient.get<{ id: string; name: string }[]>('/api/branches'),
             ]);
 
-            if (doctorsRes.ok) setDoctors(await doctorsRes.json());
-            if (therapistsRes.ok) setTherapists(await therapistsRes.json());
-            if (patientsRes.ok) setPatients(await patientsRes.json());
-            if (pharmacistsRes.ok) setPharmacists(await pharmacistsRes.json());
+            // Guard: ensure every state setter only receives a proper array — non-array responses
+            // (e.g. an error object from a 200-body or a corrupted cache payload) would otherwise
+            // cause .map() to throw and crash the render, producing a blank page.
+            setDoctors(Array.isArray(doctorsData) ? doctorsData : []);
+            setTherapists(Array.isArray(therapistsData) ? therapistsData : []);
+            setPatients(Array.isArray(patientsData) ? patientsData : []);
+            setPharmacists(Array.isArray(pharmacistsData) ? pharmacistsData : []);
+            setBranches(Array.isArray(branchesData) ? branchesData : []);
         } catch (error) {
-            toast.error("Failed to fetch users");
+            const msg = error instanceof Error ? error.message : "Failed to fetch users";
+            setFetchError(msg);
+            toast.error(msg);
             console.error("Error fetching users:", error);
         } finally {
             setLoading(false);
+            searchFiltersReady.current = true; // allow filter effects to fire on subsequent changes
         }
     };
 
-    const handleDelete = async (type: "doctor" | "therapist" | "patient", id: string, name: string | null) => {
-        const confirmMessage = `Are you sure you want to delete ${type} "${name || 'this user'}"? This action cannot be undone.`;
+    const handleDelete = (type: "doctor" | "therapist" | "patient" | "pharmacist", id: string, name: string | null) => {
+        setDeleteData({ type, id, name: name || 'this user' });
+        setIsDeleteModalOpen(true);
+    };
 
-        if (!confirm(confirmMessage)) return;
+    const confirmDelete = async () => {
+        if (!deleteData) return;
 
+        const { type, id } = deleteData;
         setDeleting(id);
         try {
-            const token = localStorage.getItem("accessToken");
-            const res = await fetch(`${API_BASE_URL}/api/user/${type}/${id}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
-            });
+            await apiClient.delete(`/api/user/${type}/${id}`);
+            toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully`);
 
-            if (res.ok) {
-                toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully`);
-
-                // Remove from local state
-                if (type === "doctor") {
-                    setDoctors(doctors.filter((d) => d.id !== id));
-                } else if (type === "therapist") {
-                    setTherapists(therapists.filter((t) => t.id !== id));
-                } else {
-                    setPatients(patients.filter((p) => p.id !== id));
-                }
-            } else {
-                const error = await res.json();
-                toast.error(error.error || `Failed to delete ${type}`);
+            // Remove from local state
+            if (type === "doctor") {
+                setDoctors(doctors.filter((d) => d.id !== id));
+            } else if (type === "therapist") {
+                setTherapists(therapists.filter((t) => t.id !== id));
+            } else if (type === "patient") {
+                setPatients(patients.filter((p) => p.id !== id));
+            } else if (type === "pharmacist") {
+                setPharmacists(pharmacists.filter((ph) => ph.id !== id));
             }
-        } catch (error) {
-            toast.error(`Failed to delete ${type}`);
+            setIsDeleteModalOpen(false);
+        } catch (error: any) {
+            toast.error(error?.message || `Failed to delete ${type}`);
             console.error(`Error deleting ${type}:`, error);
         } finally {
             setDeleting(null);
@@ -135,6 +216,22 @@ export default function ManageUsers() {
             <AppLayout>
                 <div className="flex items-center justify-center min-h-[60vh]">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+            </AppLayout>
+        );
+    }
+
+    if (fetchError) {
+        return (
+            <AppLayout>
+                <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center px-4">
+                    <AlertTriangle className="w-12 h-12 text-risk" />
+                    <p className="text-lg font-semibold text-foreground">Failed to load users</p>
+                    <p className="text-sm text-muted-foreground max-w-sm">{fetchError}</p>
+                    <Button onClick={fetchUsers} variant="outline" className="gap-2">
+                        <Loader2 className="w-4 h-4" />
+                        Retry
+                    </Button>
                 </div>
             </AppLayout>
         );
@@ -167,6 +264,29 @@ export default function ManageUsers() {
                     {/* Doctors Tab */}
                     <TabsContent value="doctors">
                         <Panel title="Doctors" subtitle="Manage medical doctors">
+                            {/* Branch + Search Filter */}
+                            <div className="flex flex-wrap items-center gap-3 mb-4">
+                                <div className="relative flex-1 min-w-[160px]">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                                    <Input
+                                        placeholder="Search by name..."
+                                        className="pl-9"
+                                        value={doctorSearch}
+                                        onChange={(e) => setDoctorSearch(e.target.value)}
+                                    />
+                                </div>
+                                <Select value={doctorBranchFilter} onValueChange={setDoctorBranchFilter}>
+                                    <SelectTrigger className="w-[180px] shrink-0">
+                                        <SelectValue placeholder="All branches" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All branches</SelectItem>
+                                        {branches.map((b) => (
+                                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             {/* Mobile Card View */}
                             <div className="grid grid-cols-1 gap-4 md:hidden">
                                 {doctors.length === 0 ? (
@@ -295,6 +415,29 @@ export default function ManageUsers() {
                     {/* Therapists Tab */}
                     <TabsContent value="therapists">
                         <Panel title="Therapists" subtitle="Manage clinical therapists">
+                            {/* Branch + Search Filter */}
+                            <div className="flex flex-wrap items-center gap-3 mb-4">
+                                <div className="relative flex-1 min-w-[160px]">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                                    <Input
+                                        placeholder="Search by name..."
+                                        className="pl-9"
+                                        value={therapistSearch}
+                                        onChange={(e) => setTherapistSearch(e.target.value)}
+                                    />
+                                </div>
+                                <Select value={therapistBranchFilter} onValueChange={setTherapistBranchFilter}>
+                                    <SelectTrigger className="w-[180px] shrink-0">
+                                        <SelectValue placeholder="All branches" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All branches</SelectItem>
+                                        {branches.map((b) => (
+                                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             {/* Mobile Card View */}
                             <div className="grid grid-cols-1 gap-4 md:hidden">
                                 {therapists.length === 0 ? (
@@ -423,6 +566,29 @@ export default function ManageUsers() {
                     {/* Patients Tab */}
                     <TabsContent value="patients">
                         <Panel title="Patients" subtitle="Manage registered patients">
+                            {/* Branch + Search Filter */}
+                            <div className="flex flex-wrap items-center gap-3 mb-4">
+                                <div className="relative flex-1 min-w-[160px]">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                                    <Input
+                                        placeholder="Search by name, phone, or patient ID..."
+                                        className="pl-9"
+                                        value={patientSearch}
+                                        onChange={(e) => setPatientSearch(e.target.value)}
+                                    />
+                                </div>
+                                <Select value={patientBranchFilter} onValueChange={setPatientBranchFilter}>
+                                    <SelectTrigger className="w-[180px] shrink-0">
+                                        <SelectValue placeholder="All branches" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All branches</SelectItem>
+                                        {branches.map((b) => (
+                                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             {/* Mobile Card View */}
                             <div className="grid grid-cols-1 gap-4 md:hidden">
                                 {patients.length === 0 ? (
@@ -697,6 +863,18 @@ export default function ManageUsers() {
                     user={userToEdit}
                     type={editType}
                     onSuccess={fetchUsers}
+                />
+
+                <DeleteConfirmationModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={() => {
+                        setIsDeleteModalOpen(false);
+                        setDeleteData(null);
+                    }}
+                    onConfirm={confirmDelete}
+                    userName={deleteData?.name || ""}
+                    userRole={deleteData?.type || ""}
+                    loading={deleting !== null}
                 />
             </div>
         </AppLayout>

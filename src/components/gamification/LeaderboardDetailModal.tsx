@@ -3,8 +3,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Activity, TrendingUp, TrendingDown, Minus, Target, Clock, CheckCircle, Users } from "lucide-react";
 import { useEffect, useState } from "react";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+import { apiClient } from "@/lib/api-client";
 
 interface LeaderboardDetailModalProps {
     participantId: string | null;
@@ -20,11 +19,8 @@ export function LeaderboardDetailModal({ participantId, open, onOpenChange }: Le
     useEffect(() => {
         if (participantId && open) {
             setLoading(true);
-            fetch(`${API_BASE_URL}/api/leaderboard/${participantId}/breakdown`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
-            })
-                .then(res => res.ok ? res.json() : Promise.reject(res))
-                .then(setData)
+            apiClient.get(`/api/leaderboard/${participantId}/breakdown`)
+                .then(({ data }) => setData(data))
                 .catch(() => setError("Failed to load performance breakdown"))
                 .finally(() => setLoading(false));
         }

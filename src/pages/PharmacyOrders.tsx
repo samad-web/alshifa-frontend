@@ -15,6 +15,7 @@ import {
     ArrowRight
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiClient } from "@/lib/api-client";
 
 export default function PharmacyOrders() {
     const [orders, setOrders] = useState<any[]>([]);
@@ -23,17 +24,12 @@ export default function PharmacyOrders() {
 
     const fetchOrders = async () => {
         try {
-            const res = await fetch("/api/pharmacy/orders", {
-                headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.orders) {
-                    setOrders(data.orders);
-                    setPagination(data.pagination);
-                } else {
-                    setOrders(data);
-                }
+            const { data } = await apiClient.get<any>('/api/pharmacy/orders');
+            if (data.orders) {
+                setOrders(data.orders);
+                setPagination(data.pagination);
+            } else {
+                setOrders(data);
             }
         } catch (err) {
             console.error("Failed to fetch orders", err);
@@ -48,22 +44,11 @@ export default function PharmacyOrders() {
 
     const updateStatus = async (orderId: string, status: string) => {
         try {
-            const res = await fetch(`/api/pharmacy/orders/${orderId}/status`, {
-                method: "PATCH",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${localStorage.getItem("accessToken")}`
-                },
-                body: JSON.stringify({ status })
-            });
-            if (res.ok) {
-                toast.success(`Order status updated to ${status}`);
-                fetchOrders();
-            } else {
-                toast.error("Failed to update status");
-            }
-        } catch (err) {
-            toast.error("An error occurred");
+            await apiClient.patch(`/api/pharmacy/orders/${orderId}/status`, { status });
+            toast.success(`Order status updated to ${status}`);
+            fetchOrders();
+        } catch (err: any) {
+            toast.error(err?.message || "Failed to update status");
         }
     };
 
