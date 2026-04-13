@@ -57,7 +57,7 @@ export default function Appointments() {
         try {
             await apiClient.delete(`/api/appointments/${appointmentId}`);
             toast.success("Appointment cancelled successfully");
-            fetchAppointments();
+            setAppointments((prev) => prev.filter((a) => a.id !== appointmentId));
         } catch (error: any) {
             toast.error(error?.message || "Failed to cancel appointment");
         }
@@ -77,7 +77,7 @@ export default function Appointments() {
                 priority: 'MEDIUM'
             });
 
-            fetchAppointments();
+            setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updatedAppointment } : a));
         } catch (error: any) {
             toast.error(error?.message || "Failed to approve appointment");
         }
@@ -98,7 +98,7 @@ export default function Appointments() {
                 priority: 'MEDIUM'
             });
 
-            fetchAppointments();
+            setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updatedAppointment } : a));
         } catch (error: any) {
             toast.error(error?.message || "Failed to reject appointment");
         }

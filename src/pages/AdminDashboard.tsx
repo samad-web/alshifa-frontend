@@ -82,7 +82,7 @@ export default function AdminDashboard() {
     try {
       await apiClient.delete(`/api/appointments/${appointmentId}`);
       toast.success("Appointment cancelled successfully");
-      fetchAppointments();
+      setAppointments((prev) => prev.filter((a) => a.id !== appointmentId));
     } catch (error: any) {
       toast.error(error?.message || "Failed to cancel appointment");
     }
@@ -95,9 +95,9 @@ export default function AdminDashboard() {
 
   const handleApprove = async (appointmentId: string) => {
     try {
-      await apiClient.put(`/api/appointments/${appointmentId}/approve`, {});
+      const { data: updated } = await apiClient.put<any>(`/api/appointments/${appointmentId}/approve`, {});
       toast.success("Appointment approved");
-      fetchAppointments();
+      setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updated } : a));
     } catch (error: any) {
       toast.error(error?.message || "Failed to approve");
     }
@@ -106,9 +106,9 @@ export default function AdminDashboard() {
   const handleReject = async (appointmentId: string) => {
     // Confirmation is handled by the themed dialog in AppointmentList
     try {
-      await apiClient.put(`/api/appointments/${appointmentId}/reject`, {});
+      const { data: updated } = await apiClient.put<any>(`/api/appointments/${appointmentId}/reject`, {});
       toast.success("Appointment rejected");
-      fetchAppointments();
+      setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updated } : a));
     } catch (error: any) {
       toast.error(error?.message || "Failed to reject");
     }

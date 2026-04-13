@@ -103,7 +103,7 @@ export default function ManageUsers() {
             } catch (err) {
                 console.error("Failed to filter doctors:", err);
             }
-        }, 300);
+        }, 600);
         return () => { if (doctorDebounce.current) clearTimeout(doctorDebounce.current); };
     }, [doctorSearch, doctorBranchFilter]);
 
@@ -120,7 +120,7 @@ export default function ManageUsers() {
             } catch (err) {
                 console.error("Failed to filter therapists:", err);
             }
-        }, 300);
+        }, 600);
         return () => { if (therapistDebounce.current) clearTimeout(therapistDebounce.current); };
     }, [therapistSearch, therapistBranchFilter]);
 
@@ -137,7 +137,7 @@ export default function ManageUsers() {
             } catch (err) {
                 console.error("Failed to filter patients:", err);
             }
-        }, 300);
+        }, 600);
         return () => { if (patientDebounce.current) clearTimeout(patientDebounce.current); };
     }, [patientSearch, patientBranchFilter]);
 
