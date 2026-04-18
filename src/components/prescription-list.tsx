@@ -1,6 +1,32 @@
-import { Download, FileText, Calendar } from "lucide-react";
+import { Download, FileText, Calendar, ExternalLink } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+
+/**
+ * Convert any YouTube URL format to a proper embed URL.
+ * Handles: watch?v=, youtu.be/, shorts/, embed/, and extra query params.
+ */
+function toEmbedUrl(url: string): string {
+    try {
+        const parsed = new URL(url);
+        let videoId: string | null = null;
+
+        if (parsed.hostname.includes('youtube.com')) {
+            if (parsed.pathname === '/watch') {
+                videoId = parsed.searchParams.get('v');
+            } else if (parsed.pathname.startsWith('/embed/')) {
+                return url; // already an embed URL
+            } else if (parsed.pathname.startsWith('/shorts/')) {
+                videoId = parsed.pathname.split('/shorts/')[1]?.split(/[?&/]/)[0];
+            }
+        } else if (parsed.hostname === 'youtu.be') {
+            videoId = parsed.pathname.slice(1).split(/[?&/]/)[0];
+        }
+
+        if (videoId) return `https://www.youtube.com/embed/${videoId}`;
+    } catch { /* not a valid URL, pass through */ }
+    return url;
+}
 
 interface Prescription {
     id: string;
@@ -118,17 +144,23 @@ export function PrescriptionList({
                                 {/* Video Player */}
                                 {rx.videoUrl && (
                                     <div className="pt-4 border-t border-border/50">
-                                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                                            Educational Video
-                                        </p>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                                Educational Video
+                                            </p>
+                                            <a
+                                                href={rx.videoUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-primary flex items-center gap-1 hover:underline"
+                                            >
+                                                Open in new tab <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                        </div>
                                         <div className="aspect-video bg-black rounded-xl overflow-hidden shadow-inner relative group">
                                             <iframe
                                                 className="w-full h-full"
-                                                src={rx.videoUrl.includes('youtube.com/watch?v=')
-                                                    ? rx.videoUrl.replace('watch?v=', 'embed/')
-                                                    : rx.videoUrl.includes('youtu.be/')
-                                                        ? rx.videoUrl.replace('youtu.be/', 'youtube.com/embed/')
-                                                        : rx.videoUrl}
+                                                src={toEmbedUrl(rx.videoUrl)}
                                                 title={`Educational video for ${rx.medicationName}`}
                                                 frameBorder="0"
                                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

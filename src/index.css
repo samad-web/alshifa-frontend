@@ -306,7 +306,127 @@
     );
   }
 }
-/* ... existing styles ... */
+/* Enhanced Animations & Dark Mode Polish */
+
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-lg border border-border/50 rounded-2xl;
+    box-shadow: var(--shadow-card);
+  }
+
+  .dark .glass-card {
+    @apply bg-card/60;
+    box-shadow: 0 4px 6px -1px hsl(215 25% 5% / 0.3), 0 2px 4px -2px hsl(215 25% 5% / 0.2);
+  }
+
+  /* Gradient text */
+  .text-gradient-wellness {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-emerald-500 to-teal-500;
+  }
+
+  .text-gradient-primary {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent;
+  }
+
+  /* Shimmer animation for loading */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted-foreground) / 0.08) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
+  }
+
+  /* Breathing ring animation */
+  @keyframes breathe-ring {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.15); opacity: 0.6; }
+  }
+
+  .animate-breathe {
+    animation: breathe-ring 4s ease-in-out infinite;
+  }
+
+  /* Float animation */
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-8px); }
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  /* Confetti burst */
+  @keyframes confetti-fall {
+    0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+  }
+
+  /* Glow effects for dark mode */
+  .dark .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.15), 0 0 60px hsl(var(--primary) / 0.05);
+  }
+
+  .dark .glow-wellness {
+    box-shadow: 0 0 20px hsl(var(--wellness) / 0.15), 0 0 60px hsl(var(--wellness) / 0.05);
+  }
+
+  .dark .glow-accent {
+    box-shadow: 0 0 20px hsl(var(--accent) / 0.15), 0 0 60px hsl(var(--accent) / 0.05);
+  }
+
+  /* Dark mode enhanced surfaces */
+  .dark .card-elevated {
+    box-shadow: 0 4px 12px -2px hsl(215 25% 5% / 0.4), 0 0 0 1px hsl(215 20% 20% / 0.5);
+  }
+
+  .dark .card-wellness {
+    @apply bg-gradient-to-br from-wellness/10 to-wellness/20 border-wellness/25;
+    box-shadow: 0 0 30px hsl(var(--wellness) / 0.06);
+  }
+
+  .dark .card-attention {
+    @apply bg-gradient-to-br from-attention/10 to-attention/20 border-attention/25;
+  }
+
+  .dark .card-risk {
+    @apply bg-gradient-to-br from-risk/10 to-risk/20 border-risk/25;
+  }
+
+  /* Smooth hover transition for all interactive cards */
+  .interactive-card {
+    @apply transition-all duration-200 ease-out;
+    @apply hover:shadow-lg hover:-translate-y-0.5;
+    @apply active:scale-[0.99] active:shadow-md;
+  }
+
+  .dark .interactive-card:hover {
+    box-shadow: 0 8px 24px -4px hsl(215 25% 5% / 0.4);
+  }
+
+  /* Focus ring polish */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Smooth color transitions for theme switching */
+  html.transitioning,
+  html.transitioning *,
+  html.transitioning *::before,
+  html.transitioning *::after {
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease !important;
+  }
+}
 
 @layer utilities {
   .no-scrollbar::-webkit-scrollbar {
@@ -320,5 +440,27 @@
   .responsive-table {
     @apply w-full overflow-x-auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* Backdrop blur utility */
+  .backdrop-blur-card {
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+
+  /* Smooth text rendering */
+  .text-smooth {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Safe area padding for mobile */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
   }
 }

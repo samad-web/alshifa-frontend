@@ -75,7 +75,7 @@ export default function ManageUsers() {
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [userToEdit, setUserToEdit] = useState<any>(null);
-    const [editType, setEditType] = useState<"doctor" | "therapist" | "patient" | null>(null);
+    const [editType, setEditType] = useState<"doctor" | "therapist" | "patient" | "pharmacist" | null>(null);
 
     // Delete Modal State
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -205,7 +205,7 @@ export default function ManageUsers() {
         }
     };
 
-    const handleEdit = (type: "doctor" | "therapist" | "patient", user: any) => {
+    const handleEdit = (type: "doctor" | "therapist" | "patient" | "pharmacist", user: any) => {
         setEditType(type);
         setUserToEdit(user);
         setIsEditModalOpen(true);

@@ -1,0 +1,36 @@
+:root {
+  /* Brand — deep teal (Ayurvedic/wellness) */
+  --brand-primary:    #0D6E6E;
+  --brand-secondary:  #1A9A9A;
+  --brand-accent:     #48D1CC;
+
+  /* Clinical status */
+  --status-urgent:    #DC2626;
+  --status-warning:   #D97706;
+  --status-safe:      #059669;
+  --status-info:      #2563EB;
+
+  /* Wellness scale */
+  --wellness-low:     #EF4444;
+  --wellness-mid:     #F59E0B;
+  --wellness-high:    #10B981;
+
+  /* Neutrals */
+  --surface-base:     #F8FAFC;
+  --surface-card:     #FFFFFF;
+  --surface-muted:    #F1F5F9;
+  --border-default:   #E2E8F0;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Radius */
+  --radius-card: 16px;
+  --radius-btn:  10px;
+  --radius-pill: 9999px;
+
+  /* Shadow */
+  --shadow-card: 0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+  --shadow-elevated: 0 4px 24px rgba(0,0,0,.10);
+}

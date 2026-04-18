@@ -9,6 +9,8 @@ import { MultiplePrescriptionForm } from "@/components/prescription/MultiplePres
 import { EncouragementText } from "@/components/ui/encouragement-text";
 import { useAuth } from "@/hooks/useAuth";
 import { Users, AlertTriangle, Sparkles, CheckCircle2, Pill } from "lucide-react";
+import { PageTransition, StaggerItem, FadeInView } from "@/components/ui/page-transition";
+import { DashboardSkeleton } from "@/components/ui/page-skeletons";
 
 import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api-client";
@@ -58,9 +60,19 @@ export default function DoctorDashboard() {
     }
   };
 
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="container max-w-7xl mx-auto px-4 py-8 md:py-12">
+          <DashboardSkeleton />
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
-      <div className="container max-w-7xl mx-auto px-4 py-8 md:py-12 space-y-10">
+      <PageTransition className="container max-w-7xl mx-auto px-4 py-8 md:py-12 space-y-10">
         {/* Hero Section */}
         <div className="text-center space-y-3">
           <PageHeader
@@ -233,7 +245,7 @@ export default function DoctorDashboard() {
             This view focuses on your patients only. No comparison with other doctors.
           </p>
         </div>
-      </div>
+      </PageTransition>
     </AppLayout>
   );
 }

@@ -52,8 +52,18 @@ export const pharmacyApi = {
   // ── Orders ─────────────────────────────────────────────────────────────────
 
   async getOrders(params?: Record<string, string | number>): Promise<PaginatedResponse<PharmacyOrder> & { orders: PharmacyOrder[] }> {
-    const { data } = await apiClient.get<PaginatedResponse<PharmacyOrder> & { orders: PharmacyOrder[] }>('/api/pharmacy/orders', params);
-    return data;
+    type Shape = { orders: PharmacyOrder[]; pagination?: Partial<PaginatedResponse<PharmacyOrder>> } & Partial<PaginatedResponse<PharmacyOrder>>;
+    const { data } = await apiClient.get<Shape>('/api/pharmacy/orders', params);
+    const list = data.orders ?? [];
+    const p = data.pagination ?? {};
+    return {
+      orders: list,
+      data: list,
+      total: p.total ?? data.total ?? list.length,
+      page: p.page ?? data.page ?? 1,
+      limit: p.limit ?? data.limit ?? list.length,
+      totalPages: p.totalPages ?? data.totalPages ?? 1,
+    };
   },
 
   async createOrder(payload: Record<string, unknown>): Promise<PharmacyOrder> {

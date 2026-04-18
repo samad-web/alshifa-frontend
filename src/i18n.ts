@@ -32,6 +32,54 @@ const resources = {
                 "title": "Secure Messaging",
                 "placeholder": "Type a message...",
                 "send": "Send"
+            },
+            "triage": {
+                "title": "Health Assessment",
+                "chief_complaint": "What brings you in today?",
+                "pain_regions": "Where does it hurt?",
+                "medical_context": "Medical Context",
+                "lifestyle": "Lifestyle & Wellness",
+                "review": "Review & Submit",
+                "submit": "Submit Assessment",
+                "result": "Triage Assessment",
+                "book_consultation": "Book a Consultation",
+                "urgency": {
+                    "routine": "Routine",
+                    "moderate": "Moderate",
+                    "urgent": "Urgent",
+                    "critical": "Critical"
+                }
+            },
+            "journey": {
+                "title": "Treatment Journey",
+                "wellness_score": "Wellness Score",
+                "active_journey": "Active Journey",
+                "milestones": "Milestones",
+                "vitals": "Vitals",
+                "tasks": "Today's Tasks",
+                "log_vitals": "Log Vitals",
+                "pain_level": "Pain Level",
+                "mood": "Mood",
+                "builder_title": "Create Treatment Journey",
+                "add_phase": "Add Phase",
+                "add_task": "Add Task",
+                "add_milestone": "Add Milestone"
+            },
+            "wellness": {
+                "dashboard": "Wellness Dashboard",
+                "zen_points": "Zen Points",
+                "streak": "Day Streak",
+                "quick_vital_log": "Quick Vital Log"
+            },
+            "nav": {
+                "dashboard": "Dashboard",
+                "appointments": "Appointments",
+                "wellness": "Wellness",
+                "triage": "Triage",
+                "prescriptions": "Prescriptions",
+                "reports": "Reports",
+                "chat": "Chat",
+                "settings": "Settings"
             }
         }
     },
@@ -65,6 +113,54 @@ const resources = {
                 "title": "பாதுகாப்பான செய்திகள்",
                 "placeholder": "செய்தியைத் தட்டச்சு செய்க...",
                 "send": "அனுப்பு"
+            },
+            "triage": {
+                "title": "சுகாதார மதிப்பீடு",
+                "chief_complaint": "இன்று என்ன பிரச்சனை?",
+                "pain_regions": "எங்கு வலிக்கிறது?",
+                "medical_context": "மருத்துவ பின்னணி",
+                "lifestyle": "வாழ்க்கை முறை & ஆரோக்கியம்",
+                "review": "ஆய்வு & சமர்ப்பிக்கவும்",
+                "submit": "மதிப்பீட்டை சமர்ப்பிக்கவும்",
+                "result": "தரவரிசை மதிப்பீடு",
+                "book_consultation": "ஆலோசனை பதிவு செய்",
+                "urgency": {
+                    "routine": "வழக்கமான",
+                    "moderate": "மிதமான",
+                    "urgent": "அவசரம்",
+                    "critical": "முக்கியமான"
+                }
+            },
+            "journey": {
+                "title": "சிகிச்சை பயணம்",
+                "wellness_score": "ஆரோக்கிய மதிப்பெண்",
+                "active_journey": "செயல்பாட்டில் உள்ள பயணம்",
+                "milestones": "மைல்கற்கள்",
+                "vitals": "உடல் அளவீடுகள்",
+                "tasks": "இன்றைய பணிகள்",
+                "log_vitals": "உடல் அளவீடுகளை பதிவிடு",
+                "pain_level": "வலி நிலை",
+                "mood": "மனநிலை",
+                "builder_title": "சிகிச்சை பயணம் உருவாக்கு",
+                "add_phase": "கட்டம் சேர்",
+                "add_task": "பணி சேர்",
+                "add_milestone": "மைல்கல் சேர்"
+            },
+            "wellness": {
+                "dashboard": "ஆரோக்கிய டாஷ்போர்டு",
+                "zen_points": "ஜென் புள்ளிகள்",
+                "streak": "தினசரி தொடர்",
+                "quick_vital_log": "விரைவு உடல் அளவீடு பதிவு"
+            },
+            "nav": {
+                "dashboard": "டாஷ்போர்டு",
+                "appointments": "நேர நிர்ணயம்",
+                "wellness": "ஆரோக்கியம்",
+                "triage": "தரவரிசை",
+                "prescriptions": "மருந்து சீட்டு",
+                "reports": "அறிக்கைகள்",
+                "chat": "செய்தி",
+                "settings": "அமைப்புகள்"
             }
         }
     }

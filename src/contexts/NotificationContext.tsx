@@ -82,8 +82,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             });
         };
 
+        // Gamification: badge earned notification
+        const handleBadgeEarned = (data: { badge: { name: string; tier: string; icon: string }; message: string }) => {
+            toast.success(`Badge Earned: ${data.badge.name}`, {
+                description: data.message,
+                duration: 8000,
+            });
+        };
+
+        // Gamification: zen points update notification
+        const handleZenPointsUpdate = (data: { points: number; earned: number; action: string; level: { name: string }; streak: number }) => {
+            toast.info(`+${data.earned} Zen Points`, {
+                description: `Total: ${data.points} | Level: ${data.level.name}${data.streak >= 7 ? ` | Streak: ${data.streak}d` : ''}`,
+                duration: 4000,
+            });
+        };
+
         socket.on('notification', handleNotification);
-        return () => { socket.off('notification', handleNotification); };
+        socket.on('badge_earned', handleBadgeEarned);
+        socket.on('zen_points_update', handleZenPointsUpdate);
+        return () => {
+            socket.off('notification', handleNotification);
+            socket.off('badge_earned', handleBadgeEarned);
+            socket.off('zen_points_update', handleZenPointsUpdate);
+        };
     }, [socket]);
 
     const addNotification = (notification: Omit<Notification, "id" | "timestamp" | "read">) => {

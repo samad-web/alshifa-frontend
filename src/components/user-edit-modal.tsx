@@ -10,7 +10,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 
@@ -18,13 +20,15 @@ interface UserEditModalProps {
     isOpen: boolean;
     onClose: () => void;
     user: any;
-    type: "doctor" | "therapist" | "patient" | null;
+    type: "doctor" | "therapist" | "patient" | "pharmacist" | null;
     onSuccess: () => void;
 }
 
 export function UserEditModal({ isOpen, onClose, user, type, onSuccess }: UserEditModalProps) {
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState<any>({});
+    const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+    const [currentBranchName, setCurrentBranchName] = useState<string>("");
 
     useEffect(() => {
         if (user) {
@@ -32,12 +36,31 @@ export function UserEditModal({ isOpen, onClose, user, type, onSuccess }: UserEd
         }
     }, [user]);
 
+    useEffect(() => {
+        if (isOpen) {
+            apiClient.get<{ id: string; name: string }[]>('/api/branches')
+                .then(({ data }) => {
+                    setBranches(Array.isArray(data) ? data : []);
+                    // Resolve current branch name
+                    if (user?.user?.branchId) {
+                        const branch = (Array.isArray(data) ? data : []).find((b: any) => b.id === user.user.branchId);
+                        setCurrentBranchName(branch?.name || "Unknown");
+                    }
+                })
+                .catch(() => setBranches([]));
+        }
+    }, [isOpen, user]);
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
         setFormData((prev: any) => ({
             ...prev,
             [name]: name === "yearsExperience" || name === "age" ? Number(value) : value,
         }));
+    };
+
+    const handleBranchChange = (branchId: string) => {
+        setFormData((prev: any) => ({ ...prev, branchId }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -59,6 +82,10 @@ export function UserEditModal({ isOpen, onClose, user, type, onSuccess }: UserEd
     };
 
     if (!user || !type) return null;
+
+    const userBranchId = user?.user?.branchId || formData.branchId;
+    const selectedBranchId = formData.branchId || userBranchId;
+    const isBranchChanged = formData.branchId && formData.branchId !== userBranchId;
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -91,6 +118,39 @@ export function UserEditModal({ isOpen, onClose, user, type, onSuccess }: UserEd
                                 onChange={handleChange}
                                 required
                             />
+                        </div>
+
+                        {/* Branch Assignment — available for all staff types */}
+                        <div className="space-y-2 md:col-span-2">
+                            <Label className="flex items-center gap-2">
+                                <Building2 className="w-4 h-4" />
+                                Branch / Hospital
+                            </Label>
+                            {currentBranchName && !isBranchChanged && (
+                                <p className="text-xs text-muted-foreground mb-1">
+                                    Currently at: <span className="font-medium">{currentBranchName}</span>
+                                </p>
+                            )}
+                            <Select
+                                value={selectedBranchId || ""}
+                                onValueChange={handleBranchChange}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select branch..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {branches.map((b) => (
+                                        <SelectItem key={b.id} value={b.id}>
+                                            {b.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {isBranchChanged && (
+                                <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 bg-amber-50">
+                                    Branch will be changed on save
+                                </Badge>
+                            )}
                         </div>
 
                         {type === "patient" ? (
