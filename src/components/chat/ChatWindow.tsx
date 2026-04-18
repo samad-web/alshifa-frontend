@@ -20,6 +20,7 @@ interface Message {
         doctor?: { fullName: string };
         patient?: { fullName: string };
         therapist?: { fullName: string };
+        pharmacist?: { fullName: string };
     };
 }
 
@@ -51,7 +52,11 @@ export function ChatWindow({ conversationId, className, header }: ChatWindowProp
 
         const handleNewMessage = (message: Message) => {
             if (message.conversationId === conversationId) {
-                setMessages((prev) => [...prev, message]);
+                setMessages((prev) => {
+                    // Deduplicate — prevent double-append on reconnect or re-emit
+                    if (prev.some((m) => m.id === message.id)) return prev;
+                    return [...prev, message];
+                });
             }
         };
 

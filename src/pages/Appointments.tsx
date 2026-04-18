@@ -4,11 +4,15 @@ import { AppointmentModal } from "@/components/appointment-modal";
 import { AppointmentList } from "@/components/appointment-list";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, CalendarDays, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Plus, CalendarDays, Clock, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { apiClient } from "@/lib/api-client";
+import { AppointmentsSkeleton } from "@/components/ui/page-skeletons";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageTransition } from "@/components/ui/page-transition";
 
 type AppointmentStatus = "ALL" | "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED";
 
@@ -21,6 +25,8 @@ export default function Appointments() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingAppointment, setEditingAppointment] = useState<any>(null);
     const [activeTab, setActiveTab] = useState<AppointmentStatus>("ALL");
+    const [cancelTarget, setCancelTarget] = useState<any>(null);
+    const [cancelling, setCancelling] = useState(false);
 
     const canApprove = ["DOCTOR", "THERAPIST", "ADMIN", "ADMIN_DOCTOR"].includes(role || "");
 
@@ -51,15 +57,23 @@ export default function Appointments() {
         setModalOpen(true);
     };
 
-    const handleCancel = async (appointmentId: string) => {
-        if (!confirm("Are you sure you want to cancel this appointment?")) return;
+    const handleCancel = (appointmentId: string) => {
+        const appointment = appointments.find(a => a.id === appointmentId);
+        setCancelTarget(appointment || { id: appointmentId });
+    };
 
+    const confirmCancel = async () => {
+        if (!cancelTarget) return;
+        setCancelling(true);
         try {
-            await apiClient.delete(`/api/appointments/${appointmentId}`);
+            await apiClient.delete(`/api/appointments/${cancelTarget.id}`);
             toast.success("Appointment cancelled successfully");
-            setAppointments((prev) => prev.filter((a) => a.id !== appointmentId));
+            setAppointments((prev) => prev.filter((a) => a.id !== cancelTarget.id));
         } catch (error: any) {
             toast.error(error?.message || "Failed to cancel appointment");
+        } finally {
+            setCancelling(false);
+            setCancelTarget(null);
         }
     };
 
@@ -104,13 +118,26 @@ export default function Appointments() {
         }
     };
 
+    const now = new Date();
+
+    // Appointments whose date has passed but status is still active → treat as past
+    const isDatePassed = (apt: any) => new Date(apt.date) < now;
+    const isActiveStatus = (apt: any) => ["PENDING", "ACCEPTED", "CONFIRMED", "SCHEDULED", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status);
+
     const filteredAppointments = appointments.filter((apt) => {
         if (activeTab === "ALL") return true;
         if (activeTab === "PENDING") {
-            return ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status);
+            return ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status) && !isDatePassed(apt);
         }
         if (activeTab === "CONFIRMED") {
-            return ["CONFIRMED", "ACCEPTED", "SCHEDULED"].includes(apt.status);
+            return ["CONFIRMED", "ACCEPTED", "SCHEDULED"].includes(apt.status) && !isDatePassed(apt);
+        }
+        if (activeTab === "COMPLETED") {
+            // Show completed, cancelled, no-show, AND any active-status appointments whose date has passed
+            return apt.status === "COMPLETED" || apt.status === "NO_SHOW" || (isActiveStatus(apt) && isDatePassed(apt));
+        }
+        if (activeTab === "CANCELLED") {
+            return apt.status === "CANCELLED";
         }
         return apt.status === activeTab;
     });
@@ -118,10 +145,13 @@ export default function Appointments() {
     const getTabCount = (status: AppointmentStatus) => {
         if (status === "ALL") return appointments.length;
         if (status === "PENDING") {
-            return appointments.filter((apt) => ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status)).length;
+            return appointments.filter((apt) => ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status) && !isDatePassed(apt)).length;
         }
         if (status === "CONFIRMED") {
-            return appointments.filter((apt) => ["CONFIRMED", "ACCEPTED", "SCHEDULED"].includes(apt.status)).length;
+            return appointments.filter((apt) => ["CONFIRMED", "ACCEPTED", "SCHEDULED"].includes(apt.status) && !isDatePassed(apt)).length;
+        }
+        if (status === "COMPLETED") {
+            return appointments.filter((apt) => apt.status === "COMPLETED" || apt.status === "NO_SHOW" || (isActiveStatus(apt) && isDatePassed(apt))).length;
         }
         return appointments.filter((apt) => apt.status === status).length;
     };
@@ -184,9 +214,13 @@ export default function Appointments() {
 
                         <TabsContent value={activeTab} className="mt-6">
                             {loading ? (
-                                <div className="text-center py-12">
-                                    <p className="text-muted-foreground">Loading appointments...</p>
-                                </div>
+                                <AppointmentsSkeleton />
+                            ) : filteredAppointments.length === 0 ? (
+                                <EmptyState
+                                    variant="appointments"
+                                    title={`No ${activeTab === "ALL" ? "" : activeTab.toLowerCase()} appointments`}
+                                    description="Your schedule is clear. New appointments will appear here when booked."
+                                />
                             ) : (
                                 <AppointmentList
                                     appointments={filteredAppointments}
@@ -202,6 +236,62 @@ export default function Appointments() {
                     </Tabs>
                 </div>
             </div>
+
+            {/* Cancel Confirmation Dialog */}
+            <Dialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+                <DialogContent className="sm:max-w-sm p-0 rounded-xl overflow-hidden">
+                    <div className="bg-risk/5 border-b border-risk/10 px-5 pt-5 pb-4">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2.5 text-risk text-base">
+                                <div className="p-2 bg-risk/10 rounded-full">
+                                    <AlertTriangle className="w-4 h-4" />
+                                </div>
+                                Cancel Appointment
+                            </DialogTitle>
+                        </DialogHeader>
+                    </div>
+                    <div className="px-5 py-4 space-y-4">
+                        {cancelTarget && (
+                            <div className="bg-muted/30 rounded-lg border border-border/50 p-3 space-y-2">
+                                {(cancelTarget.patient?.fullName || cancelTarget.patient?.user?.email) && (
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Patient</span>
+                                        <span className="font-bold text-foreground">{cancelTarget.patient.fullName || cancelTarget.patient.user.email}</span>
+                                    </div>
+                                )}
+                                {cancelTarget.date && (
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Date</span>
+                                        <span className="font-bold text-foreground">
+                                            {new Date(cancelTarget.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                        </span>
+                                    </div>
+                                )}
+                                {(cancelTarget.doctor?.fullName || cancelTarget.therapist?.fullName) && (
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Clinician</span>
+                                        <span className="font-bold text-foreground">
+                                            {cancelTarget.doctor?.fullName || cancelTarget.therapist?.fullName}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                            This will permanently cancel the appointment and notify all parties. This action cannot be undone.
+                        </p>
+                    </div>
+                    <div className="flex gap-3 px-5 pb-5">
+                        <Button variant="outline" className="flex-1 text-sm" onClick={() => setCancelTarget(null)} disabled={cancelling}>
+                            Keep Appointment
+                        </Button>
+                        <Button className="flex-1 bg-risk hover:bg-risk/90 text-white border-0 text-sm" onClick={confirmCancel} disabled={cancelling}>
+                            {cancelling ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <XCircle className="w-4 h-4 mr-1.5" />}
+                            {cancelling ? "Cancelling..." : "Confirm Cancel"}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Appointment Modal */}
             <AppointmentModal

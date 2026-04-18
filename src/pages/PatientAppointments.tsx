@@ -6,6 +6,7 @@ import { ClientAppointmentList } from "@/components/client/ClientAppointmentList
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Clock, History } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 
@@ -35,13 +36,31 @@ export default function PatientAppointments() {
         }
     };
 
-    const upcomingAppointments = appointments.filter(apt =>
-        ["PENDING", "ACCEPTED", "CONFIRMED", "SCHEDULED", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status)
-    );
+    const handleCancel = async (appointmentId: string) => {
+        try {
+            await apiClient.delete(`/api/appointments/${appointmentId}`);
+            toast.success("Appointment cancelled successfully");
+            setAppointments((prev) => prev.filter((a) => a.id !== appointmentId));
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to cancel appointment");
+        }
+    };
 
-    const pastAppointments = appointments.filter(apt =>
-        ["COMPLETED", "CANCELLED"].includes(apt.status)
-    );
+    const now = new Date();
+
+    const upcomingAppointments = appointments.filter(apt => {
+        const isActiveStatus = ["PENDING", "ACCEPTED", "CONFIRMED", "SCHEDULED", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status);
+        const isFutureDate = new Date(apt.date) >= now;
+        // Only show in upcoming if both active status AND date hasn't passed
+        return isActiveStatus && isFutureDate;
+    });
+
+    const pastAppointments = appointments.filter(apt => {
+        const isTerminalStatus = ["COMPLETED", "CANCELLED", "NO_SHOW"].includes(apt.status);
+        const isExpiredActive = !["COMPLETED", "CANCELLED", "NO_SHOW"].includes(apt.status) && new Date(apt.date) < now;
+        // Show in history if terminal status OR date has passed (regardless of status)
+        return isTerminalStatus || isExpiredActive;
+    });
 
     return (
         <AppLayout>
@@ -92,6 +111,7 @@ export default function PatientAppointments() {
                         ) : (
                             <ClientAppointmentList
                                 appointments={upcomingAppointments}
+                                onCancel={handleCancel}
                                 emptyMessage="No upcoming appointments yet. Start your wellness journey by booking today!"
                             />
                         )}

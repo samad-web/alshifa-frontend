@@ -4,7 +4,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { EncouragementText } from "@/components/ui/encouragement-text";
 import { NotificationPlaceholder } from "@/components/ui/notification-placeholder";
 import { useState, useEffect } from "react";
-import { CheckCircle2, Pill, Bell } from "lucide-react";
+import { Pill, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -12,8 +12,11 @@ import { Input } from "@/components/ui/input";
 import { PrescriptionList } from "@/components/prescription-list";
 import { AdherenceTracker } from "@/components/adherence-tracker";
 import { apiClient } from "@/lib/api-client";
+import { PageTransition, StaggerItem, FadeInView } from "@/components/ui/page-transition";
+import { PatientScreenSkeleton } from "@/components/ui/page-skeletons";
+import { EmptyState } from "@/components/ui/empty-state";
+import { motion } from "framer-motion";
 
-// Mock data aligned with backend models
 type JourneyStatus = "ON_TRACK" | "AT_RISK" | "COMPLETED";
 
 const patientData = {
@@ -25,7 +28,6 @@ const patientData = {
   medicineTakenToday: false,
 };
 
-// Map journey status to StatusBadge status
 const mapJourneyStatus = (status: JourneyStatus) => {
   switch (status) {
     case "ON_TRACK": return "on-track" as const;
@@ -42,16 +44,20 @@ export default function PatientScreen() {
   const [medicineTaken, setMedicineTaken] = useState(patientData.medicineTakenToday);
   const [showMedicineSuccess, setShowMedicineSuccess] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // H-4: Use Bearer token auth; depend only on stable patient id (not whole profile object)
   const patientId = profile?.patient?.id;
   useEffect(() => {
-    if (!patientId) return;
+    if (!patientId) {
+      setLoading(false);
+      return;
+    }
     async function fetchPrescriptions() {
       try {
         const { data } = await apiClient.get<any[]>(`/api/prescriptions/patient/${patientId}/view`);
         setPrescriptions(data);
       } catch { /* show empty list */ }
+      finally { setLoading(false); }
     }
     fetchPrescriptions();
   }, [patientId]);
@@ -68,46 +74,64 @@ export default function PatientScreen() {
 
   const getGreeting = () => {
     if (patientData.status === "COMPLETED") {
-      return { title: "Congratulations! 🎉", subtitle: "You've completed your journey to wellness." };
+      return { title: "Congratulations!", subtitle: "You've completed your journey to wellness." };
     }
     if (patientData.status === "AT_RISK") {
-      return { title: "We're here for you 💙", subtitle: "Let's get back on track together." };
+      return { title: "We're here for you", subtitle: "Let's get back on track together." };
     }
-    return { title: "You're doing well 🌿", subtitle: "Healing is a journey. You're on track." };
+    return { title: "You're doing well", subtitle: "Healing is a journey. You're on track." };
   };
 
   const greeting = getGreeting();
   const activeNudge = {
     id: "n1",
     type: "encouragement",
-    message: "You've completed over half your treatment. Keep going 🌱",
+    message: "You've completed over half your treatment. Keep going",
   };
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex-1 flex items-start justify-center px-4 py-8">
+          <div className="max-w-5xl w-full">
+            <PatientScreenSkeleton />
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
       <div className="min-h-[calc(100vh-3.5rem)] md:min-h-[calc(100vh-4rem)] flex flex-col">
-        {/* Main Content */}
-        <div className="flex-1 flex items-start justify-center px-4 py-8">
+        <PageTransition className="flex-1 flex items-start justify-center px-4 py-8">
           <div className="max-w-5xl w-full">
-            {/* Greeting - Always centered at top */}
-            <div className="text-center space-y-2 mb-8 md:mb-12">
-              <h1 className="text-3xl md:text-4xl font-bold text-foreground">
-                {greeting.title}
-              </h1>
-              <p className="text-lg text-muted-foreground">
-                {greeting.subtitle}
-              </p>
-              {(profile?.patient?.fullName || profile?.fullName) && (
-                <p className="text-base text-primary font-medium mt-2">
-                  {profile.patient?.fullName || profile.fullName}
+            {/* Greeting */}
+            <StaggerItem>
+              <motion.div
+                className="text-center space-y-2 mb-8 md:mb-12"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <h1 className="text-3xl md:text-4xl font-bold text-foreground">
+                  {greeting.title}
+                </h1>
+                <p className="text-lg text-muted-foreground">
+                  {greeting.subtitle}
                 </p>
-              )}
-            </div>
+                {(profile?.patient?.fullName || profile?.fullName) && (
+                  <p className="text-base text-primary font-medium mt-2">
+                    {profile.patient?.fullName || profile.fullName}
+                  </p>
+                )}
+              </motion.div>
+            </StaggerItem>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-start">
               {/* Left Column: Progress */}
-              <div className="space-y-8 flex flex-col items-center lg:items-center">
-                <div className="flex flex-col items-center space-y-6 w-full py-8 bg-card rounded-3xl border border-border/50 shadow-sm">
+              <StaggerItem className="space-y-8 flex flex-col items-center lg:items-center">
+                <div className="flex flex-col items-center space-y-6 w-full py-8 bg-card rounded-3xl border border-border/50 shadow-sm dark:glow-primary">
                   <ProgressRing
                     progress={progress}
                     size={220}
@@ -125,65 +149,77 @@ export default function PatientScreen() {
                   <StatusBadge status={mapJourneyStatus(patientData.status)} />
                 </div>
 
-                {/* Active Nudge - Integrated here on desktop */}
-                <div className="w-full bg-wellness/5 border border-wellness/20 rounded-2xl p-6">
+                <div className="w-full bg-wellness/5 border border-wellness/20 rounded-2xl p-6 dark:glow-wellness">
                   <EncouragementText
                     message={activeNudge.message}
                     variant="prominent"
                   />
                 </div>
-              </div>
+              </StaggerItem>
 
               {/* Right Column: Today's Care & Prescriptions */}
               <div className="space-y-6">
-                {/* Today's Care Section */}
-                <div className="bg-card rounded-2xl border border-border shadow-card p-6 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 rounded-lg bg-primary/10">
-                        <Pill className="w-5 h-5 text-primary" />
+                <FadeInView delay={0.1}>
+                  <div className="bg-card rounded-2xl border border-border shadow-card p-6 space-y-5 interactive-card">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-lg bg-primary/10">
+                          <Pill className="w-5 h-5 text-primary" />
+                        </div>
+                        <h2 className="text-xl font-bold text-foreground">Today's Medication</h2>
                       </div>
-                      <h2 className="text-xl font-bold text-foreground">Today's Medication</h2>
-                    </div>
-                    <button
-                      onClick={() => setShowNotifications(!showNotifications)}
-                      className="p-2 rounded-lg hover:bg-secondary transition-colors"
-                      aria-label="View notifications"
-                    >
-                      <Bell className="w-5 h-5 text-muted-foreground" />
-                    </button>
-                  </div>
-
-                  <AdherenceTracker patientId={profile?.patient?.id || ""} />
-                </div>
-
-                {/* Prescription Section */}
-                <div className="bg-card rounded-2xl border border-border shadow-card p-6 space-y-5">
-                  <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-xl font-bold text-foreground">Prescriptions</h2>
-                    {(profile?.role === "ADMIN_DOCTOR" || profile?.role === "DOCTOR") && (
-                      <button className="text-sm font-semibold text-primary hover:underline" onClick={() => setShowAddModal(true)}>
-                        + Add Prescription
+                      <button
+                        onClick={() => setShowNotifications(!showNotifications)}
+                        className="p-2 rounded-lg hover:bg-secondary transition-colors focus-ring"
+                        aria-label="View notifications"
+                      >
+                        <Bell className="w-5 h-5 text-muted-foreground" />
                       </button>
+                    </div>
+                    <AdherenceTracker patientId={profile?.patient?.id || ""} />
+                  </div>
+                </FadeInView>
+
+                <FadeInView delay={0.2}>
+                  <div className="bg-card rounded-2xl border border-border shadow-card p-6 space-y-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <h2 className="text-xl font-bold text-foreground">Prescriptions</h2>
+                      {(profile?.role === "ADMIN_DOCTOR" || profile?.role === "DOCTOR") && (
+                        <button className="text-sm font-semibold text-primary hover:underline" onClick={() => setShowAddModal(true)}>
+                          + Add Prescription
+                        </button>
+                      )}
+                    </div>
+                    {prescriptions.length > 0 ? (
+                      <PrescriptionList prescriptions={prescriptions} />
+                    ) : (
+                      <EmptyState
+                        variant="prescriptions"
+                        className="py-8"
+                      />
                     )}
                   </div>
-                  <PrescriptionList prescriptions={prescriptions} />
-                </div>
+                </FadeInView>
 
                 {/* Notification Placeholders */}
                 {showNotifications && (
-                  <div className="space-y-4 animate-fade-in-up">
+                  <motion.div
+                    className="space-y-4"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
                     <NotificationPlaceholder type="medication" />
                     <NotificationPlaceholder type="sitting" />
                     <p className="text-xs text-center text-muted-foreground">
                       Real-time notifications coming soon
                     </p>
-                  </div>
+                  </motion.div>
                 )}
               </div>
             </div>
           </div>
-        </div>
+        </PageTransition>
 
         {/* Footer Encouragement */}
         <footer className="py-6 px-4">
@@ -192,7 +228,6 @@ export default function PatientScreen() {
             variant="subtle"
           />
         </footer>
-
 
         {/* Add Prescription Modal */}
         <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
@@ -213,7 +248,6 @@ export default function PatientScreen() {
                 await apiClient.upload('/api/prescriptions/add', fd);
                 setShowAddModal(false);
                 setForm({ medicationName: "", dosage: "", frequency: "", duration: "", notes: "", file: null });
-                // Refresh prescriptions
                 const { data } = await apiClient.get<any[]>(`/api/prescriptions/patient/${patientId}/view`);
                 setPrescriptions(data);
               }}

@@ -33,6 +33,11 @@ interface Message {
     };
 }
 
+interface ConversationUpdate {
+    conversationId: string;
+    lastMessage: Message;
+}
+
 interface Conversation {
     id: string;
     patient: { fullName: string; userId: string };
@@ -89,8 +94,10 @@ export default function Chat() {
     useEffect(() => {
         if (!socket) return;
 
-        const handleNewMessage = (message: Message) => {
-            // Update preview in conversation list
+        // new_message fires when the user is inside the conversation room (ChatWindow open).
+        // conversation_updated fires via the user-room for ALL participants, even when
+        // they haven't opened that specific chat — keeps the sidebar preview current.
+        const updateConversationPreview = (message: Message) => {
             setConversations((prev) =>
                 prev.map((c) =>
                     c.id === message.conversationId ? { ...c, messages: [message] } : c
@@ -102,10 +109,20 @@ export default function Chat() {
             );
         };
 
+        const handleNewMessage = (message: Message) => {
+            updateConversationPreview(message);
+        };
+
+        const handleConversationUpdated = (update: ConversationUpdate) => {
+            updateConversationPreview(update.lastMessage);
+        };
+
         socket.on('new_message', handleNewMessage);
+        socket.on('conversation_updated', handleConversationUpdated);
 
         return () => {
             socket.off('new_message', handleNewMessage);
+            socket.off('conversation_updated', handleConversationUpdated);
         };
     }, [socket]);
 

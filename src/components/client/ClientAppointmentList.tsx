@@ -1,7 +1,9 @@
-import { Calendar, Clock, MessageSquare, ChevronRight, Video } from "lucide-react";
+import { useState } from "react";
+import { Calendar, Clock, MessageSquare, ChevronRight, Video, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { ClientAppointmentStatus } from "@/components/client/ClientAppointmentStatus";
 
@@ -28,12 +30,29 @@ interface Appointment {
 interface ClientAppointmentListProps {
     appointments: Appointment[];
     emptyMessage?: string;
+    onCancel?: (appointmentId: string) => Promise<void>;
 }
+
+const CANCELLABLE_STATUSES = ["PENDING", "SCHEDULED", "CONFIRMED", "ACCEPTED", "PENDING_DOCTOR_APPROVAL", "PENDING_THERAPIST_APPROVAL"];
 
 export function ClientAppointmentList({
     appointments,
     emptyMessage = "No appointments found.",
+    onCancel,
 }: ClientAppointmentListProps) {
+    const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+    const [cancelling, setCancelling] = useState(false);
+
+    const handleConfirmCancel = async () => {
+        if (!cancelTarget || !onCancel) return;
+        setCancelling(true);
+        try {
+            await onCancel(cancelTarget.id);
+        } finally {
+            setCancelling(false);
+            setCancelTarget(null);
+        }
+    };
 
     const formatDateTime = (dateString: string) => {
         const date = new Date(dateString);
@@ -120,6 +139,16 @@ export function ClientAppointmentList({
                                     >
                                         <MessageSquare className="w-3.5 h-3.5" /> Message
                                     </Button>
+                                    {onCancel && CANCELLABLE_STATUSES.includes(appointment.status) && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="text-xs font-bold gap-1.5 rounded-lg text-risk border-risk/20 hover:bg-risk/10 hover:text-risk"
+                                            onClick={() => setCancelTarget(appointment)}
+                                        >
+                                            <XCircle className="w-3.5 h-3.5" /> Cancel
+                                        </Button>
+                                    )}
                                     <Button
                                         size="sm"
                                         className="rounded-lg shadow-sm"
@@ -150,6 +179,76 @@ export function ClientAppointmentList({
                     </div>
                 );
             })}
+
+            {/* Cancel Confirmation Dialog */}
+            <Dialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+                <DialogContent className="sm:max-w-sm p-0 rounded-xl overflow-hidden">
+                    {/* Warning banner */}
+                    <div className="bg-risk/5 border-b border-risk/10 px-5 pt-5 pb-4">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2.5 text-risk text-base">
+                                <div className="p-2 bg-risk/10 rounded-full">
+                                    <AlertTriangle className="w-4 h-4" />
+                                </div>
+                                Cancel Appointment
+                            </DialogTitle>
+                        </DialogHeader>
+                    </div>
+
+                    <div className="px-5 py-4 space-y-4">
+                        {/* Appointment summary */}
+                        {cancelTarget && (
+                            <div className="bg-muted/30 rounded-lg border border-border/50 p-3 space-y-2">
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Specialist</span>
+                                    <span className="font-bold text-foreground">
+                                        {cancelTarget.doctor?.fullName || cancelTarget.therapist?.fullName || "Assigned Specialist"}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Date</span>
+                                    <span className="font-bold text-foreground">
+                                        {new Date(cancelTarget.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Time</span>
+                                    <span className="font-bold text-foreground">
+                                        {new Date(cancelTarget.date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                            Are you sure you want to cancel this appointment? This action cannot be undone and your specialist will be notified.
+                        </p>
+                    </div>
+
+                    <div className="flex gap-3 px-5 pb-5">
+                        <Button
+                            variant="outline"
+                            className="flex-1 text-sm"
+                            onClick={() => setCancelTarget(null)}
+                            disabled={cancelling}
+                        >
+                            Keep Appointment
+                        </Button>
+                        <Button
+                            className="flex-1 bg-risk hover:bg-risk/90 text-white border-0 text-sm"
+                            onClick={handleConfirmCancel}
+                            disabled={cancelling}
+                        >
+                            {cancelling ? (
+                                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                            ) : (
+                                <XCircle className="w-4 h-4 mr-1.5" />
+                            )}
+                            {cancelling ? "Cancelling..." : "Yes, Cancel"}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

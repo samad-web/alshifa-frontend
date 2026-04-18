@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Panel } from "@/components/ui/panel";
-import { Plus, Trash2, Search, Loader2, CheckCircle2, PlaySquare, ChevronsUpDown, Check } from "lucide-react";
+import { Plus, Trash2, Search, Loader2, CheckCircle2, PlaySquare, ChevronsUpDown, Check, Video, X, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -66,6 +66,43 @@ interface MultiplePrescriptionFormProps {
     patientName?: string;
     onSuccess?: () => void;
     onCancel?: () => void;
+}
+
+/**
+ * Extract YouTube video ID from various URL formats and return an embed URL.
+ * Returns null if not a YouTube URL.
+ */
+function getYouTubeEmbedUrl(url: string): string | null {
+    if (!url) return null;
+    try {
+        const parsed = new URL(url);
+        let videoId: string | null = null;
+
+        if (parsed.hostname.includes('youtube.com')) {
+            if (parsed.pathname === '/watch') {
+                videoId = parsed.searchParams.get('v');
+            } else if (parsed.pathname.startsWith('/embed/')) {
+                videoId = parsed.pathname.split('/embed/')[1]?.split(/[?&/]/)[0];
+            } else if (parsed.pathname.startsWith('/shorts/')) {
+                videoId = parsed.pathname.split('/shorts/')[1]?.split(/[?&/]/)[0];
+            }
+        } else if (parsed.hostname === 'youtu.be') {
+            videoId = parsed.pathname.slice(1).split(/[?&/]/)[0];
+        }
+
+        if (videoId) return `https://www.youtube.com/embed/${videoId}`;
+    } catch { /* not a valid URL */ }
+    return null;
+}
+
+function isValidUrl(url: string): boolean {
+    if (!url) return true;
+    try {
+        const parsed = new URL(url);
+        return ['http:', 'https:'].includes(parsed.protocol);
+    } catch {
+        return false;
+    }
 }
 
 const TIMING_OPTIONS = [
@@ -385,34 +422,122 @@ export function MultiplePrescriptionForm({
                                 />
                             </div>
 
-                            <div className="md:col-span-4 space-y-2 border-t border-border/30 pt-4">
-                                <Label className="flex items-center gap-2">
-                                    Educational Video URL (Optional)
-                                    <span className="text-[10px] text-muted-foreground font-normal">Link a video for the patient to follow</span>
-                                </Label>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="relative">
-                                        <Input
-                                            value={item.videoUrl}
-                                            onChange={(e) => updateItem(index, "videoUrl", e.target.value)}
-                                            placeholder="Paste YouTube/Vimeo URL or select from library..."
-                                            list={`video-list-${index}`}
-                                        />
-                                        <datalist id={`video-list-${index}`}>
-                                            {videos.map(v => (
-                                                <option key={v.id} value={v.videoUrl}>{v.title} ({v.category})</option>
-                                            ))}
-                                        </datalist>
+                            {/* Video URL Section */}
+                            <div className="md:col-span-4 border-t border-border/30 pt-3">
+                                {!item.videoUrl ? (
+                                    <div className="flex items-center gap-3">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => updateItem(index, "videoUrl", " ")}
+                                            className="gap-2 text-primary border-primary/30 hover:bg-primary/5"
+                                        >
+                                            <Video className="w-4 h-4" />
+                                            Add YouTube Video
+                                        </Button>
+                                        <span className="text-[10px] text-muted-foreground">
+                                            Attach an exercise or medication guidance video for the patient
+                                        </span>
                                     </div>
-                                    <div className="flex items-center">
-                                        {item.videoUrl && (
-                                            <div className="text-[10px] text-primary flex items-center gap-2 p-2 bg-primary/5 rounded-lg w-full">
-                                                <PlaySquare className="w-3 h-3" />
-                                                <span className="truncate">Video link attached: {item.videoUrl}</span>
+                                ) : (
+                                    <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="flex items-center gap-2 text-sm font-medium">
+                                                <Video className="w-4 h-4 text-primary" />
+                                                Video URL
+                                                <span className="text-xs font-normal text-muted-foreground">(paste YouTube link)</span>
+                                            </Label>
+                                            <button
+                                                type="button"
+                                                onClick={() => updateItem(index, "videoUrl", "")}
+                                                className="text-muted-foreground hover:text-destructive p-1 rounded"
+                                                aria-label="Remove video"
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        </div>
+
+                                        <Input
+                                            value={item.videoUrl.trim()}
+                                            onChange={(e) => updateItem(index, "videoUrl", e.target.value)}
+                                            onPaste={(e) => {
+                                                // Auto-trim pasted content
+                                                const pasted = e.clipboardData.getData('text').trim();
+                                                if (pasted) {
+                                                    e.preventDefault();
+                                                    updateItem(index, "videoUrl", pasted);
+                                                }
+                                            }}
+                                            placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
+                                            className={!isValidUrl(item.videoUrl.trim()) && item.videoUrl.trim() ? 'border-destructive' : ''}
+                                            autoFocus
+                                        />
+
+                                        {/* Validation feedback */}
+                                        {item.videoUrl.trim() && !isValidUrl(item.videoUrl.trim()) && (
+                                            <p className="text-xs text-destructive">Please enter a valid URL starting with https://</p>
+                                        )}
+
+                                        {item.videoUrl.trim() && isValidUrl(item.videoUrl.trim()) && (
+                                            <p className="text-xs text-primary/70 flex items-center gap-1">
+                                                <CheckCircle2 className="w-3 h-3" />
+                                                Valid URL — patient will see an embedded video in their prescription
+                                            </p>
+                                        )}
+
+                                        {/* YouTube preview thumbnail */}
+                                        {(() => {
+                                            const embedUrl = getYouTubeEmbedUrl(item.videoUrl.trim());
+                                            if (!embedUrl) return null;
+                                            const videoId = embedUrl.split('/embed/')[1];
+                                            return (
+                                                <div className="flex items-center gap-3 p-2 bg-background rounded-lg border">
+                                                    <img
+                                                        src={`https://img.youtube.com/vi/${videoId}/mqdefault.jpg`}
+                                                        alt="Video thumbnail"
+                                                        className="w-24 h-14 object-cover rounded"
+                                                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                                    />
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-medium truncate">YouTube Video</p>
+                                                        <p className="text-[10px] text-muted-foreground truncate">{item.videoUrl.trim()}</p>
+                                                    </div>
+                                                    <a
+                                                        href={item.videoUrl.trim()}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-primary hover:text-primary/80 p-1"
+                                                    >
+                                                        <ExternalLink className="w-4 h-4" />
+                                                    </a>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Quick select from video library */}
+                                        {videos.length > 0 && (
+                                            <div className="space-y-1">
+                                                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Or select from library</p>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {videos.slice(0, 6).map(v => (
+                                                        <Button
+                                                            key={v.id}
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-auto py-1 px-2 text-[10px] border border-border/50"
+                                                            onClick={() => updateItem(index, "videoUrl", v.videoUrl)}
+                                                        >
+                                                            <PlaySquare className="w-3 h-3 mr-1" />
+                                                            {v.title}
+                                                        </Button>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
-                                </div>
+                                )}
                             </div>
                         </div>
                     </div>
