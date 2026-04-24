@@ -15,8 +15,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { useBranchScope } from "@/hooks/useBranchScope";
 
 export default function PharmacyDashboard() {
+    const { branchIdParam } = useBranchScope();
     const [stats, setStats] = useState({
         totalMedicines: 0,
         lowStock: 0,
@@ -27,11 +29,15 @@ export default function PharmacyDashboard() {
 
     useEffect(() => {
         async function fetchStats() {
+            setLoading(true);
             try {
-                // Fetch medicines to calculate total and low stock
-                const { data: medicines } = await apiClient.get<any[]>('/api/pharmacy/medicines');
+                // Fetch medicines to calculate total and low stock — backend scopes stocks by branch
+                const { data: medicines } = await apiClient.get<any[]>(
+                    '/api/pharmacy/medicines',
+                    branchIdParam ? { branchId: branchIdParam } : undefined
+                );
                 if (Array.isArray(medicines)) {
-                    const lowStock = medicines.filter((m: any) => m.totalStock <= 10).length;
+                    const lowStock = medicines.filter((m: any) => (m.totalStock ?? 0) <= 10).length;
                     setStats(prev => ({
                         ...prev,
                         totalMedicines: medicines.length,
@@ -39,15 +45,21 @@ export default function PharmacyDashboard() {
                     }));
                 }
 
-                // Fetch dispenses for today
-                const { data: dispenses } = await apiClient.get<any[]>('/api/pharmacy/dispenses');
-                if (Array.isArray(dispenses)) {
+                // Fetch dispenses for today — same branch param applies
+                const { data: dispensesRaw } = await apiClient.get<any>(
+                    '/api/pharmacy/dispenses',
+                    branchIdParam ? { branchId: branchIdParam } : undefined
+                );
+                const dispenses = Array.isArray(dispensesRaw)
+                    ? dispensesRaw
+                    : Array.isArray(dispensesRaw?.data) ? dispensesRaw.data : [];
+                if (dispenses.length >= 0) {
                     const today = new Date().toISOString().split('T')[0];
-                    const todayDispenses = dispenses.filter((d: any) => d.createdAt.startsWith(today));
+                    const todayDispenses = dispenses.filter((d: any) => d.createdAt?.startsWith(today));
                     setStats(prev => ({
                         ...prev,
                         dispensedToday: todayDispenses.length,
-                        revenueToday: todayDispenses.reduce((sum: number, d: any) => sum + d.totalAmount, 0)
+                        revenueToday: todayDispenses.reduce((sum: number, d: any) => sum + (d.totalAmount || 0), 0)
                     }));
                 }
             } catch (error) {
@@ -58,7 +70,7 @@ export default function PharmacyDashboard() {
         }
 
         fetchStats();
-    }, []);
+    }, [branchIdParam]);
 
     return (
         <AppLayout>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { ClientBookingModal } from "@/components/client/ClientBookingModal";
@@ -12,14 +13,25 @@ import { apiClient } from "@/lib/api-client";
 
 export default function PatientAppointments() {
     const { role } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const initialBranchId = searchParams.get("branchId") ?? undefined;
     const [appointments, setAppointments] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [modalOpen, setModalOpen] = useState(false);
+    const [modalOpen, setModalOpen] = useState(Boolean(initialBranchId));
     const [activeTab, setActiveTab] = useState("UPCOMING");
 
     useEffect(() => {
         fetchAppointments();
     }, []);
+
+    const handleCloseModal = () => {
+        setModalOpen(false);
+        if (searchParams.has("branchId")) {
+            const next = new URLSearchParams(searchParams);
+            next.delete("branchId");
+            setSearchParams(next, { replace: true });
+        }
+    };
 
     const fetchAppointments = async () => {
         try {
@@ -128,8 +140,9 @@ export default function PatientAppointments() {
 
             <ClientBookingModal
                 isOpen={modalOpen}
-                onClose={() => setModalOpen(false)}
+                onClose={handleCloseModal}
                 onSuccess={fetchAppointments}
+                initialBranchId={initialBranchId}
             />
         </AppLayout>
     );

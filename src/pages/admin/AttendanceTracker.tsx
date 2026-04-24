@@ -7,9 +7,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -45,7 +43,7 @@ function formatTime(dateStr?: string) {
   return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function AttendanceTracker() {
+export default function AttendanceTracker({ embedded = false }: { embedded?: boolean } = {}) {
   const { role } = useAuth();
   const { branches } = useBranches();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
@@ -146,29 +144,22 @@ export default function AttendanceTracker() {
   };
 
   if (loading) {
-    return (
-      <AppLayout>
-        <div className="container max-w-7xl mx-auto px-4 py-8 flex items-center justify-center min-h-[50vh]">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-            <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Loading Attendance...</p>
-          </div>
+    const spinner = (
+      <div className="container max-w-7xl mx-auto px-4 py-8 flex items-center justify-center min-h-[50vh]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Loading Attendance...</p>
         </div>
-      </AppLayout>
+      </div>
     );
+    return embedded ? spinner : <AppLayout>{spinner}</AppLayout>;
   }
 
-  return (
-    <AppLayout>
-      <div className="container max-w-7xl mx-auto px-4 py-8 space-y-8">
-        <PageHeader
-          title="Attendance Tracker"
-          subtitle="Track attendance, clock in/out, and view punctuality reports."
-        />
-
-        {error && (
-          <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
-        )}
+  const body = (
+    <>
+      {error && (
+        <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
+      )}
 
         {/* Clock In/Out */}
         <Card className="border-none shadow-sm">
@@ -257,16 +248,15 @@ export default function AttendanceTracker() {
                     Branch Attendance
                   </CardTitle>
                   <div className="flex items-center gap-3">
-                    <Select value={branchId} onValueChange={setBranchId}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Select Branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(branches as any[]).map((b: any) => (
-                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      value={branchId}
+                      onChange={setBranchId}
+                      placeholder="Select Branch"
+                      searchPlaceholder="Search branches…"
+                      className="w-[200px]"
+                      items={(branches as any[]).map((b: any) => ({ value: b.id, label: b.name }))}
+                    />
+                    {/* spacer */}
                     <input
                       type="date"
                       value={selectedDate}
@@ -354,6 +344,19 @@ export default function AttendanceTracker() {
             )}
           </>
         )}
+    </>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <AppLayout>
+      <div className="container max-w-7xl mx-auto px-4 py-8 space-y-8">
+        <PageHeader
+          title="Attendance Tracker"
+          subtitle="Track attendance, clock in/out, and view punctuality reports."
+        />
+        {body}
       </div>
     </AppLayout>
   );

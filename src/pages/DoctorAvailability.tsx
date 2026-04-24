@@ -14,6 +14,19 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/lib/api-client";
+import { useBranchScope } from "@/hooks/useBranchScope";
+
+// Shared branch-scope accessors, mirroring the style used on Appointments.tsx.
+function clinicianBranchId(c: any): string | null {
+    return c?.branchId
+        ?? c?.user?.branchId
+        ?? null;
+}
+function clinicianBranchName(c: any): string | null {
+    return c?.branch?.name
+        ?? c?.user?.branch?.name
+        ?? null;
+}
 
 interface BlockedSlot {
     id: string;
@@ -26,8 +39,9 @@ interface BlockedSlot {
     reason?: string;
 }
 
-export default function DoctorAvailability() {
+export default function DoctorAvailability({ embedded = false }: { embedded?: boolean } = {}) {
     const { role, profile } = useAuth();
+    const { branchIdParam } = useBranchScope();
     const [loading, setLoading] = useState(false);
     const [clinicians, setClinicians] = useState<any[]>([]);
     const [selectedClinicianId, setSelectedClinicianId] = useState<string>("");
@@ -149,15 +163,15 @@ export default function DoctorAvailability() {
 
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-    return (
-        <AppLayout>
-            <div className="container max-w-6xl mx-auto px-4 py-8 space-y-8">
-                <PageHeader
-                    title="Availability Management"
-                    subtitle="Manage blocked dates and time slots for Doctors & Therapists"
-                />
+    // When the top-bar scope is set to a specific branch, narrow the
+    // admin's clinician picker to that branch's doctors/therapists. For
+    // non-admins branchIdParam is always undefined so this is a no-op.
+    const scopedClinicians = branchIdParam
+        ? clinicians.filter(c => clinicianBranchId(c) === branchIdParam)
+        : clinicians;
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+    const body = (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {/* Sidebar / Controls */}
                     <Card className="md:col-span-1 h-fit">
                         <CardHeader>
@@ -173,11 +187,15 @@ export default function DoctorAvailability() {
                                             <SelectValue placeholder="Choose professional..." />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {clinicians.map(c => (
-                                                <SelectItem key={c.id} value={c.id}>
-                                                    {c.fullName || c.user?.email} ({c.type})
-                                                </SelectItem>
-                                            ))}
+                                            {scopedClinicians.map(c => {
+                                                const branchName = clinicianBranchName(c);
+                                                return (
+                                                    <SelectItem key={c.id} value={c.id}>
+                                                        {c.fullName || c.user?.email} ({c.type})
+                                                        {branchName ? ` — ${branchName}` : ""}
+                                                    </SelectItem>
+                                                );
+                                            })}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -294,6 +312,18 @@ export default function DoctorAvailability() {
                         </CardContent>
                     </Card>
                 </div>
+    );
+
+    if (embedded) return body;
+
+    return (
+        <AppLayout>
+            <div className="container max-w-6xl mx-auto px-4 py-8 space-y-8">
+                <PageHeader
+                    title="Availability Management"
+                    subtitle="Manage blocked dates and time slots for Doctors & Therapists"
+                />
+                {body}
             </div>
         </AppLayout>
     );

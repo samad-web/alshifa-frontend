@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { MapPin, Phone, Mail, Plus, Trash2, Edit2, Building2, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { MapPin, Phone, Mail, Plus, Trash2, Edit2, Building2, Loader2, AlertCircle, CheckCircle2, BedDouble, DoorOpen, Clock, Activity } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { DeleteBranchModal } from "@/components/delete-branch-modal";
 import { apiClient } from "@/lib/api-client";
@@ -19,7 +20,14 @@ export default function BranchManagement() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
     const [editingBranch, setEditingBranch] = useState(null);
-    const [formData, setFormData] = useState({ name: "", address: "", phone: "", email: "" });
+    const [formData, setFormData] = useState({
+        name: "", address: "", phone: "", email: "",
+        // Capacity & operations
+        ipdEnabled: false, opdEnabled: true,
+        totalBeds: "", availableBeds: "",
+        totalRooms: "", totalTherapyRooms: "",
+        operatingHoursFrom: "", operatingHoursTo: "",
+    });
 
     // Delete Modal State
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -54,11 +62,25 @@ export default function BranchManagement() {
                 name: branch.name,
                 address: branch.address || "",
                 phone: branch.phone || "",
-                email: branch.email || ""
+                email: branch.email || "",
+                ipdEnabled: !!branch.ipdEnabled,
+                opdEnabled: branch.opdEnabled ?? true,
+                totalBeds: branch.totalBeds?.toString() || "",
+                availableBeds: branch.availableBeds?.toString() || "",
+                totalRooms: branch.totalRooms?.toString() || "",
+                totalTherapyRooms: branch.totalTherapyRooms?.toString() || "",
+                operatingHoursFrom: branch.operatingHoursFrom || "",
+                operatingHoursTo: branch.operatingHoursTo || "",
             });
         } else {
             setEditingBranch(null);
-            setFormData({ name: "", address: "", phone: "", email: "" });
+            setFormData({
+                name: "", address: "", phone: "", email: "",
+                ipdEnabled: false, opdEnabled: true,
+                totalBeds: "", availableBeds: "",
+                totalRooms: "", totalTherapyRooms: "",
+                operatingHoursFrom: "", operatingHoursTo: "",
+            });
         }
         setIsDialogOpen(true);
     };
@@ -74,7 +96,16 @@ export default function BranchManagement() {
             // Strip empty strings so optional-field validators never see blank values
             const payload: Record<string, unknown> = {};
             for (const [key, value] of Object.entries(formData)) {
-                if (value !== "") payload[key] = value;
+                if (value === "") continue;
+                if (["totalBeds","availableBeds","totalRooms","totalTherapyRooms"].includes(key)) {
+                    payload[key] = Number(value);
+                } else {
+                    payload[key] = value;
+                }
+            }
+            // If IPD is off, clear bed fields
+            if (!formData.ipdEnabled) {
+                delete payload.totalBeds; delete payload.availableBeds;
             }
 
             if (editingBranch) {
@@ -86,8 +117,13 @@ export default function BranchManagement() {
             setShowSuccess(true);
             fetchBranches();
         } catch (error: any) {
-            // Surface Zod field-level detail messages when available, otherwise the top-level error
-            const message = error?.details?.map((d: any) => `${d.path}: ${d.message}`).join('; ')
+            // Surface Zod field-level detail messages when available, otherwise
+            // the top-level error. Guard for non-array `details` so a string
+            // payload doesn't crash `.map`.
+            const message =
+                (Array.isArray(error?.details)
+                    ? error.details.map((d: any) => `${d?.path ?? ''}: ${d?.message ?? d}`).join('; ')
+                    : null)
                 ?? error?.message
                 ?? 'Operation failed';
             toast({ title: "Error", description: message, variant: "destructive" });
@@ -190,6 +226,40 @@ export default function BranchManagement() {
                                         </div>
                                     </div>
 
+                                    {/* Capacity chips — F0 */}
+                                    {(branch.ipdEnabled || branch.totalRooms != null) && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {branch.ipdEnabled && branch.totalBeds != null && (() => {
+                                                const total = branch.totalBeds || 0;
+                                                const avail = branch.availableBeds ?? 0;
+                                                const pct   = total > 0 ? avail / total : 1;
+                                                const tone  = avail === 0 ? "bg-destructive/10 text-destructive" :
+                                                              pct < 0.2 ? "bg-amber-500/10 text-amber-600" :
+                                                                          "bg-wellness/10 text-wellness";
+                                                return (
+                                                    <Badge variant="secondary" className={`gap-1.5 ${tone}`}>
+                                                        <BedDouble className="w-3 h-3" />
+                                                        {avail} / {total} beds
+                                                    </Badge>
+                                                );
+                                            })()}
+                                            {branch.totalTherapyRooms != null && (
+                                                <Badge variant="secondary" className="gap-1.5">
+                                                    <DoorOpen className="w-3 h-3" />
+                                                    {branch._count?.therapyRooms ?? 0} / {branch.totalTherapyRooms} therapy rooms
+                                                </Badge>
+                                            )}
+                                            {branch.operatingHoursFrom && branch.operatingHoursTo && (
+                                                <Badge variant="outline" className="gap-1.5">
+                                                    <Clock className="w-3 h-3" />
+                                                    {branch.operatingHoursFrom}–{branch.operatingHoursTo}
+                                                </Badge>
+                                            )}
+                                            {branch.ipdEnabled && <Badge variant="outline">IPD</Badge>}
+                                            {branch.opdEnabled && <Badge variant="outline">OPD</Badge>}
+                                        </div>
+                                    )}
+
                                     <div className="flex justify-end gap-2 pt-2 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
                                         <Button variant="secondary" size="sm" className="h-9 px-4 rounded-lg font-medium" onClick={() => handleOpenDialog(branch)}>
                                             <Edit2 className="w-3.5 h-3.5 mr-2" />
@@ -207,7 +277,7 @@ export default function BranchManagement() {
                 )}
 
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DialogContent className="sm:max-w-[500px]">
+                    <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>{editingBranch ? "Edit Clinical Location" : "Provision New Branch"}</DialogTitle>
                             <DialogDescription>
@@ -259,6 +329,80 @@ export default function BranchManagement() {
                                     />
                                 </div>
                             </div>
+                            {/* Capacity & Operations — F0 */}
+                            <div className="pt-2 border-t border-border/40 space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <Activity className="w-4 h-4 text-primary" />
+                                    <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground m-0">
+                                        Capacity & Operations
+                                    </Label>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="flex items-center justify-between p-3 rounded-lg border border-border/60 bg-secondary/5">
+                                        <div>
+                                            <div className="text-sm font-semibold">IPD</div>
+                                            <div className="text-xs text-muted-foreground">Inpatient admissions</div>
+                                        </div>
+                                        <Switch
+                                            checked={formData.ipdEnabled}
+                                            onCheckedChange={(v) => setFormData({ ...formData, ipdEnabled: v })}
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-between p-3 rounded-lg border border-border/60 bg-secondary/5">
+                                        <div>
+                                            <div className="text-sm font-semibold">OPD</div>
+                                            <div className="text-xs text-muted-foreground">Outpatient consults</div>
+                                        </div>
+                                        <Switch
+                                            checked={formData.opdEnabled}
+                                            onCheckedChange={(v) => setFormData({ ...formData, opdEnabled: v })}
+                                        />
+                                    </div>
+                                </div>
+
+                                {formData.ipdEnabled && (
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="totalBeds" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Total beds</Label>
+                                            <Input id="totalBeds" type="number" min={0} value={formData.totalBeds}
+                                                onChange={(e) => setFormData({ ...formData, totalBeds: e.target.value })} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="availableBeds" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Available beds</Label>
+                                            <Input id="availableBeds" type="number" min={0} value={formData.availableBeds}
+                                                onChange={(e) => setFormData({ ...formData, availableBeds: e.target.value })} />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="totalRooms" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Total rooms</Label>
+                                        <Input id="totalRooms" type="number" min={0} value={formData.totalRooms}
+                                            onChange={(e) => setFormData({ ...formData, totalRooms: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="totalTherapyRooms" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Therapy rooms</Label>
+                                        <Input id="totalTherapyRooms" type="number" min={0} value={formData.totalTherapyRooms}
+                                            onChange={(e) => setFormData({ ...formData, totalTherapyRooms: e.target.value })} />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="operatingHoursFrom" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Opens</Label>
+                                        <Input id="operatingHoursFrom" type="time" value={formData.operatingHoursFrom}
+                                            onChange={(e) => setFormData({ ...formData, operatingHoursFrom: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="operatingHoursTo" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Closes</Label>
+                                        <Input id="operatingHoursTo" type="time" value={formData.operatingHoursTo}
+                                            onChange={(e) => setFormData({ ...formData, operatingHoursTo: e.target.value })} />
+                                    </div>
+                                </div>
+                            </div>
+
                             <DialogFooter>
                                 <Button type="button" variant="ghost" onClick={handleCloseDialog}>
                                     Cancel

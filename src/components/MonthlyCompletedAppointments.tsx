@@ -44,7 +44,11 @@ interface MetaData {
     prevMonthTotal: number;
 }
 
-export function MonthlyCompletedAppointments() {
+interface MonthlyCompletedAppointmentsProps {
+    branchId?: string;
+}
+
+export function MonthlyCompletedAppointments({ branchId }: MonthlyCompletedAppointmentsProps = {}) {
     const [data, setData] = useState<AppointmentRecord[]>([]);
     const [meta, setMeta] = useState<MetaData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -54,9 +58,11 @@ export function MonthlyCompletedAppointments() {
     const fetchData = async (targetPage: number) => {
         setLoading(true);
         try {
+            const params: Record<string, string | number> = { page: targetPage, limit };
+            if (branchId) params.branchId = branchId;
             const { data: result } = await apiClient.get<{ data: AppointmentRecord[]; meta: MetaData }>(
                 '/api/reports/monthly-completed-appointments',
-                { page: targetPage, limit }
+                params
             );
             setData(result.data);
             setMeta(result.meta);
@@ -70,7 +76,8 @@ export function MonthlyCompletedAppointments() {
 
     useEffect(() => {
         fetchData(page);
-    }, [page]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [page, branchId]);
 
     const formatDateTime = (dateString: string) => {
         const date = new Date(dateString);

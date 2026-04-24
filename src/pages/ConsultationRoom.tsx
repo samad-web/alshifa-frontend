@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
@@ -21,6 +21,8 @@ import {
 import { toast } from "sonner";
 import { ChatWrapper } from "@/components/chat/ChatWrapper";
 import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
+import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
+import type { FollowUpPayload } from "@/services/followUp.service";
 
 export default function ConsultationRoom() {
     const { appointmentId } = useParams();
@@ -30,6 +32,8 @@ export default function ConsultationRoom() {
     const [notes, setNotes] = useState("");
     const [isSaving, setIsSaving] = useState(false);
     const [showChecklist, setShowChecklist] = useState(false);
+    const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+    const [completing, setCompleting] = useState(false);
 
     useEffect(() => {
         fetchAppointment();
@@ -59,18 +63,30 @@ export default function ConsultationRoom() {
         }
     };
 
-    const handleCompleteSession = async () => {
-        if (!confirm("Are you sure you want to complete this session?")) return;
+    // Consultation can no longer be completed without a follow-up
+    // decision. Clicking "Complete Session" now opens the scheduler;
+    // submitting that modal is what actually POSTs /complete with the
+    // follow-up payload.
+    const handleCompleteSession = () => {
+        setShowFollowUpModal(true);
+    };
 
+    const submitCompletion = async (followUp: FollowUpPayload) => {
+        setCompleting(true);
         try {
-            // First save notes
+            // Save notes first so they persist even if the completion
+            // request fails for any reason.
             await handleSaveNotes();
 
-            await apiClient.post(`/api/consultations/session/${appointmentId}/complete`, {});
-            toast.success("Session completed!");
+            await apiClient.post(`/api/consultations/session/${appointmentId}/complete`, { followUp });
+            toast.success("Session completed — follow-up saved");
+            setShowFollowUpModal(false);
             navigate("/therapist");
         } catch (error) {
-            toast.error("Failed to complete session");
+            const msg = error instanceof Error ? error.message : "Failed to complete session";
+            toast.error(msg);
+        } finally {
+            setCompleting(false);
         }
     };
 
@@ -118,29 +134,10 @@ export default function ConsultationRoom() {
                     <div className="flex-1 bg-secondary/20 p-6 overflow-y-auto">
                         {appointment.consultationMode === "ONLINE" ? (
                             <div className="h-full flex flex-col gap-6">
-                                <div className="flex-1 bg-black rounded-3xl overflow-hidden relative group">
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <div className="text-center space-y-4">
-                                            <div className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center mx-auto">
-                                                <Video className="w-10 h-10 text-white/50" />
-                                            </div>
-                                            <p className="text-white/40 text-sm font-medium">Video Consultation Room</p>
-                                            <Button
-                                                asChild
-                                                className="bg-primary/80 hover:bg-primary backdrop-blur-xl border border-white/20"
-                                            >
-                                                <a href={appointment.meetingLink} target="_blank" rel="noopener noreferrer">
-                                                    <ExternalLink className="w-4 h-4 mr-2" />
-                                                    Open Video Stream
-                                                </a>
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    {/* Participant Labels */}
-                                    <div className="absolute bottom-6 left-6 px-3 py-1.5 bg-black/50 backdrop-blur-md rounded-lg text-white text-xs font-bold border border-white/10">
-                                        {appointment.patient?.fullName || "Patient"} (Remote)
-                                    </div>
-                                </div>
+                                <VideoCallFrame
+                                    meetingLink={appointment.meetingLink}
+                                    patientName={appointment.patient?.fullName || "Patient"}
+                                />
 
                                 {/* Chat Section */}
                                 <div className="h-64 bg-card border border-border/50 rounded-2xl flex flex-col overflow-hidden">
@@ -257,9 +254,98 @@ export default function ConsultationRoom() {
                                 onSuccess={() => toast.success("Retention checklist saved")}
                             />
                         )}
+
+                        <FollowUpSchedulerModal
+                            open={showFollowUpModal}
+                            onClose={() => setShowFollowUpModal(false)}
+                            onSubmit={submitCompletion}
+                            submitting={completing}
+                            patientName={appointment?.patient?.fullName}
+                            submitLabel="Complete Session"
+                        />
                     </div>
                 </div>
             </div>
         </AppLayout>
+    );
+}
+
+// ── Embedded video call frame ─────────────────────────────────────────
+//
+// Embeds the meeting URL directly in an iframe so the doctor never leaves
+// the app. Works with both providers:
+//
+//   - Daily.co: rooms at `*.daily.co/...` — the hosted room page handles
+//     camera/mic setup, waiting-room admit (knocking), chat, screenshare.
+//   - Jitsi: rooms at `meet.jit.si/...` — hosted page similarly handles
+//     everything; we pass `#config.prejoinPageEnabled=true` to get a proper
+//     pre-join screen.
+//
+// If meetingLink is null (booking glitch), render a recovery card with a
+// plain external-tab fallback so the call is still reachable.
+function VideoCallFrame({
+    meetingLink,
+    patientName,
+}: {
+    meetingLink: string | null;
+    patientName: string;
+}) {
+    const embeddedUrl = useMemo(() => {
+        if (!meetingLink) return null;
+        try {
+            const u = new URL(meetingLink);
+            // Jitsi supports config overrides via URL hash parameters.
+            if (u.hostname.includes('jit.si')) {
+                u.hash = 'config.prejoinPageEnabled=true&config.disableInviteFunctions=true';
+            }
+            // Daily.co doesn't need parameters — the room config was set at create time.
+            return u.toString();
+        } catch {
+            return meetingLink;
+        }
+    }, [meetingLink]);
+
+    if (!embeddedUrl) {
+        return (
+            <div className="flex-1 bg-black rounded-3xl overflow-hidden flex items-center justify-center">
+                <div className="text-center space-y-4 p-8">
+                    <div className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center mx-auto">
+                        <Video className="w-10 h-10 text-white/50" />
+                    </div>
+                    <p className="text-white/60 text-sm font-medium">
+                        This appointment doesn't have a meeting link yet.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex-1 bg-black rounded-3xl overflow-hidden relative group">
+            <iframe
+                title={`Video call with ${patientName}`}
+                src={embeddedUrl}
+                className="w-full h-full border-0"
+                // Permissions the provider needs to run camera + mic + screen share.
+                allow="camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-write"
+                // Best-effort sandbox — same-origin is required for provider scripts,
+                // forms + popups permit post-call surveys or sign-in prompts.
+                allowFullScreen
+            />
+            <div className="absolute bottom-6 left-6 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-lg text-white text-xs font-bold border border-white/10 pointer-events-none">
+                Embedded call with {patientName}
+            </div>
+            <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white border-white/20 hover:bg-black/60 hover:text-white"
+            >
+                <a href={embeddedUrl} target="_blank" rel="noopener noreferrer" title="Open in a separate tab">
+                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                    Pop out
+                </a>
+            </Button>
+        </div>
     );
 }

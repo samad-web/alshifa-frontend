@@ -20,7 +20,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   // Patient
   { label: 'Dashboard', path: '/patient', icon: Home, roles: ['PATIENT'] },
-  { label: 'Wellness', path: '/wellness-dashboard', icon: Heart, roles: ['PATIENT'] },
   { label: 'Appointments', path: '/appointments', icon: Calendar, roles: ['PATIENT'] },
   { label: 'Triage', path: '/triage', icon: Map, roles: ['PATIENT'] },
   { label: 'Exercises', path: '/exercise-library', icon: Activity, roles: ['PATIENT'] },

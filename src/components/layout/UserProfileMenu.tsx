@@ -75,6 +75,7 @@ function getInitials(name: string): string {
 
 /** Human-readable role label. */
 const ROLE_LABELS: Record<AppRole, string> = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   ADMIN_DOCTOR: "Admin Doctor",
   DOCTOR: "Doctor",
@@ -86,6 +87,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
 /** Primary dashboard path for the role — used as the "View Profile" destination. */
 function getRoleDashboardPath(role: AppRole | null): string {
   switch (role) {
+    case "SUPER_ADMIN": return "/super-admin";
     case "ADMIN":       return "/admin";
     case "ADMIN_DOCTOR": return "/doctor-admin";
     case "DOCTOR":      return "/doctor";
@@ -115,6 +117,9 @@ export function UserProfileMenu({ className }: UserProfileMenuProps) {
   const initials      = getInitials(displayName);
   const roleLabel     = role ? ROLE_LABELS[role] : "";
   const dashboardPath = getRoleDashboardPath(role);
+  // Super admins don't have a role-specific profile — keep their menu pointing
+  // at the super-admin dashboard rather than /profile.
+  const profilePath   = role === "SUPER_ADMIN" ? dashboardPath : "/profile";
 
   const handleSignOut = async () => {
     await signOut();
@@ -166,7 +171,7 @@ export function UserProfileMenu({ className }: UserProfileMenuProps) {
 
         <DropdownMenuItem
           className="gap-2 cursor-pointer"
-          onClick={() => navigate(dashboardPath)}
+          onClick={() => navigate(profilePath)}
         >
           <UserCircle2 className="h-4 w-4 text-muted-foreground" />
           View Profile

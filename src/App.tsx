@@ -8,6 +8,7 @@ import { WebSocketProvider } from "@/contexts/WebSocketContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ProtectedRoute, getRoleRedirectPath } from "@/components/auth/ProtectedRoute";
 import ErrorBoundary from "@/components/common/ErrorBoundary";
+import { FeatureGate } from "@/components/common/FeatureGate";
 import { lazy, Suspense } from "react";
 import { TriageWizard } from "./components/triage/TriageWizard";
 import { Loader2 } from "lucide-react";
@@ -25,10 +26,9 @@ const DoctorGamification = lazy(() => import("./pages/DoctorGamification"));
 const TherapistDashboard = lazy(() => import("./pages/TherapistDashboard"));
 const TherapistPatients = lazy(() => import("./pages/TherapistPatients"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
-const PatientScreen = lazy(() => import("./pages/PatientScreen"));
+const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const PatientDetails = lazy(() => import("./pages/PatientDetails"));
 const PatientOnboarding = lazy(() => import("./pages/PatientOnboarding"));
-const PatientWellness = lazy(() => import("./pages/PatientWellness"));
 const PatientAppointments = lazy(() => import("./pages/PatientAppointments"));
 const ExerciseLibrary = lazy(() => import("./pages/ExerciseLibrary"));
 const Chat = lazy(() => import("./pages/Chat"));
@@ -46,17 +46,16 @@ const CreateUser = lazy(() => import("./pages/CreateUser"));
 const BranchManagement = lazy(() => import("./pages/BranchManagement"));
 const AssignPatient = lazy(() => import("./pages/AssignPatient"));
 const GamificationAnalytics = lazy(() => import("./pages/admin/GamificationAnalytics"));
-const FeatureFlags = lazy(() => import("./pages/FeatureFlags"));
 const ReferralPage = lazy(() => import("./pages/ReferralPage"));
-const WellnessDashboard = lazy(() => import("./pages/patient/WellnessDashboard"));
 const JourneyBuilder = lazy(() => import("./pages/doctor/JourneyBuilder"));
-const Billing = lazy(() => import("./pages/Billing"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 
 // ── New Feature Pages ────────────────────────────────────────────────────────
 // Operations (Features 4, 6, 7, 8, 9, 13)
 const StaffActivityFeed = lazy(() => import("./pages/admin/StaffActivityFeed"));
 const PerformanceScorecards = lazy(() => import("./pages/admin/PerformanceScorecards"));
 const AttendanceTracker = lazy(() => import("./pages/admin/AttendanceTracker"));
+const StaffSchedule = lazy(() => import("./pages/admin/StaffSchedule"));
 const SkillMatrix = lazy(() => import("./pages/admin/SkillMatrix"));
 const ResourceSharingPage = lazy(() => import("./pages/admin/ResourceSharing"));
 const CentralizedInventory = lazy(() => import("./pages/admin/CentralizedInventory"));
@@ -64,7 +63,6 @@ const CentralizedInventory = lazy(() => import("./pages/admin/CentralizedInvento
 // Clinician Gamification (Features 14-20)
 const XPDashboard = lazy(() => import("./pages/clinician/XPDashboard"));
 const SeasonalChallenges = lazy(() => import("./pages/clinician/SeasonalChallenges"));
-const TeamQuests = lazy(() => import("./pages/clinician/TeamQuests"));
 const AchievementShowcase = lazy(() => import("./pages/clinician/AchievementShowcase"));
 const RewardStore = lazy(() => import("./pages/clinician/RewardStore"));
 const MentorHub = lazy(() => import("./pages/clinician/MentorHub"));
@@ -76,12 +74,43 @@ const FamilyLeaderboard = lazy(() => import("./pages/patient/FamilyLeaderboard")
 const ReferralRewards = lazy(() => import("./pages/patient/ReferralRewards"));
 const SocialProofDashboard = lazy(() => import("./pages/patient/SocialProofDashboard"));
 const HealthContentLibrary = lazy(() => import("./pages/patient/HealthContentLibrary"));
+const SelfExaminationKit = lazy(() => import("./pages/patient/SelfExaminationKit"));
+const ContactClinics = lazy(() => import("./pages/patient/ContactClinics"));
+const SelfExamReview = lazy(() => import("./pages/doctor/SelfExamReview"));
+const SelfExamProtocols = lazy(() => import("./pages/admin/SelfExamProtocols"));
 
 // Communication & Portal (Features 33, 35, 37, 39)
 const Announcements = lazy(() => import("./pages/Announcements"));
+const MessageTemplatesPage = lazy(() => import("./pages/MessageTemplates"));
+const ReminderSettingsPage = lazy(() => import("./pages/ReminderSettings"));
+// Critical-journey admin page: patients flagged for non-adherence
+const CriticalJourneyPage = lazy(() => import("./pages/CriticalJourney"));
 const HandoffNotes = lazy(() => import("./pages/HandoffNotes"));
 const PatientPortal = lazy(() => import("./pages/patient/PatientPortal"));
 const VisitSummaryPage = lazy(() => import("./pages/VisitSummary"));
+
+// IWIS Competitor Features (0-6)
+const TherapyRoomsPage = lazy(() => import("./pages/iwis/TherapyRooms"));
+const DietPrescriptionsPage = lazy(() => import("./pages/iwis/DietPrescriptions"));
+const DietPackagesPage = lazy(() => import("./pages/iwis/DietPackages"));
+const PatientDietPage = lazy(() => import("./pages/iwis/PatientDiet"));
+const ClinicalPhotosPage = lazy(() => import("./pages/iwis/ClinicalPhotos"));
+const TreatmentPackagesPage = lazy(() => import("./pages/iwis/TreatmentPackages"));
+const TherapistMatchPage = lazy(() => import("./pages/iwis/TherapistMatch"));
+const GroupSessionsPage = lazy(() => import("./pages/iwis/GroupSessions"));
+
+// Super Admin (IWIS platform-level)
+const SuperAdminShell = lazy(() =>
+  import("./components/super-admin/SuperAdminShell").then((m) => ({ default: m.SuperAdminShell }))
+);
+const SuperAdminDashboard = lazy(() => import("./pages/super-admin/SuperAdminDashboard"));
+const SuperAdminHospitalList = lazy(() => import("./pages/super-admin/HospitalList"));
+const SuperAdminHospitalCreate = lazy(() => import("./pages/super-admin/HospitalCreate"));
+const SuperAdminHospitalDetail = lazy(() => import("./pages/super-admin/HospitalDetail"));
+const SuperAdminFeatureRegistry = lazy(() => import("./pages/super-admin/FeatureRegistryPage"));
+const SuperAdminAudit = lazy(() => import("./pages/super-admin/AuditLog"));
+const SuperAdminTriageOversight = lazy(() => import("./pages/super-admin/TriageOversight"));
+const SuperAdminSpecialtyRoutes = lazy(() => import("./pages/super-admin/SpecialtyRoutesAdmin"));
 
 const queryClient = new QueryClient();
 
@@ -234,15 +263,7 @@ function AppRoutes() {
         path="/patient"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <PatientScreen />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/wellness"
-        element={
-          <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <PatientWellness />
+            <EnhancedPatientDashboard />
           </ProtectedRoute>
         }
       />
@@ -281,7 +302,7 @@ function AppRoutes() {
       <Route
         path="/branch-management"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN_DOCTOR"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
             <BranchManagement />
           </ProtectedRoute>
         }
@@ -344,6 +365,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/staff-schedule"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+            <StaffSchedule />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/patients/:id/timeline"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT"]}>
@@ -352,10 +381,10 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/feature-flags"
+        path="/patients/:id"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
-            <FeatureFlags />
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+            <PatientDetails />
           </ProtectedRoute>
         }
       />
@@ -376,26 +405,10 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/wellness-dashboard"
-        element={
-          <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <WellnessDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/triage"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
             <div className="p-4"><TriageWizard /></div>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/billing"
-        element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "PATIENT"]}>
-            <Billing />
           </ProtectedRoute>
         }
       />
@@ -412,7 +425,9 @@ function AppRoutes() {
         path="/staff-activity"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
-            <StaffActivityFeed />
+            <FeatureGate feature="STAFF_ACTIVITY_FEED" title="Staff Activity Feed isn't enabled">
+              <StaffActivityFeed />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -420,7 +435,9 @@ function AppRoutes() {
         path="/performance-scorecards"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
-            <PerformanceScorecards />
+            <FeatureGate feature="PERFORMANCE_SCORECARDS" title="Performance Scorecards isn't enabled">
+              <PerformanceScorecards />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -428,7 +445,9 @@ function AppRoutes() {
         path="/attendance"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PHARMACIST"]}>
-            <AttendanceTracker />
+            <FeatureGate feature="STAFF_ATTENDANCE" title="Staff Attendance isn't enabled">
+              <AttendanceTracker />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -436,7 +455,9 @@ function AppRoutes() {
         path="/skill-matrix"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
-            <SkillMatrix />
+            <FeatureGate feature="STAFF_SKILL_MATRIX" title="Staff Skill Matrix isn't enabled">
+              <SkillMatrix />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -444,7 +465,9 @@ function AppRoutes() {
         path="/resource-sharing"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
-            <ResourceSharingPage />
+            <FeatureGate feature="RESOURCE_SHARING" title="Cross-Branch Resource Sharing isn't enabled">
+              <ResourceSharingPage />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -452,7 +475,9 @@ function AppRoutes() {
         path="/centralized-inventory"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "PHARMACIST"]}>
-            <CentralizedInventory />
+            <FeatureGate feature="CENTRALIZED_INVENTORY" title="Centralized Inventory isn't enabled">
+              <CentralizedInventory />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -462,7 +487,9 @@ function AppRoutes() {
         path="/xp-dashboard"
         element={
           <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR"]}>
-            <XPDashboard />
+            <FeatureGate feature="CLINICIAN_XP" title="Clinician XP isn't enabled">
+              <XPDashboard />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -470,15 +497,9 @@ function AppRoutes() {
         path="/seasonal-challenges"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
-            <SeasonalChallenges />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/team-quests"
-        element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
-            <TeamQuests />
+            <FeatureGate feature="SEASONAL_CHALLENGES" title="Seasonal Challenges isn't enabled">
+              <SeasonalChallenges />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -486,7 +507,9 @@ function AppRoutes() {
         path="/achievement-showcase"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
-            <AchievementShowcase />
+            <FeatureGate feature="ACHIEVEMENT_SHOWCASE" title="Achievement Showcase isn't enabled">
+              <AchievementShowcase />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -494,7 +517,9 @@ function AppRoutes() {
         path="/achievement-showcase/:userId"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
-            <AchievementShowcase />
+            <FeatureGate feature="ACHIEVEMENT_SHOWCASE" title="Achievement Showcase isn't enabled">
+              <AchievementShowcase />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -502,7 +527,9 @@ function AppRoutes() {
         path="/reward-store"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT"]}>
-            <RewardStore />
+            <FeatureGate feature="REWARD_STORE" title="Reward Store isn't enabled">
+              <RewardStore />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -510,7 +537,9 @@ function AppRoutes() {
         path="/mentor-hub"
         element={
           <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR"]}>
-            <MentorHub />
+            <FeatureGate feature="MENTOR_SESSIONS" title="Mentor Sessions isn't enabled">
+              <MentorHub />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -520,7 +549,9 @@ function AppRoutes() {
         path="/health-quests"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <HealthQuests />
+            <FeatureGate feature="HEALTH_QUESTS" title="Health Quests isn't enabled">
+              <HealthQuests />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -528,7 +559,9 @@ function AppRoutes() {
         path="/health-avatar"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <HealthAvatar />
+            <FeatureGate feature="HEALTH_AVATAR" title="Health Avatar isn't enabled">
+              <HealthAvatar />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -536,7 +569,9 @@ function AppRoutes() {
         path="/family-leaderboard"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <FamilyLeaderboard />
+            <FeatureGate feature="FAMILY_LEADERBOARD" title="Family Leaderboard isn't enabled">
+              <FamilyLeaderboard />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -544,7 +579,9 @@ function AppRoutes() {
         path="/referral-rewards"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <ReferralRewards />
+            <FeatureGate feature="REFERRAL_TIERS" title="Referral Rewards isn't enabled">
+              <ReferralRewards />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -552,7 +589,9 @@ function AppRoutes() {
         path="/social-proof"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <SocialProofDashboard />
+            <FeatureGate feature="SOCIAL_PROOF" title="Social Proof isn't enabled">
+              <SocialProofDashboard />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -560,7 +599,9 @@ function AppRoutes() {
         path="/health-content"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <HealthContentLibrary />
+            <FeatureGate feature="UNLOCKABLE_CONTENT" title="Health Content Library isn't enabled">
+              <HealthContentLibrary />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -570,7 +611,39 @@ function AppRoutes() {
         path="/announcements"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT", "PHARMACIST"]}>
-            <Announcements />
+            <FeatureGate feature="ANNOUNCEMENTS" title="Announcements isn't enabled">
+              <Announcements />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/message-templates"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+            <FeatureGate feature="MESSAGING_TEMPLATES" title="Message templates aren't enabled">
+              <MessageTemplatesPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reminder-settings"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+            <FeatureGate feature="MESSAGING_TEMPLATES" title="Message templates aren't enabled">
+              <ReminderSettingsPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/critical-journey"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+            <FeatureGate feature="CRITICAL_JOURNEY_DASHBOARD" title="Critical Journey isn't enabled">
+              <CriticalJourneyPage />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -578,7 +651,9 @@ function AppRoutes() {
         path="/handoff-notes"
         element={
           <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR"]}>
-            <HandoffNotes />
+            <FeatureGate feature="HANDOFF_NOTES" title="Handoff Notes isn't enabled">
+              <HandoffNotes />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
@@ -594,13 +669,164 @@ function AppRoutes() {
         path="/visit-summary"
         element={
           <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR", "PATIENT"]}>
-            <VisitSummaryPage />
+            <FeatureGate feature="VISIT_SUMMARY" title="Visit Summary isn't enabled">
+              <VisitSummaryPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ── IWIS Competitor Features (0-6) ────────────────────────────────── */}
+      <Route
+        path="/therapy-rooms"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+            <FeatureGate feature="THERAPY_ROOM_MANAGEMENT" title="Therapy Room Management isn't enabled">
+              <TherapyRoomsPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/diet-prescriptions"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN_DOCTOR", "DOCTOR"]}>
+            <FeatureGate feature="DIET_PRESCRIPTION" title="Diet Prescriptions isn't enabled">
+              <DietPrescriptionsPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/diet-packages"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+            <FeatureGate feature="DIET_PRESCRIPTION" title="Diet Prescriptions isn't enabled">
+              <DietPackagesPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-diet"
+        element={
+          <ProtectedRoute allowedRoles={["PATIENT"]}>
+            <FeatureGate feature="DIET_PRESCRIPTION" title="Diet tracking isn't enabled">
+              <PatientDietPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/clinical-photos"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT"]}>
+            <FeatureGate feature="CLINICAL_PHOTOS" title="Clinical Photos isn't enabled">
+              <ClinicalPhotosPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/self-exam"
+        element={
+          <ProtectedRoute allowedRoles={["PATIENT"]}>
+            <FeatureGate feature="SELF_EXAM_PROTOCOL" title="Self-Examination isn't enabled">
+              <SelfExaminationKit />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/contact-clinics"
+        element={
+          <ProtectedRoute allowedRoles={["PATIENT"]}>
+            <ContactClinics />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/self-exam-review"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+            <FeatureGate feature="SELF_EXAM_PROTOCOL" title="Self-Examination isn't enabled">
+              <SelfExamReview />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/self-exam-protocols"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+            <FeatureGate feature="SELF_EXAM_PROTOCOL" title="Self-Examination isn't enabled">
+              <SelfExamProtocols />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/treatment-packages"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+            <FeatureGate feature="TREATMENT_PACKAGES" title="Treatment Packages isn't enabled">
+              <TreatmentPackagesPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/therapist-match"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+            <FeatureGate feature="THERAPIST_SKILL_MATCHING" title="Therapist Skill Matching isn't enabled">
+              <TherapistMatchPage />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/group-sessions"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT"]}>
+            <FeatureGate feature="GROUP_SESSIONS" title="Group Therapy Sessions isn't enabled">
+              <GroupSessionsPage />
+            </FeatureGate>
           </ProtectedRoute>
         }
       />
 
       <Route path="/verify-email" element={<Login />} />
       <Route path="/reset-password" element={<Login />} />
+
+      {/* Super Admin — platform-level; role-gated by ProtectedRoute */}
+      <Route
+        path="/super-admin"
+        element={
+          <ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>
+            <SuperAdminShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<SuperAdminDashboard />} />
+        <Route path="hospitals" element={<SuperAdminHospitalList />} />
+        <Route path="hospitals/new" element={<SuperAdminHospitalCreate />} />
+        <Route path="hospitals/:id" element={<SuperAdminHospitalDetail />} />
+        <Route path="feature-registry" element={<SuperAdminFeatureRegistry />} />
+        <Route path="triage" element={<SuperAdminTriageOversight />} />
+        <Route path="triage/routes" element={<SuperAdminSpecialtyRoutes />} />
+        <Route path="audit" element={<SuperAdminAudit />} />
+      </Route>
+
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT", "PHARMACIST"]}>
+            <ProfilePage />
+          </ProtectedRoute>
+        }
+      />
+
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

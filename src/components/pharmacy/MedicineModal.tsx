@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api-client";
 
 const medicineSchema = z.object({
@@ -47,15 +47,23 @@ export function MedicineModal({ isOpen, onClose, onSuccess, medicine }: Medicine
     const form = useForm<z.infer<typeof medicineSchema>>({
         resolver: zodResolver(medicineSchema),
         defaultValues: {
-            name: medicine?.name || "",
-            sku: medicine?.sku || "",
-            category: medicine?.category || "",
-            type: medicine?.type || "",
-            brand: medicine?.brand || "",
-            stock: medicine?.totalStock || 0,
-            price: medicine?.price || 0,
+            name: "", sku: "", category: "", type: "", brand: "", stock: 0, price: 0,
         },
     });
+
+    useEffect(() => {
+        if (!isOpen) return;
+        form.reset({
+            name: medicine?.name ?? "",
+            sku: medicine?.sku ?? "",
+            category: medicine?.category ?? "",
+            type: medicine?.type ?? "",
+            brand: medicine?.brand ?? "",
+            stock: medicine?.totalStock ?? 0,
+            price: medicine?.price ?? 0,
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, medicine?.id]);
 
     const onSubmit = async (values: z.infer<typeof medicineSchema>) => {
         setIsSubmitting(true);

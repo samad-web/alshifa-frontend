@@ -14,6 +14,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { apiClient } from "@/lib/api-client";
 
 export default function PrescriptionManagement() {
@@ -120,35 +121,31 @@ export default function PrescriptionManagement() {
                             onChange={(e) => setPrescriptionSearchQuery(e.target.value)}
                             className="flex-1 min-w-[160px] h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         />
-                        <Select value={prescriptionBranchFilter} onValueChange={setPrescriptionBranchFilter}>
-                            <SelectTrigger className="w-[160px] h-9 shrink-0">
-                                <SelectValue placeholder="All branches" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All branches</SelectItem>
-                                {branches.map((b) => (
-                                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <SearchableSelect
+                            value={prescriptionBranchFilter}
+                            onChange={setPrescriptionBranchFilter}
+                            placeholder="All branches"
+                            searchPlaceholder="Search branches…"
+                            className="w-[180px] shrink-0"
+                            items={[
+                                { value: "all", label: "All branches" },
+                                ...branches.map((b) => ({ value: b.id, label: b.name })),
+                            ]}
+                        />
                     </div>
                     <div className="flex items-center gap-4">
                         <div className="flex-1">
-                            <Select value={selectedPatient} onValueChange={setSelectedPatient}>
-                                <SelectTrigger className="w-full">
-                                    <SelectValue placeholder="Select a patient..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {filteredPatients.map((patient) => (
-                                        <SelectItem key={patient.id} value={patient.id}>
-                                            <div className="flex items-center gap-2">
-                                                <User className="w-4 h-4" />
-                                                <span>{patient.fullName || patient.email}</span>
-                                            </div>
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={selectedPatient}
+                                onChange={setSelectedPatient}
+                                placeholder="Select a patient..."
+                                searchPlaceholder="Search patients by name or email…"
+                                items={filteredPatients.map((patient: any) => ({
+                                    value: patient.id,
+                                    label: patient.fullName || patient.email || patient.id,
+                                    keywords: [patient.email || "", patient.phoneNumber || ""],
+                                }))}
+                            />
                         </div>
                         {selectedPatient && (
                             <Button onClick={() => setShowModal(true)} className="gap-2">
@@ -185,7 +182,10 @@ export default function PrescriptionManagement() {
                                 Loading prescriptions...
                             </div>
                         ) : (
-                            <PrescriptionList prescriptions={prescriptions} />
+                            <PrescriptionList
+                                prescriptions={prescriptions}
+                                onChange={handlePrescriptionAdded}
+                            />
                         )}
                     </Panel>
                 )}

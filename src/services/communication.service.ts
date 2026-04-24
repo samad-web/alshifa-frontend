@@ -6,14 +6,45 @@
 import apiClient from '@/lib/api-client';
 import type {
   AnnouncementEntry, HandoffNoteEntry,
-  PatientPortalDashboard, VisitSummaryEntry, Prescription
+  VisitSummaryEntry, Prescription
 } from '@/types';
+
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface PortalDocument {
+  id: string;
+  fileName: string;
+  fileUrl?: string;
+  fileType?: string;
+  category: string;
+  description?: string | null;
+  createdAt: string;
+}
+
+export interface PortalAppointment {
+  id: string;
+  date: string;
+  status: string;
+  consultationType: string;
+  consultationMode?: string;
+  meetingLink?: string | null;
+  doctor?: { id: string; fullName: string | null; user?: { name: string | null } } | null;
+  therapist?: { id: string; fullName: string | null; user?: { name: string | null } } | null;
+  branch?: { id: string; name: string } | null;
+  visitSummary?: { id: string; sentToPatient: boolean } | null;
+}
 
 export const communicationApi = {
   // ── Announcements (Feature 33) ────────────────────────────────────────────
 
   async createAnnouncement(data: {
-    branchId?: string; title: string; message: string;
+    /** Empty/omitted = broadcast to every branch. */
+    branchIds?: string[]; title: string; message: string;
     priority?: string; targetRoles?: string[]; isPinned?: boolean; expiresAt?: string;
   }): Promise<AnnouncementEntry> {
     const { data: result } = await apiClient.post<AnnouncementEntry>('/api/announcements', data);
@@ -36,6 +67,7 @@ export const communicationApi = {
 
   async updateAnnouncement(id: string, data: Partial<{
     title: string; message: string; priority: string; isPinned: boolean;
+    branchIds: string[]; targetRoles: string[]; expiresAt: string | null;
   }>): Promise<AnnouncementEntry> {
     const { data: result } = await apiClient.put<AnnouncementEntry>(`/api/announcements/${id}`, data);
     return result;
@@ -86,12 +118,28 @@ export const communicationApi = {
     return data;
   },
 
-  // ── Patient Portal (Feature 37) ───────────────────────────────────────────
+  async updateHandoffNote(id: string, data: {
+    summary?: string;
+    currentMedications?: { name: string; dosage: string; frequency: string }[];
+    activeConditions?: string[];
+    nextSteps?: string;
+    urgency?: string;
+    toClinicianId?: string | null;
+    toBranchId?: string | null;
+  }): Promise<HandoffNoteEntry> {
+    const { data: result } = await apiClient.patch<HandoffNoteEntry>(`/api/handoff/${id}`, data);
+    return result;
+  },
 
-  async getPortalDashboard(): Promise<PatientPortalDashboard> {
-    const { data } = await apiClient.get<PatientPortalDashboard>('/api/portal/dashboard');
+  async sendHandoffDraft(id: string): Promise<HandoffNoteEntry> {
+    const { data } = await apiClient.post<HandoffNoteEntry>(`/api/handoff/${id}/send`, {});
     return data;
   },
+
+  // ── Patient Portal (Feature 37) ───────────────────────────────────────────
+  // Note: getPortalDashboard() removed — superseded by EnhancedPatientDashboard
+  // (`/api/patient/dashboard/summary`) and the records-archive PatientPortal
+  // (which only calls getMyAppointmentHistory / getMyPrescriptions / getMyReports).
 
   async getMyPrescriptions(params?: { page?: number; limit?: number }): Promise<{ prescriptions: Prescription[]; total: number }> {
     type Shape = { prescriptions: Prescription[]; total: number } | { data: Prescription[]; pagination?: { total?: number } };
@@ -101,14 +149,50 @@ export const communicationApi = {
     return { prescriptions: list, total: data.pagination?.total ?? list.length };
   },
 
-  async getMyReports(): Promise<{ summaries: VisitSummaryEntry[]; documents: { id: string; fileName: string; category: string; createdAt: string }[] }> {
-    type Doc = { id: string; fileName: string; category: string; createdAt: string };
-    type Shape =
-      | { summaries: VisitSummaryEntry[]; documents: Doc[] }
-      | { visitSummaries: VisitSummaryEntry[]; documents: Doc[] };
-    const { data } = await apiClient.get<Shape>('/api/portal/reports');
-    if ('summaries' in data) return data;
-    return { summaries: data.visitSummaries ?? [], documents: data.documents ?? [] };
+  async getMyReports(params?: { page?: number; limit?: number }): Promise<{
+    summaries: { data: VisitSummaryEntry[]; pagination: PaginationInfo };
+    documents: { data: PortalDocument[]; pagination: PaginationInfo };
+  }> {
+    type NewShape = {
+      visitSummaries: { data: VisitSummaryEntry[]; pagination: PaginationInfo };
+      documents: { data: PortalDocument[]; pagination: PaginationInfo };
+    };
+    type LegacyShape = {
+      summaries?: VisitSummaryEntry[];
+      visitSummaries?: VisitSummaryEntry[];
+      documents?: PortalDocument[];
+    };
+    const { data } = await apiClient.get<NewShape | LegacyShape>('/api/portal/reports', params);
+    // New paginated shape
+    if (
+      data &&
+      typeof data === 'object' &&
+      'documents' in data &&
+      data.documents &&
+      typeof data.documents === 'object' &&
+      'data' in (data.documents as object)
+    ) {
+      const d = data as NewShape;
+      return { summaries: d.visitSummaries, documents: d.documents };
+    }
+    // Legacy flat-array fallback
+    const legacy = data as LegacyShape;
+    const sList = legacy.summaries ?? legacy.visitSummaries ?? [];
+    const dList = legacy.documents ?? [];
+    const empty: PaginationInfo = { page: 1, limit: sList.length || 1, total: sList.length, totalPages: 1 };
+    return {
+      summaries: { data: sList, pagination: { ...empty, total: sList.length } },
+      documents: { data: dList, pagination: { ...empty, total: dList.length, limit: dList.length || 1 } },
+    };
+  },
+
+  async getMyAppointmentHistory(params?: {
+    page?: number; limit?: number; status?: string;
+  }): Promise<{ data: PortalAppointment[]; pagination: PaginationInfo }> {
+    const { data } = await apiClient.get<{ data: PortalAppointment[]; pagination: PaginationInfo }>(
+      '/api/portal/appointments', params,
+    );
+    return data;
   },
 
   async getMyTreatmentProgress(): Promise<unknown> {

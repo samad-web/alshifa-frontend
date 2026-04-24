@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarIcon, Loader2, Video, MapPin, ChevronRight, ChevronLeft, User, Activity, X, Lock } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Video, MapPin, ChevronRight, ChevronLeft, Activity, Lock } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -16,39 +16,51 @@ import { TriageQuestionnaire } from "../triage/TriageQuestionnaire";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiClient } from "@/lib/api-client";
+import {
+    selfExamService,
+    type SelfExamBundle,
+    type PainZone,
+} from "@/services/selfExam.service";
+import { ClipboardList } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface ClientBookingModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSuccess?: () => void;
+    initialBranchId?: string;
 }
 
-type Step = "branch" | "type" | "clinician" | "triage" | "time" | "confirm";
+type Step = "branch" | "type" | "clinician" | "triage" | "self-exam-intro" | "time" | "confirm";
 
 export function ClientBookingModal({
     isOpen,
     onClose,
     onSuccess,
+    initialBranchId,
 }: ClientBookingModalProps) {
     const [loading, setLoading] = useState(false);
     const [step, setStep] = useState<Step>("branch");
     const [branches, setBranches] = useState<any[]>([]);
     const [doctors, setDoctors] = useState<any[]>([]);
-    const [therapists, setTherapists] = useState<any[]>([]);
     const [availableSlots, setAvailableSlots] = useState<any[]>([]);
     const [fetchingSlots, setFetchingSlots] = useState(false);
     const [triageSessionId, setTriageSessionId] = useState<string | null>(null);
     const [triageResult, setTriageResult] = useState<any>(null);
     const [suggestedSlot, setSuggestedSlot] = useState<string | null>(null);
-    // For COMBINED type: tracks whether we're picking the doctor or the therapist
-    const [clinicianSubStep, setClinicianSubStep] = useState<"doctor" | "therapist">("doctor");
+    // Self-exam kit preview — auto-created by the triage hook.
+    const [selfExamBundle, setSelfExamBundle] = useState<SelfExamBundle | null>(null);
+    const [loadingSelfExam, setLoadingSelfExam] = useState(false);
+    const navigate = useNavigate();
 
+    // Patient booking is doctor-only by design. If therapy is needed, the
+    // doctor arranges it after the consultation — not the patient through
+    // this flow. consultationType is frozen to "DOCTOR".
     const [formData, setFormData] = useState({
         branchId: "",
-        consultationType: "DOCTOR" as "DOCTOR" | "THERAPIST" | "COMBINED",
+        consultationType: "DOCTOR" as const,
         consultationMode: "OFFLINE" as "OFFLINE" | "ONLINE",
         doctorId: "",
-        therapistId: "",
         date: undefined as Date | undefined,
         slot: "",
         notes: "",
@@ -59,23 +71,21 @@ export function ClientBookingModal({
     useEffect(() => {
         if (isOpen) {
             fetchBranches();
-            setStep("branch");
+            setStep(initialBranchId ? "type" : "branch");
             setTriageSessionId(null);
             setTriageResult(null);
-            setClinicianSubStep("doctor");
             setFormData({
-                branchId: "",
+                branchId: initialBranchId ?? "",
                 consultationType: "DOCTOR",
                 consultationMode: "OFFLINE",
                 doctorId: "",
-                therapistId: "",
                 date: undefined,
                 slot: "",
                 notes: "",
             });
             setSuggestedSlot(null);
         }
-    }, [isOpen]);
+    }, [isOpen, initialBranchId]);
 
     // Fetch staff when entering the clinician step or when branchId changes while on it.
     // No longer depends on date/slot because clinician is now chosen BEFORE date selection.
@@ -86,10 +96,36 @@ export function ClientBookingModal({
     }, [formData.branchId, step]);
 
     useEffect(() => {
-        if (formData.date && (formData.doctorId || formData.therapistId)) {
+        if (formData.date && formData.doctorId) {
             fetchSlots();
         }
-    }, [formData.date, formData.doctorId, formData.therapistId]);
+    }, [formData.date, formData.doctorId]);
+
+    // Load the DRAFT self-exam submission created by the triage-submit hook.
+    // Fires once when the patient lands on the self-exam-intro step.
+    useEffect(() => {
+        if (step !== "self-exam-intro") return;
+        let cancelled = false;
+        setLoadingSelfExam(true);
+        (async () => {
+            try {
+                const list = await selfExamService.mine();
+                const draft = list.find((s) => s.status === "DRAFT");
+                if (cancelled || !draft) {
+                    if (!cancelled) setSelfExamBundle(null);
+                    return;
+                }
+                const bundle = await selfExamService.get(draft.id);
+                if (!cancelled) setSelfExamBundle(bundle);
+            } catch {
+                // Soft-fail: the intro step renders the "no tests needed" state.
+                if (!cancelled) setSelfExamBundle(null);
+            } finally {
+                if (!cancelled) setLoadingSelfExam(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [step]);
 
     const fetchBranches = async () => {
         try {
@@ -109,20 +145,12 @@ export function ClientBookingModal({
 
             const { data } = await apiClient.get<any>('/api/appointments/available-staff', params);
             setDoctors(data.doctors || []);
-            setTherapists(data.therapists || []);
 
-            // If currently selected doctor/therapist is no longer in the list, clear it
+            // If the currently-selected doctor is no longer in the list, clear it.
             if (formData.doctorId && !data.doctors.some((d: any) => d.id === formData.doctorId)) {
                 setFormData(prev => ({ ...prev, doctorId: "" }));
                 if (step === "confirm") {
                     toast.error("Selected doctor is no longer available for this time. Please choose another.");
-                    setStep("clinician");
-                }
-            }
-            if (formData.therapistId && !data.therapists.some((t: any) => t.id === formData.therapistId)) {
-                setFormData(prev => ({ ...prev, therapistId: "" }));
-                if (step === "confirm") {
-                    toast.error("Selected therapist is no longer available for this time. Please choose another.");
                     setStep("clinician");
                 }
             }
@@ -132,22 +160,14 @@ export function ClientBookingModal({
     };
 
     const fetchSlots = async () => {
-        if (!formData.date) return;
-
-        // Resolve which clinician's schedule to query
-        const clinicianId = formData.consultationType === "THERAPIST"
-            ? formData.therapistId
-            : formData.doctorId;
-
-        // Guard: backend returns 400 if clinicianId is falsy — skip silently
-        if (!clinicianId) return;
+        if (!formData.date || !formData.doctorId) return;
 
         setFetchingSlots(true);
         try {
             // Send as YYYY-MM-DD (no time / no timezone offset) so the backend always
             // queries the calendar date the user sees, regardless of the server's UTC offset.
             const dateParam = format(formData.date, "yyyy-MM-dd");
-            const { data: slots } = await apiClient.get<any[]>('/api/appointments/available-slots', { clinicianId, date: dateParam });
+            const { data: slots } = await apiClient.get<any[]>('/api/appointments/available-slots', { clinicianId: formData.doctorId, date: dateParam });
             setAvailableSlots(Array.isArray(slots) ? slots : []);
         } catch (error: any) {
             console.error("Failed to fetch slots:", error);
@@ -163,8 +183,8 @@ export function ClientBookingModal({
             toast.error("Please select a date and time slot");
             return;
         }
-        if (formData.consultationType === "COMBINED" && (!formData.doctorId || !formData.therapistId)) {
-            toast.error("Combined appointments require both a doctor and a therapist. Please go back and select both.");
+        if (!formData.doctorId) {
+            toast.error("Please choose a doctor before confirming.");
             return;
         }
 
@@ -178,8 +198,8 @@ export function ClientBookingModal({
             await apiClient.post('/api/appointments', {
                 consultationType: formData.consultationType,
                 consultationMode: formData.consultationMode,
-                doctorId: formData.doctorId || null,
-                therapistId: formData.therapistId || null,
+                doctorId: formData.doctorId,
+                therapistId: null,
                 date: appointmentDate.toISOString(),
                 notes: formData.notes,
                 triageSessionId: triageSessionId,
@@ -203,34 +223,25 @@ export function ClientBookingModal({
     const nextStep = () => {
         if (step === "branch") setStep("type");
         else if (step === "type") setStep("triage");
-        else if (step === "triage") setStep("clinician");  // pick clinician BEFORE date/time
+        else if (step === "triage") setStep("self-exam-intro");  // brief kit preview
+        else if (step === "self-exam-intro") setStep("clinician");
         else if (step === "clinician") setStep("time");    // slots fetched once clinician is known
         else if (step === "time") setStep("confirm");
     };
 
     const prevStep = () => {
-        if (step === "type") setStep("branch");
+        if (step === "type" && !initialBranchId) setStep("branch");
         else if (step === "triage") setStep("type");
+        else if (step === "self-exam-intro") setStep("triage");
         else if (step === "clinician") {
-            // For COMBINED, go back from therapist pick → doctor pick before leaving clinician step
-            if (formData.consultationType === "COMBINED" && clinicianSubStep === "therapist") {
-                setClinicianSubStep("doctor");
-                setFormData(prev => ({ ...prev, therapistId: "" }));
-            } else {
-                setStep("triage");
-                setClinicianSubStep("doctor");
-                setFormData(prev => ({ ...prev, doctorId: "", therapistId: "" }));
-            }
+            setStep("self-exam-intro");
+            setFormData(prev => ({ ...prev, doctorId: "" }));
         }
         else if (step === "time") setStep("clinician");
         else if (step === "confirm") setStep("time");
     };
 
     const selectedDoctor = doctors.find(d => d.id === formData.doctorId);
-    const selectedTherapist = therapists.find(t => t.id === formData.therapistId);
-    // Whether the clinician step is currently showing therapists
-    const showingTherapists = formData.consultationType === "THERAPIST" ||
-        (formData.consultationType === "COMBINED" && clinicianSubStep === "therapist");
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -286,56 +297,38 @@ export function ClientBookingModal({
                     )}
                     {step === "type" && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                            <Label className="text-base font-bold text-foreground">What type of consultation do you need?</Label>
-                            <div className="grid gap-2.5">
-                                {[
-                                    { id: "DOCTOR", label: "Consult a Doctor", icon: User, desc: "Primary care and medical consultation" },
-                                    { id: "THERAPIST", label: "Talk to a Therapist", icon: Video, desc: "Emotional wellness and therapy sessions" },
-                                    { id: "COMBINED", label: "Combined Care", icon: ChevronRight, desc: "Both Doctor and Therapist (Recommended)" }
-                                ].map((t) => (
-                                    <button
-                                        key={t.id}
-                                        onClick={() => {
-                                            setFormData({ ...formData, consultationType: t.id as any });
-                                            nextStep();
-                                        }}
-                                        className={cn(
-                                            "flex items-center gap-3.5 p-3.5 rounded-lg border transition-all hover:border-primary/50 hover:bg-primary/5",
-                                            formData.consultationType === t.id ? "border-primary bg-primary/5 shadow-sm" : "border-border"
-                                        )}
-                                    >
-                                        <div className="p-2 bg-primary/10 rounded-md text-primary">
-                                            <t.icon className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-bold">{t.label}</p>
-                                            <p className="text-[11px] text-muted-foreground">{t.desc}</p>
-                                        </div>
-                                    </button>
-                                ))}
+                            <Label className="text-base font-bold text-foreground">How would you like to meet your doctor?</Label>
+                            <p className="text-[11px] text-muted-foreground -mt-2">
+                                Patients book a doctor. If therapy is needed, the doctor will arrange it after your consultation.
+                            </p>
+                            <div className="flex gap-2.5">
+                                <button
+                                    onClick={() => setFormData({ ...formData, consultationMode: "OFFLINE" })}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center gap-2 p-4 rounded-lg border text-sm font-medium transition-all",
+                                        formData.consultationMode === "OFFLINE" ? "bg-primary/5 border-primary text-primary shadow-sm" : "bg-background border-border hover:bg-muted"
+                                    )}
+                                >
+                                    <MapPin className="w-5 h-5" />
+                                    <span className="font-bold">In-person</span>
+                                    <span className="text-[10px] text-muted-foreground text-center">Visit the clinic</span>
+                                </button>
+                                <button
+                                    onClick={() => setFormData({ ...formData, consultationMode: "ONLINE" })}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center gap-2 p-4 rounded-lg border text-sm font-medium transition-all",
+                                        formData.consultationMode === "ONLINE" ? "bg-primary/5 border-primary text-primary shadow-sm" : "bg-background border-border hover:bg-muted"
+                                    )}
+                                >
+                                    <Video className="w-5 h-5" />
+                                    <span className="font-bold">Online</span>
+                                    <span className="text-[10px] text-muted-foreground text-center">Video consultation</span>
+                                </button>
                             </div>
-                            <div className="pt-4 border-t border-border/50">
-                                <Label className="block mb-2.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">Preferred Mode</Label>
-                                <div className="flex gap-2.5">
-                                    <button
-                                        onClick={() => setFormData({ ...formData, consultationMode: "OFFLINE" })}
-                                        className={cn(
-                                            "flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border text-sm font-medium transition-all",
-                                            formData.consultationMode === "OFFLINE" ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-background border-border hover:bg-muted"
-                                        )}
-                                    >
-                                        <MapPin className="w-4 h-4" /> In-person
-                                    </button>
-                                    <button
-                                        onClick={() => setFormData({ ...formData, consultationMode: "ONLINE" })}
-                                        className={cn(
-                                            "flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border text-sm font-medium transition-all",
-                                            formData.consultationMode === "ONLINE" ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-background border-border hover:bg-muted"
-                                        )}
-                                    >
-                                        <Video className="w-4 h-4" /> Online
-                                    </button>
-                                </div>
+                            <div className="flex justify-end pt-2">
+                                <Button onClick={nextStep}>
+                                    Continue <ChevronRight className="w-4 h-4 ml-1" />
+                                </Button>
                             </div>
                         </div>
                     )}
@@ -351,6 +344,21 @@ export function ClientBookingModal({
                                 onCancel={onClose}
                             />
                         </div>
+                    )}
+
+                    {step === "self-exam-intro" && (
+                        <SelfExamIntroStep
+                            bundle={selfExamBundle}
+                            loading={loadingSelfExam}
+                            onOpenKit={() => {
+                                // Close the Radix dialog first, then navigate on the next tick.
+                                // Navigating synchronously while the dialog is still closing
+                                // leaves `pointer-events: none` on body → stuck page.
+                                onClose();
+                                setTimeout(() => navigate("/self-exam"), 0);
+                            }}
+                            onLater={nextStep}
+                        />
                     )}
 
                     {step === "clinician" && (
@@ -370,50 +378,23 @@ export function ClientBookingModal({
                                 </div>
                             )}
 
-                            {/* COMBINED sub-step progress indicator */}
-                            {formData.consultationType === "COMBINED" && (
-                                <div className="flex items-center gap-2 text-[11px]">
-                                    <div className={cn(
-                                        "px-2.5 py-1 rounded-full font-bold border transition-colors",
-                                        clinicianSubStep === "doctor"
-                                            ? "bg-primary text-primary-foreground border-primary"
-                                            : "bg-primary/10 text-primary border-primary/30"
-                                    )}>
-                                        {formData.doctorId ? "✓ Doctor" : "1. Doctor"}
-                                    </div>
-                                    <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                                    <div className={cn(
-                                        "px-2.5 py-1 rounded-full font-bold border transition-colors",
-                                        clinicianSubStep === "therapist"
-                                            ? "bg-primary text-primary-foreground border-primary"
-                                            : "bg-muted text-muted-foreground border-border"
-                                    )}>
-                                        2. Therapist
-                                    </div>
-                                </div>
-                            )}
-
                             <Label className="text-base font-bold text-foreground">
-                                {triageResult?.classification === 'Escalation Required' && !showingTherapists
+                                {triageResult?.classification === 'Escalation Required'
                                     ? "Consult with a Senior Specialist"
-                                    : showingTherapists
-                                        ? "Choose your Therapist"
-                                        : "Choose your Doctor"}
+                                    : "Choose your Doctor"}
                             </Label>
 
                             <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1 customize-scrollbar">
-                                {(showingTherapists ? therapists : doctors)
+                                {doctors
                                     .filter(staff => {
-                                        // Therapist selection doesn't use the doctor-specific triage escalation filter
-                                        if (showingTherapists) return true;
                                         if (!triageResult) return true;
 
-                                        // 1. Escalation enforcement (doctors only)
+                                        // Escalation enforcement
                                         if (triageResult.classification === 'Escalation Required') {
                                             return staff.user?.role === 'ADMIN_DOCTOR';
                                         }
 
-                                        // 2. Specialist preference
+                                        // Specialist preference
                                         if (triageResult.classification === 'Specialist Required' && triageResult.suggestedSpecialty) {
                                             return staff.specialization?.toLowerCase() === triageResult.suggestedSpecialty.toLowerCase() ||
                                                 staff.specialization?.toLowerCase().includes(triageResult.suggestedSpecialty.toLowerCase());
@@ -425,27 +406,12 @@ export function ClientBookingModal({
                                         <button
                                             key={staff.id}
                                             onClick={() => {
-                                                if (formData.consultationType === "THERAPIST") {
-                                                    setFormData({ ...formData, therapistId: staff.id });
-                                                    nextStep();
-                                                } else if (formData.consultationType === "COMBINED") {
-                                                    if (clinicianSubStep === "doctor") {
-                                                        // First pick doctor, then stay on clinician to pick therapist
-                                                        setFormData({ ...formData, doctorId: staff.id });
-                                                        setClinicianSubStep("therapist");
-                                                    } else {
-                                                        // Second pick therapist, then advance to time
-                                                        setFormData({ ...formData, therapistId: staff.id });
-                                                        nextStep();
-                                                    }
-                                                } else {
-                                                    setFormData({ ...formData, doctorId: staff.id });
-                                                    nextStep();
-                                                }
+                                                setFormData({ ...formData, doctorId: staff.id });
+                                                nextStep();
                                             }}
                                             className={cn(
                                                 "w-full flex items-center justify-between p-3.5 rounded-lg border transition-all hover:border-primary/50",
-                                                (showingTherapists ? formData.therapistId === staff.id : formData.doctorId === staff.id)
+                                                formData.doctorId === staff.id
                                                     ? "border-primary bg-primary/5 shadow-sm" : "border-border"
                                             )}
                                         >
@@ -456,7 +422,7 @@ export function ClientBookingModal({
                                                 <div>
                                                     <p className="text-sm font-bold">{staff.fullName}</p>
                                                     <p className="text-[11px] text-muted-foreground">
-                                                        {staff.specialization || (staff.user?.role === 'ADMIN_DOCTOR' ? 'Senior Consultant' : (showingTherapists ? "Wellness Specialist" : "Medical Practitioner"))}
+                                                        {staff.specialization || (staff.user?.role === 'ADMIN_DOCTOR' ? 'Senior Consultant' : 'Medical Practitioner')}
                                                     </p>
                                                 </div>
                                             </div>
@@ -467,9 +433,7 @@ export function ClientBookingModal({
 
                             <Button variant="ghost" size="sm" className="w-full gap-2 text-muted-foreground" onClick={prevStep}>
                                 <ChevronLeft className="w-3.5 h-3.5" />
-                                {formData.consultationType === "COMBINED" && clinicianSubStep === "therapist"
-                                    ? "Back to Doctor selection"
-                                    : "Back to assessment"}
+                                Back to assessment
                             </Button>
                         </div>
                     )}
@@ -567,15 +531,11 @@ export function ClientBookingModal({
                             <div className="bg-muted/30 p-4 rounded-lg border border-border/50 space-y-3">
                                 <div className="flex justify-between items-center border-b border-border/40 pb-2">
                                     <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Consultation</span>
-                                    <span className="text-sm font-bold">{formData.consultationType} ({formData.consultationMode})</span>
+                                    <span className="text-sm font-bold">Doctor ({formData.consultationMode === "ONLINE" ? "Online" : "In-person"})</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/40 pb-2">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Clinician</span>
-                                    <span className="text-sm font-bold">
-                                        {formData.consultationType === "COMBINED"
-                                            ? `${selectedDoctor?.fullName || "—"} & ${selectedTherapist?.fullName || "—"}`
-                                            : selectedDoctor?.fullName || selectedTherapist?.fullName}
-                                    </span>
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Doctor</span>
+                                    <span className="text-sm font-bold">{selectedDoctor?.fullName || "—"}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-border/40 pb-2">
                                     <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Date</span>
@@ -625,6 +585,16 @@ export function ClientBookingModal({
                                 />
                             </div>
 
+                            {selfExamBundle && selfExamBundle.submission.painZones.length > 0 && (
+                                <div className="p-3 rounded-lg border bg-primary/5 border-primary/20 flex items-start gap-2">
+                                    <ClipboardList className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                                    <div className="text-[11px] leading-relaxed text-primary">
+                                        <span className="font-bold">Your pre-consultation kit is ready.</span>{" "}
+                                        Please complete and submit it before your appointment so your doctor has full context.
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="flex gap-3">
                                 <Button variant="ghost" className="flex-1 text-xs font-bold" onClick={prevStep} disabled={loading}>
                                     Back
@@ -642,5 +612,137 @@ export function ClientBookingModal({
                 </div>
             </DialogContent>
         </Dialog>
+    );
+}
+
+// ── Self-Exam Intro (kit preview) step ────────────────────────────────
+// Shown right after the triage step. Explains that the 9-zone body-map
+// selection yields a tailored, 3-day test list the Vaidya will see before
+// the consultation. Deliberately non-blocking — patients can book now and
+// complete the tests in the days leading up to the appointment.
+
+const ZONE_LABELS: Record<PainZone, string> = {
+    HEAD_MIGRAINE: "Head / Migraine",
+    NECK: "Neck",
+    SHOULDER: "Shoulder",
+    CHEST: "Chest",
+    LOWER_BACK: "Lower Back",
+    ABDOMEN: "Abdomen",
+    KNEE: "Knee",
+    WRIST_HAND: "Wrist & Hand",
+    GENERALISED_MUSCLE: "Generalised Muscle",
+};
+
+function SelfExamIntroStep({
+    bundle,
+    loading,
+    onOpenKit,
+    onLater,
+}: {
+    bundle: SelfExamBundle | null;
+    loading: boolean;
+    onOpenKit: () => void;
+    onLater: () => void;
+}) {
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Preparing your pre-consultation tests…
+            </div>
+        );
+    }
+
+    // No DRAFT came back — either the triage covered regions outside the 9
+    // supported zones, or the auto-init hook failed. Render a soft message
+    // and let the patient continue.
+    if (!bundle || bundle.submission.painZones.length === 0) {
+        return (
+            <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
+                <div className="p-4 rounded-lg border bg-muted/40 text-sm text-muted-foreground">
+                    No pre-consultation tests are required for the area you
+                    selected. Continue to pick a clinician.
+                </div>
+                <div className="flex justify-end">
+                    <Button onClick={onLater}>
+                        Continue <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    // Group checklist items by zone for the summary.
+    const perZone = new Map<PainZone, number>();
+    for (const item of bundle.checklist) {
+        if (!item.zone) continue;
+        perZone.set(item.zone, (perZone.get(item.zone) ?? 0) + 1);
+    }
+    // Has the constitution quiz been rolled in?
+    const hasConstitution = bundle.checklist.some((i) => i.type === "CONSTITUTION");
+
+    return (
+        <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
+            <div className="p-3 rounded-lg border bg-primary/5 border-primary/20 text-[11px] leading-relaxed text-primary">
+                <p className="font-bold flex items-center gap-1.5 mb-1 uppercase">
+                    <ClipboardList className="w-3 h-3" />
+                    Pre-consultation kit
+                </p>
+                <p>
+                    Based on the areas you marked, your Vaidya needs a few
+                    short observations before your appointment (tongue photos,
+                    stool texture, urine, posture). Some are 3-day logs —
+                    please start them now and submit before your visit.
+                </p>
+            </div>
+
+            <div className="space-y-2">
+                {Array.from(perZone.entries()).map(([zone, count]) => (
+                    <div
+                        key={zone}
+                        className="flex items-center gap-3 p-3 rounded-lg border bg-background"
+                    >
+                        <div className="shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            <ClipboardList className="w-4 h-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="text-sm font-semibold">{ZONE_LABELS[zone]}</div>
+                            <div className="text-xs text-muted-foreground">
+                                {count} test{count === 1 ? "" : "s"} — includes 3-day logs where applicable
+                            </div>
+                        </div>
+                    </div>
+                ))}
+                {hasConstitution && (
+                    <div className="flex items-center gap-3 p-3 rounded-lg border bg-background">
+                        <div className="shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            <Activity className="w-4 h-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="text-sm font-semibold">Constitution quiz</div>
+                            <div className="text-xs text-muted-foreground">
+                                Prakriti · Satva · Agni — one-time, ~2 minutes
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="text-[11px] text-muted-foreground leading-relaxed px-1">
+                Tests will be sent to the doctor you book with, attached to
+                your appointment. You can complete them over the next few
+                days — no rush.
+            </div>
+
+            <div className="flex justify-between gap-2 pt-2">
+                <Button variant="outline" onClick={onLater}>
+                    I'll do it later <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+                <Button onClick={onOpenKit}>
+                    <ClipboardList className="w-4 h-4 mr-2" />
+                    Open kit now
+                </Button>
+            </div>
+        </div>
     );
 }

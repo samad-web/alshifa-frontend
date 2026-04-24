@@ -5,6 +5,7 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, Trash2, AlertTriangle, Loader2, Pencil, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -275,17 +276,17 @@ export default function ManageUsers() {
                                         onChange={(e) => setDoctorSearch(e.target.value)}
                                     />
                                 </div>
-                                <Select value={doctorBranchFilter} onValueChange={setDoctorBranchFilter}>
-                                    <SelectTrigger className="w-[180px] shrink-0">
-                                        <SelectValue placeholder="All branches" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All branches</SelectItem>
-                                        {branches.map((b) => (
-                                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={doctorBranchFilter}
+                                    onChange={setDoctorBranchFilter}
+                                    placeholder="All branches"
+                                    searchPlaceholder="Search branches…"
+                                    className="w-[200px] shrink-0"
+                                    items={[
+                                        { value: "all", label: "All branches" },
+                                        ...branches.map((b) => ({ value: b.id, label: b.name })),
+                                    ]}
+                                />
                             </div>
                             {/* Mobile Card View */}
                             <div className="grid grid-cols-1 gap-4 md:hidden">
@@ -426,17 +427,17 @@ export default function ManageUsers() {
                                         onChange={(e) => setTherapistSearch(e.target.value)}
                                     />
                                 </div>
-                                <Select value={therapistBranchFilter} onValueChange={setTherapistBranchFilter}>
-                                    <SelectTrigger className="w-[180px] shrink-0">
-                                        <SelectValue placeholder="All branches" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All branches</SelectItem>
-                                        {branches.map((b) => (
-                                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={therapistBranchFilter}
+                                    onChange={setTherapistBranchFilter}
+                                    placeholder="All branches"
+                                    searchPlaceholder="Search branches…"
+                                    className="w-[200px] shrink-0"
+                                    items={[
+                                        { value: "all", label: "All branches" },
+                                        ...branches.map((b) => ({ value: b.id, label: b.name })),
+                                    ]}
+                                />
                             </div>
                             {/* Mobile Card View */}
                             <div className="grid grid-cols-1 gap-4 md:hidden">
@@ -577,17 +578,17 @@ export default function ManageUsers() {
                                         onChange={(e) => setPatientSearch(e.target.value)}
                                     />
                                 </div>
-                                <Select value={patientBranchFilter} onValueChange={setPatientBranchFilter}>
-                                    <SelectTrigger className="w-[180px] shrink-0">
-                                        <SelectValue placeholder="All branches" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All branches</SelectItem>
-                                        {branches.map((b) => (
-                                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={patientBranchFilter}
+                                    onChange={setPatientBranchFilter}
+                                    placeholder="All branches"
+                                    searchPlaceholder="Search branches…"
+                                    className="w-[200px] shrink-0"
+                                    items={[
+                                        { value: "all", label: "All branches" },
+                                        ...branches.map((b) => ({ value: b.id, label: b.name })),
+                                    ]}
+                                />
                             </div>
                             {/* Mobile Card View */}
                             <div className="grid grid-cols-1 gap-4 md:hidden">

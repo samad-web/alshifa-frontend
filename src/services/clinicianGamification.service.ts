@@ -1,12 +1,12 @@
 /**
  * Clinician Gamification API service — XP, seasonal challenges,
- * team quests, reward store, mentor sessions, achievement showcase.
+ * reward store, mentor sessions, achievement showcase.
  */
 
 import apiClient from '@/lib/api-client';
 import type {
   ClinicianXPProfile, XPTransaction, XPLeaderboardEntry,
-  SeasonalChallengeEntry, TeamQuestEntry, AchievementShowcase,
+  SeasonalChallengeEntry, AchievementShowcase,
   RewardItem, RewardRedemption, MentorSessionEntry, MentorStats
 } from '@/types';
 
@@ -46,26 +46,6 @@ export const clinicianGamificationApi = {
 
   async getSeasonalChallengeHistory(params?: { page?: number; limit?: number }): Promise<SeasonalChallengeEntry[]> {
     const { data } = await apiClient.get<SeasonalChallengeEntry[]>('/api/clinician-gamification/seasonal-challenges/history', params);
-    return data;
-  },
-
-  // ── Team Quests (Feature 16) ──────────────────────────────────────────────
-
-  async createTeamQuest(payload: {
-    branchId: string; title: string; description: string; icon?: string;
-    metric: string; target: number; startDate: string; endDate: string; rewardXP?: number;
-  }): Promise<TeamQuestEntry> {
-    const { data } = await apiClient.post<TeamQuestEntry>('/api/clinician-gamification/team-quests', payload);
-    return data;
-  },
-
-  async getActiveTeamQuests(): Promise<TeamQuestEntry[]> {
-    const { data } = await apiClient.get<TeamQuestEntry[]>('/api/clinician-gamification/team-quests');
-    return data;
-  },
-
-  async getTeamQuestHistory(params?: { page?: number; limit?: number }): Promise<TeamQuestEntry[]> {
-    const { data } = await apiClient.get<TeamQuestEntry[]>('/api/clinician-gamification/team-quests/history', params);
     return data;
   },
 

@@ -22,8 +22,10 @@ export const operationsApi = {
   },
 
   async getSharingRequests(params?: { branchId?: string; status?: string }): Promise<ResourceSharingEntry[]> {
-    const { data } = await apiClient.get<ResourceSharingEntry[]>('/api/operations/resource-sharing', params);
-    return data;
+    // Backend returns { data, total, page, limit, totalPages } — unwrap the list.
+    const { data } = await apiClient.get<ResourceSharingEntry[] | { data: ResourceSharingEntry[] }>('/api/operations/resource-sharing', params);
+    if (Array.isArray(data)) return data;
+    return (data as { data?: ResourceSharingEntry[] })?.data ?? [];
   },
 
   async getSharedStaffToday(branchId: string): Promise<ResourceSharingEntry[]> {
@@ -38,6 +40,17 @@ export const operationsApi = {
 
   async rejectSharingRequest(id: string): Promise<ResourceSharingEntry> {
     const { data } = await apiClient.patch<ResourceSharingEntry>(`/api/operations/resource-sharing/${id}/reject`, {});
+    return data;
+  },
+
+  // Pre-flight availability check — used by the create-sharing form so the
+  // admin sees "on leave" / "blocked" warnings before submitting.
+  async checkStaffAvailability(userId: string, params: { date: string; startTime: string; endTime: string }):
+      Promise<{ available: boolean; reason?: string }> {
+    const { data } = await apiClient.get<{ available: boolean; reason?: string }>(
+      `/api/availability/user/${userId}/check`,
+      params,
+    );
     return data;
   },
 

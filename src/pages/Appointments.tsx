@@ -13,12 +13,35 @@ import { apiClient } from "@/lib/api-client";
 import { AppointmentsSkeleton } from "@/components/ui/page-skeletons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageTransition } from "@/components/ui/page-transition";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { GroupedByBranch } from "@/components/common/GroupedByBranch";
+
+function appointmentBranchId(a: any): string | null {
+    return a?.branchId
+        ?? a?.patient?.user?.branchId
+        ?? a?.patient?.branchId
+        ?? a?.doctor?.user?.branchId
+        ?? a?.doctor?.branchId
+        ?? a?.therapist?.user?.branchId
+        ?? a?.therapist?.branchId
+        ?? null;
+}
+function appointmentBranchName(a: any): string | null {
+    return a?.branch?.name
+        ?? a?.patient?.user?.branch?.name
+        ?? a?.patient?.branch?.name
+        ?? a?.doctor?.branch?.name
+        ?? a?.therapist?.branch?.name
+        ?? null;
+}
 
 type AppointmentStatus = "ALL" | "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED";
 
 export default function Appointments() {
     const { role } = useAuth();
     const { addNotification } = useNotifications();
+    const { isAll, branchIdParam } = useBranchScope();
+    const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
     const [appointments, setAppointments] = useState<any[]>([]);
     const [pagination, setPagination] = useState<any>({ total: 0, page: 1, limit: 20, totalPages: 0 });
     const [loading, setLoading] = useState(true);
@@ -124,7 +147,10 @@ export default function Appointments() {
     const isDatePassed = (apt: any) => new Date(apt.date) < now;
     const isActiveStatus = (apt: any) => ["PENDING", "ACCEPTED", "CONFIRMED", "SCHEDULED", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status);
 
-    const filteredAppointments = appointments.filter((apt) => {
+    const branchScopedAppointments = branchIdParam
+        ? appointments.filter((a) => appointmentBranchId(a) === branchIdParam)
+        : appointments;
+    const filteredAppointments = branchScopedAppointments.filter((apt) => {
         if (activeTab === "ALL") return true;
         if (activeTab === "PENDING") {
             return ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status) && !isDatePassed(apt);
@@ -143,17 +169,17 @@ export default function Appointments() {
     });
 
     const getTabCount = (status: AppointmentStatus) => {
-        if (status === "ALL") return appointments.length;
+        if (status === "ALL") return branchScopedAppointments.length;
         if (status === "PENDING") {
-            return appointments.filter((apt) => ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status) && !isDatePassed(apt)).length;
+            return branchScopedAppointments.filter((apt) => ["PENDING", "PENDING_THERAPIST_APPROVAL", "PENDING_DOCTOR_APPROVAL"].includes(apt.status) && !isDatePassed(apt)).length;
         }
         if (status === "CONFIRMED") {
-            return appointments.filter((apt) => ["CONFIRMED", "ACCEPTED", "SCHEDULED"].includes(apt.status) && !isDatePassed(apt)).length;
+            return branchScopedAppointments.filter((apt) => ["CONFIRMED", "ACCEPTED", "SCHEDULED"].includes(apt.status) && !isDatePassed(apt)).length;
         }
         if (status === "COMPLETED") {
-            return appointments.filter((apt) => apt.status === "COMPLETED" || apt.status === "NO_SHOW" || (isActiveStatus(apt) && isDatePassed(apt))).length;
+            return branchScopedAppointments.filter((apt) => apt.status === "COMPLETED" || apt.status === "NO_SHOW" || (isActiveStatus(apt) && isDatePassed(apt))).length;
         }
-        return appointments.filter((apt) => apt.status === status).length;
+        return branchScopedAppointments.filter((apt) => apt.status === status).length;
     };
 
     return (
@@ -220,6 +246,23 @@ export default function Appointments() {
                                     variant="appointments"
                                     title={`No ${activeTab === "ALL" ? "" : activeTab.toLowerCase()} appointments`}
                                     description="Your schedule is clear. New appointments will appear here when booked."
+                                />
+                            ) : isAdmin && isAll ? (
+                                <GroupedByBranch
+                                    items={filteredAppointments}
+                                    getBranchId={appointmentBranchId}
+                                    getBranchName={appointmentBranchName}
+                                    renderItem={(apt) => (
+                                        <AppointmentList
+                                            appointments={[apt]}
+                                            onEdit={canApprove ? handleEdit : undefined}
+                                            onCancel={handleCancel}
+                                            onApprove={canApprove ? handleApprove : undefined}
+                                            onReject={canApprove ? handleReject : undefined}
+                                            showPatientName={true}
+                                            emptyMessage=""
+                                        />
+                                    )}
                                 />
                             ) : (
                                 <AppointmentList

@@ -30,6 +30,12 @@ interface ChatWindowProps {
     header?: React.ReactNode;
 }
 
+interface MessagesPage {
+    messages: Message[];
+    hasMore: boolean;
+    nextCursor: string | null;
+}
+
 export function ChatWindow({ conversationId, className, header }: ChatWindowProps) {
     const { t } = useTranslation();
     const { socket } = useWebSocket();
@@ -78,8 +84,8 @@ export function ChatWindow({ conversationId, className, header }: ChatWindowProp
         setError(null);
         try {
             console.log("[ChatWindow] Fetching messages for:", id);
-            const { data } = await apiClient.get<Message[]>(`/api/chat/messages/${id}`);
-            setMessages(data);
+            const { data } = await apiClient.get<MessagesPage>(`/api/chat/messages/${id}`);
+            setMessages(data.messages);
         } catch (err: any) {
             console.error("[ChatWindow] Network error:", err);
             setError(err?.message || "Connection error. Please try again.");

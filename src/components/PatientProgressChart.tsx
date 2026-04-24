@@ -15,17 +15,25 @@ interface PatientProgress {
   doctorName: string;
 }
 
-export function PatientProgressChart() {
+interface PatientProgressChartProps {
+  branchId?: string;
+}
+
+export function PatientProgressChart({ branchId }: PatientProgressChartProps = {}) {
   const [data, setData] = useState<PatientProgress[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     apiClient
-      .get<{ data: PatientProgress[] }>("/api/reports/patient-progress")
+      .get<{ data: PatientProgress[] }>(
+        "/api/reports/patient-progress",
+        branchId ? { branchId } : undefined,
+      )
       .then(({ data: result }) => setData(result.data))
       .catch(() => toast.error("Failed to load patient progress data"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [branchId]);
 
   if (loading) {
     return (

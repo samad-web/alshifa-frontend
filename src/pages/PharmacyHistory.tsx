@@ -6,20 +6,50 @@ import { Panel } from "@/components/ui/panel";
 import { History, Search, Eye } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { GroupedByBranch } from "@/components/common/GroupedByBranch";
+
+function dispenseBranchId(d: any): string | null {
+    return d?.branchId
+        ?? d?.branch?.id
+        ?? d?.patient?.user?.branchId
+        ?? d?.patient?.branchId
+        ?? d?.dispenser?.branchId
+        ?? null;
+}
+function dispenseBranchName(d: any): string | null {
+    return d?.branch?.name
+        ?? d?.patient?.user?.branch?.name
+        ?? d?.patient?.branch?.name
+        ?? d?.dispenser?.branch?.name
+        ?? null;
+}
 
 export default function PharmacyHistory() {
+    const { role } = useAuth();
+    const { isAll, branchIdParam } = useBranchScope();
+    const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
     const [dispenses, setDispenses] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
 
     useEffect(() => {
         async function fetchHistory() {
+            setLoading(true);
             try {
-                const res = await fetch("/api/pharmacy/dispenses", { credentials: "include" });
-                if (res.ok) {
-                    const data = await res.json();
-                    setDispenses(data);
-                }
+                const { data } = await apiClient.get<any>(
+                    "/api/pharmacy/dispenses",
+                    branchIdParam ? { branchId: branchIdParam } : undefined
+                );
+                // Backend returns { data, total, page, ... }; some older paths returned a plain array
+                const rows = Array.isArray(data)
+                    ? data
+                    : Array.isArray(data?.data) ? data.data
+                    : Array.isArray(data?.dispenses) ? data.dispenses
+                    : [];
+                setDispenses(rows);
             } catch (error) {
                 console.error("Failed to fetch pharmacy history:", error);
             } finally {
@@ -27,9 +57,14 @@ export default function PharmacyHistory() {
             }
         }
         fetchHistory();
-    }, []);
+    }, [branchIdParam]);
 
-    const filteredHistory = dispenses.filter(d =>
+    // Client-side safety filter: if backend didn't narrow, still restrict to selected branch
+    const scopedDispenses = branchIdParam
+        ? dispenses.filter((d) => dispenseBranchId(d) === branchIdParam)
+        : dispenses;
+
+    const filteredHistory = scopedDispenses.filter(d =>
         d.patient?.fullName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         d.id.includes(searchTerm)
     );
@@ -53,6 +88,44 @@ export default function PharmacyHistory() {
                     />
                 </div>
 
+                {isAdmin && isAll && !loading && filteredHistory.length > 0 ? (
+                    <Panel title="All Transactions" subtitle="Grouped by branch">
+                        <GroupedByBranch
+                            items={filteredHistory}
+                            getBranchId={dispenseBranchId}
+                            getBranchName={dispenseBranchName}
+                            renderItem={(d) => (
+                                <div className="p-4 rounded-xl border border-border/50 bg-card space-y-4">
+                                    <div className="flex justify-between items-start">
+                                        <div className="space-y-1">
+                                            <p className="text-[10px] text-muted-foreground font-black uppercase tracking-wider">
+                                                {format(new Date(d.createdAt), "MMM dd, yyyy HH:mm")}
+                                            </p>
+                                            <h4 className="font-bold text-foreground">{d.patient?.fullName || "Unknown"}</h4>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-sm font-bold text-accent">₹{d.totalAmount}</p>
+                                            <p className="text-[10px] text-muted-foreground">{d.id.slice(0, 8)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <p className="text-[10px] text-muted-foreground font-black uppercase">Items</p>
+                                        <div className="flex flex-wrap gap-1">
+                                            {d.items.map((item: any, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 rounded-md bg-secondary text-[10px] font-medium border border-border/50">
+                                                    {item.medicine.name} (x{item.quantity})
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="pt-3 border-t border-border/30 flex justify-between items-center">
+                                        <span className="text-[10px] text-muted-foreground">By: {d.dispenser?.email?.split('@')[0]}</span>
+                                    </div>
+                                </div>
+                            )}
+                        />
+                    </Panel>
+                ) : (
                 <Panel title="All Transactions" subtitle="Sorted by most recent">
                     {/* Mobile Card View */}
                     <div className="grid grid-cols-1 gap-4 md:hidden">
@@ -140,6 +213,7 @@ export default function PharmacyHistory() {
                         </table>
                     </div>
                 </Panel>
+                )}
             </div>
         </AppLayout>
     );

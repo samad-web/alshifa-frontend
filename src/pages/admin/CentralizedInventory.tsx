@@ -22,6 +22,7 @@ import {
   Loader2, Package, ArrowRightLeft, AlertTriangle, CheckCircle, PackageCheck,
   Pill, Warehouse,
 } from "lucide-react";
+import { useBranchScope } from "@/hooks/useBranchScope";
 
 const transferStatusBadge: Record<TransferStatus, { className: string; label: string }> = {
   PENDING: { className: "bg-yellow-100 text-yellow-800 border-yellow-300", label: "Pending" },
@@ -36,6 +37,7 @@ const LOW_STOCK_THRESHOLD = 10;
 export default function CentralizedInventory() {
   const { role } = useAuth();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  const { branchIdParam } = useBranchScope();
 
   const [inventory, setInventory] = useState<CentralizedInventoryItem[]>([]);
   const [transfers, setTransfers] = useState<StockTransferEntry[]>([]);
@@ -72,28 +74,47 @@ export default function CentralizedInventory() {
     fetchData();
   }, []);
 
-  // Get all unique branches from inventory
+  // Apply branch scope: when a specific branch is picked, narrow each medicine's
+  // branch breakdown to just that branch and recompute totalStock. When "all",
+  // leave the full cross-branch view intact.
+  const scopedInventory: CentralizedInventoryItem[] = branchIdParam
+    ? inventory
+        .map(item => {
+          const branches = item.branches.filter(b => b.branchId === branchIdParam);
+          const totalStock = branches.reduce((sum, b) => sum + (b.totalQty || 0), 0);
+          return { ...item, branches, totalStock } as CentralizedInventoryItem;
+        })
+        // Drop medicines that have no presence in the selected branch
+        .filter(item => item.branches.length > 0)
+    : inventory;
+
+  // Get all unique branches from the scoped inventory (drives the table columns)
   const allBranches = Array.from(
     new Map(
-      inventory.flatMap(item => item.branches.map(b => [b.branchId, b.branchName]))
+      scopedInventory.flatMap(item => item.branches.map(b => [b.branchId, b.branchName]))
     ).entries()
   ).map(([id, name]) => ({ id, name }));
 
   const filteredInventory = search
-    ? inventory.filter(item =>
+    ? scopedInventory.filter(item =>
         (item.medicine as any).name?.toLowerCase().includes(search.toLowerCase()) ||
         (item.medicine as any).genericName?.toLowerCase().includes(search.toLowerCase())
       )
-    : inventory;
+    : scopedInventory;
 
-  const lowStockCount = inventory.reduce(
+  const lowStockCount = scopedInventory.reduce(
     (acc, item) => acc + item.branches.filter(b => b.totalQty < LOW_STOCK_THRESHOLD && b.totalQty > 0).length,
     0
   );
-  const expiringCount = inventory.reduce(
+  const expiringCount = scopedInventory.reduce(
     (acc, item) => acc + item.branches.filter(b => b.expiringCount > 0).length,
     0
   );
+
+  // Transfers are branch-scoped when either end (from/to) is the selected branch
+  const scopedTransfers = branchIdParam
+    ? transfers.filter(tx => tx.fromBranch?.id === branchIdParam || tx.toBranch?.id === branchIdParam)
+    : transfers;
 
   const handleCreateTransfer = async () => {
     if (!tfMedicine || !tfFrom || !tfTo || !tfQty) return;
@@ -170,7 +191,7 @@ export default function CentralizedInventory() {
 
         {/* Summary Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <StatCard title="Total Medicines" value={inventory.length} icon={Pill} />
+          <StatCard title="Total Medicines" value={scopedInventory.length} icon={Pill} />
           <StatCard title="Branches" value={allBranches.length} icon={Warehouse} />
           <StatCard title="Low Stock Alerts" value={lowStockCount} icon={AlertTriangle} variant="attention" />
           <StatCard title="Expiring Items" value={expiringCount} icon={Package} variant="risk" />
@@ -266,7 +287,7 @@ export default function CentralizedInventory() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {transfers.length === 0 ? (
+            {scopedTransfers.length === 0 ? (
               <div className="text-center py-12">
                 <ArrowRightLeft className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
                 <p className="text-muted-foreground">No transfer requests yet</p>
@@ -287,7 +308,7 @@ export default function CentralizedInventory() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {transfers.map(tx => {
+                    {scopedTransfers.map(tx => {
                       const cfg = transferStatusBadge[tx.status];
                       return (
                         <TableRow key={tx.id}>

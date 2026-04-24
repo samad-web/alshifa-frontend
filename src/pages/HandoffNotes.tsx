@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowRightLeft, Plus, X, Pill, ChevronDown, ChevronUp,
-  Clock, Wand2, AlertTriangle, AlertCircle, Info, Circle,
+  Clock, Wand2, AlertTriangle, AlertCircle, Info, Circle, Send, Pencil, Sparkles,
 } from "lucide-react";
 import { communicationApi } from "@/services/communication.service";
 import { toast } from "sonner";
@@ -68,6 +68,10 @@ export default function HandoffNotes() {
   const [appointmentId, setAppointmentId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [autoPopulating, setAutoPopulating] = useState(false);
+  // When set, the form is editing an existing DRAFT rather than creating fresh.
+  // Two flows converge on one Dialog — submit branches on this state.
+  const [editingDraft, setEditingDraft] = useState<HandoffNoteEntry | null>(null);
+  const [sendAfterSave, setSendAfterSave] = useState(false);
 
   useEffect(() => {
     loadReceived();
@@ -110,25 +114,66 @@ export default function HandoffNotes() {
         .split(",")
         .map((c) => c.trim())
         .filter(Boolean);
-      await communicationApi.createHandoffNote({
-        patientId: patientId.trim(),
-        toClinicianId: toClinicianId.trim() || undefined,
-        toBranchId: toBranchId.trim() || undefined,
-        summary: summary.trim(),
-        currentMedications: filteredMeds.length > 0 ? filteredMeds : undefined,
-        activeConditions: conditionsList.length > 0 ? conditionsList : undefined,
-        nextSteps: nextSteps.trim() || undefined,
-        urgency,
-      });
-      toast.success("Handoff note created");
+
+      if (editingDraft) {
+        // Draft edit path: save fields, then optionally promote to SENT.
+        await communicationApi.updateHandoffNote(editingDraft.id, {
+          summary: summary.trim(),
+          currentMedications: filteredMeds.length > 0 ? filteredMeds : [],
+          activeConditions: conditionsList,
+          nextSteps: nextSteps.trim() || "",
+          urgency,
+          toClinicianId: toClinicianId.trim() || null,
+          toBranchId: toBranchId.trim() || null,
+        });
+        if (sendAfterSave) {
+          await communicationApi.sendHandoffDraft(editingDraft.id);
+          toast.success("Handoff sent");
+        } else {
+          toast.success("Draft saved");
+        }
+      } else {
+        await communicationApi.createHandoffNote({
+          patientId: patientId.trim(),
+          toClinicianId: toClinicianId.trim() || undefined,
+          toBranchId: toBranchId.trim() || undefined,
+          summary: summary.trim(),
+          currentMedications: filteredMeds.length > 0 ? filteredMeds : undefined,
+          activeConditions: conditionsList.length > 0 ? conditionsList : undefined,
+          nextSteps: nextSteps.trim() || undefined,
+          urgency,
+        });
+        toast.success("Handoff note created");
+      }
       resetForm();
       setFormOpen(false);
       loadSent();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to create handoff note");
+      toast.error(err?.message || "Failed to save handoff note");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const openDraftEditor = (h: HandoffNoteEntry, sendAfter: boolean) => {
+    setEditingDraft(h);
+    setSendAfterSave(sendAfter);
+    setPatientId(h.patientId);
+    setToClinicianId(h.toClinicianId || "");
+    setToBranchId(h.toBranchId || "");
+    setSummary(h.summary || "");
+    setMedications(
+      h.currentMedications && h.currentMedications.length > 0
+        ? h.currentMedications
+        : [{ name: "", dosage: "", frequency: "" }],
+    );
+    setConditions((h.activeConditions || []).join(", "));
+    setNextSteps(h.nextSteps || "");
+    // Form's Select uses TitleCase values; backend stores UPPER. Map defensively.
+    const u = (h.urgency || "Normal").toLowerCase();
+    setUrgency(u.charAt(0).toUpperCase() + u.slice(1));
+    setAppointmentId("");
+    setFormOpen(true);
   };
 
   const handleAutoPopulate = async () => {
@@ -193,17 +238,23 @@ export default function HandoffNotes() {
     setNextSteps("");
     setUrgency("Normal");
     setAppointmentId("");
+    setEditingDraft(null);
+    setSendAfterSave(false);
   };
 
   const renderHandoffCard = (h: HandoffNoteEntry, type: "received" | "sent") => {
     const uc = URGENCY_CONFIG[h.urgency] || URGENCY_CONFIG.Normal;
     const UIcon = uc.icon;
     const isExpanded = expandedId === h.id;
+    const isDraft = type === "sent" && h.status === "DRAFT";
+    const needsRecipient = isDraft && !h.toClinicianId && !h.toBranchId;
 
     return (
       <Card
         key={h.id}
-        className={`transition-colors ${!h.isRead && type === "received" ? "border-l-4 border-l-blue-500" : ""}`}
+        className={`transition-colors ${
+          !h.isRead && type === "received" ? "border-l-4 border-l-blue-500" : ""
+        } ${isDraft ? "border-l-4 border-l-amber-500 bg-amber-50/30" : ""}`}
       >
         <CardContent className="p-5">
           <div
@@ -217,6 +268,22 @@ export default function HandoffNotes() {
                     <UIcon className="h-3 w-3 mr-1" />
                     {uc.label}
                   </Badge>
+                  {isDraft && (
+                    <Badge className="bg-amber-100 text-amber-800 border border-amber-200 text-xs">
+                      Draft
+                    </Badge>
+                  )}
+                  {isDraft && h.isAutoGenerated && (
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      Auto-seeded
+                    </Badge>
+                  )}
+                  {needsRecipient && (
+                    <span className="text-[11px] text-amber-700 font-medium">
+                      Recipient needed
+                    </span>
+                  )}
                   {!h.isRead && type === "received" && (
                     <span className="h-2.5 w-2.5 rounded-full bg-blue-500 inline-block" />
                   )}
@@ -303,6 +370,27 @@ export default function HandoffNotes() {
                   Mark as Read
                 </Button>
               )}
+              {isDraft && (
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    onClick={(e) => { e.stopPropagation(); openDraftEditor(h, true); }}
+                    className="gap-1"
+                  >
+                    <Send className="h-4 w-4" />
+                    Review & Send
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => { e.stopPropagation(); openDraftEditor(h, false); }}
+                    className="gap-1"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -328,7 +416,13 @@ export default function HandoffNotes() {
     <AppLayout>
       <div className="container mx-auto px-4 py-6 max-w-4xl">
         <PageHeader title="Handoff Notes" subtitle="Patient handoff management between clinicians">
-          <Dialog open={formOpen} onOpenChange={setFormOpen}>
+          <Dialog
+            open={formOpen}
+            onOpenChange={(open) => {
+              setFormOpen(open);
+              if (!open) resetForm();
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -337,7 +431,11 @@ export default function HandoffNotes() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Create Handoff Note</DialogTitle>
+                <DialogTitle>
+                  {editingDraft
+                    ? sendAfterSave ? "Review & Send Handoff" : "Edit Draft Handoff"
+                    : "Create Handoff Note"}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-4 mt-2">
                 {/* Auto-populate */}
@@ -483,11 +581,15 @@ export default function HandoffNotes() {
 
                 <Separator />
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setFormOpen(false)}>
+                  <Button variant="outline" onClick={() => { setFormOpen(false); resetForm(); }}>
                     Cancel
                   </Button>
                   <Button onClick={handleCreate} disabled={submitting}>
-                    {submitting ? "Creating..." : "Create Handoff"}
+                    {submitting
+                      ? "Saving..."
+                      : editingDraft
+                        ? sendAfterSave ? "Send Handoff" : "Save Draft"
+                        : "Create Handoff"}
                   </Button>
                 </div>
               </div>
@@ -505,7 +607,14 @@ export default function HandoffNotes() {
                 </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="sent">Sent</TabsTrigger>
+            <TabsTrigger value="sent" className="gap-1.5">
+              Sent
+              {sent.filter((h) => h.status === "DRAFT").length > 0 && (
+                <Badge className="h-5 min-w-5 text-[10px] px-1.5 bg-amber-100 text-amber-800 border border-amber-200">
+                  {sent.filter((h) => h.status === "DRAFT").length} draft
+                </Badge>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="received">
@@ -539,7 +648,14 @@ export default function HandoffNotes() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {sent.map((h) => renderHandoffCard(h, "sent"))}
+                {[...sent]
+                  .sort((a, b) => {
+                    const aDraft = a.status === "DRAFT" ? 0 : 1;
+                    const bDraft = b.status === "DRAFT" ? 0 : 1;
+                    if (aDraft !== bDraft) return aDraft - bDraft;
+                    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+                  })
+                  .map((h) => renderHandoffCard(h, "sent"))}
               </div>
             )}
           </TabsContent>

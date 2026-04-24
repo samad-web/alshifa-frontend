@@ -1,272 +1,339 @@
-
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
-import { Panel } from "@/components/ui/panel";
+import { StatCard } from "@/components/ui/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AppointmentModal } from "@/components/appointment-modal";
-import { AppointmentList } from "@/components/appointment-list";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar, Users, UserPlus, Activity, MapPin, ArrowUpDown } from "lucide-react";
-import { toast } from "sonner";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useBranches } from "@/hooks/useBranches";
-import { appointmentsApi, type GetAppointmentsParams } from "@/services/appointments.service";
-import { apiClient } from "@/lib/api-client";
+import { DashboardSkeleton } from "@/components/ui/page-skeletons";
+import { PageTransition } from "@/components/ui/page-transition";
+import { useToast } from "@/components/ui/use-toast";
+import { cn } from "@/lib/utils";
+import {
+  Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift, CheckCircle2,
+  Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse,
+} from "lucide-react";
+import {
+  dashboardSummaryApi,
+  AdminDashboardSummary,
+} from "@/services/dashboardSummary.service";
+import TodoPanel, { AssignedByMePanel } from "@/components/todo/TodoPanel";
+import { useBranchScope } from "@/hooks/useBranchScope";
 
 export default function AdminDashboard() {
-  const [counts, setCounts] = useState({ doctors: 0, patients: 0 });
-  const [appointments, setAppointments] = useState<any[]>([]);
-  const [showModal, setShowModal] = useState(false);
-  const [editingAppointment, setEditingAppointment] = useState<any>(null);
-  const [loadingAppointments, setLoadingAppointments] = useState(false);
-  const [loadingCounts, setLoadingCounts] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState<string>("");
-  const [sortByBranch, setSortByBranch] = useState<boolean>(false);
-  const { branches } = useBranches();
+  const { toast } = useToast();
+  const { branchIdParam } = useBranchScope();
+  const [summary, setSummary] = useState<AdminDashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function fetchCounts() {
-      setLoadingCounts(true);
-      try {
-        const [{ data: doctors }, { data: patients }] = await Promise.all([
-          apiClient.get<any[]>('/api/user/list-doctors'),
-          apiClient.get<any[]>('/api/user/list-patients'),
-        ]);
-        setCounts({ doctors: doctors.length, patients: patients.length });
-      } catch (error) {
-        console.error("Failed to fetch counts:", error);
-      } finally {
-        setLoadingCounts(false);
-      }
-    }
-    fetchCounts();
-  }, []);
-
-  // Re-fetch appointments whenever branch filter or sort order changes (including initial mount)
-  const fetchAppointments = useCallback(async () => {
-    setLoadingAppointments(true);
+  async function refresh() {
+    setLoading(true);
     try {
-      const params: GetAppointmentsParams = {};
-      if (selectedBranch) params.branchId = selectedBranch;
-      if (sortByBranch) params.sort = "branch";
-      const data = await appointmentsApi.list(params);
-      setAppointments(data.appointments);
-    } catch (error) {
-      console.error("Failed to fetch appointments:", error);
-      toast.error("Failed to fetch appointments");
-    } finally {
-      setLoadingAppointments(false);
-    }
-  }, [selectedBranch, sortByBranch]);
+      const data = await dashboardSummaryApi.admin(branchIdParam);
+      setSummary(data);
+    } catch (err) {
+      toast({
+        title: "Failed to load dashboard",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [branchIdParam]);
 
-  useEffect(() => {
-    fetchAppointments();
-  }, [fetchAppointments]);
+  if (loading || !summary) {
+    return (
+      <AppLayout>
+        <div className="container max-w-7xl mx-auto px-4 py-8">
+          <DashboardSkeleton />
+        </div>
+      </AppLayout>
+    );
+  }
 
-  const handleAppointmentSuccess = () => {
-    fetchAppointments();
-    setShowModal(false);
-    setEditingAppointment(null);
-  };
+  const greetingPrefix = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  })();
 
-  const handleEdit = (appointment: any) => {
-    setEditingAppointment(appointment);
-    setShowModal(true);
-  };
-
-  const handleCancel = async (appointmentId: string) => {
-    if (!confirm("Are you sure you want to cancel this appointment?")) return;
-
-    try {
-      await apiClient.delete(`/api/appointments/${appointmentId}`);
-      toast.success("Appointment cancelled successfully");
-      setAppointments((prev) => prev.filter((a) => a.id !== appointmentId));
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to cancel appointment");
-    }
-  };
-
-  const handleCloseModal = () => {
-    setShowModal(false);
-    setEditingAppointment(null);
-  };
-
-  const handleApprove = async (appointmentId: string) => {
-    try {
-      const { data: updated } = await apiClient.put<any>(`/api/appointments/${appointmentId}/approve`, {});
-      toast.success("Appointment approved");
-      setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updated } : a));
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to approve");
-    }
-  };
-
-  const handleReject = async (appointmentId: string) => {
-    // Confirmation is handled by the themed dialog in AppointmentList
-    try {
-      const { data: updated } = await apiClient.put<any>(`/api/appointments/${appointmentId}/reject`, {});
-      toast.success("Appointment rejected");
-      setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updated } : a));
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to reject");
-    }
-  };
+  const healthStatus = summary.systemHealth.unresolvedAnomalies > 5
+    ? "Degraded"
+    : "All Systems Operational";
+  const healthColor = summary.systemHealth.unresolvedAnomalies > 5
+    ? "bg-amber-500"
+    : "bg-emerald-500";
 
   return (
     <AppLayout>
-      <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
-        <PageHeader
-          title="Admin Dashboard"
-          subtitle="Manage users, patients, and appointments"
+      <PageTransition className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
+        {/* SECTION A — Header + System Status */}
+        <header className="flex items-start justify-between flex-wrap gap-3">
+          <PageHeader
+            title={`${greetingPrefix}, ${summary.greeting.name} — Administrator`}
+            subtitle={new Date().toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          />
+          <Badge className={cn("text-white", healthColor)}>
+            <ShieldAlert className="w-3 h-3 mr-1" /> {healthStatus}
+          </Badge>
+        </header>
+
+        {/* SECTION B — System-wide KPIs. Each card links to the full-detail
+            page for its metric. Dashboard is for glancing; tap a number to dive. */}
+        <section className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <StatCard
+            title="Total Patients"
+            value={summary.stats.totalPatients}
+            icon={Users}
+            description={summary.stats.newPatientsToday > 0 ? `+${summary.stats.newPatientsToday} today` : undefined}
+            href="/manage-users?role=PATIENT"
+          />
+          <StatCard
+            title="Appointments Today"
+            value={summary.stats.appointmentsToday}
+            icon={Calendar}
+            href="/appointments"
+          />
+          <StatCard
+            title="Revenue This Month"
+            value={`₹${(summary.stats.revenueThisMonth || 0).toLocaleString()}`}
+            icon={DollarSign}
+            variant="wellness"
+            href="/reports"
+          />
+          <StatCard
+            title="Active Staff"
+            value={summary.stats.activeStaff}
+            icon={UserPlus}
+            href="/staff-activity"
+          />
+          <StatCard
+            title="Outstanding Invoices"
+            value={summary.stats.outstandingInvoicesCount}
+            icon={AlertTriangle}
+            variant="attention"
+            description={`₹${(summary.stats.outstandingInvoicesTotal || 0).toLocaleString()}`}
+            href="/reports"
+          />
+          <StatCard
+            title="Gamification Anomalies"
+            value={summary.systemHealth.unresolvedAnomalies}
+            icon={Flag}
+            variant="risk"
+            href="/gamification-analytics"
+          />
+        </section>
+
+        {/* SECTION C — Critical Journey (patients flagged for non-adherence) */}
+        <CriticalJourneySection
+          total={summary.systemHealth.criticalPatients ?? 0}
+          high={summary.systemHealth.criticalPatientsHigh ?? 0}
+          medium={summary.systemHealth.criticalPatientsMedium ?? 0}
+          low={summary.systemHealth.criticalPatientsLow ?? 0}
         />
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Panel title="Doctors" subtitle="Total registered doctors">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-lg bg-primary/10">
-                <Users className="w-6 h-6 text-primary" />
-              </div>
-              {loadingCounts ? (
-                <Skeleton className="h-9 w-12" />
-              ) : (
-                <div className="text-3xl font-bold text-foreground">{counts.doctors}</div>
-              )}
-            </div>
-          </Panel>
-
-          <Panel title="Patients" subtitle="Total registered patients">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-lg bg-wellness/10">
-                <Users className="w-6 h-6 text-wellness" />
-              </div>
-              {loadingCounts ? (
-                <Skeleton className="h-9 w-12" />
-              ) : (
-                <div className="text-3xl font-bold text-foreground">{counts.patients}</div>
-              )}
-            </div>
-          </Panel>
-
-          <Panel title="Appointments" subtitle="Total scheduled appointments">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-lg bg-secondary">
-                <Calendar className="w-6 h-6 text-foreground" />
-              </div>
-              {loadingAppointments || loadingCounts ? (
-                <Skeleton className="h-9 w-12" />
-              ) : (
-                <div className="text-3xl font-bold text-foreground">
-                  {appointments.filter(a => a.status === "SCHEDULED").length}
-                </div>
-              )}
-            </div>
-          </Panel>
-        </div>
-
-        {/* Quick Actions */}
-        <Panel title="Quick Actions" subtitle="Common administrative tasks">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Link
-              to="/create-user"
-              className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-primary to-primary/80 text-primary-foreground rounded-lg shadow hover:shadow-lg transition font-semibold"
-            >
-              <UserPlus className="w-5 h-5" />
-              Create User
-            </Link>
-            <Link
-              to="/manage-users"
-              className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-risk to-risk/80 text-risk-foreground rounded-lg shadow hover:shadow-lg transition font-semibold"
-            >
-              <Users className="w-5 h-5" />
-              Manage Users
-            </Link>
-            <Link
-              to="/assign-patient"
-              className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-wellness to-wellness/80 text-wellness-foreground rounded-lg shadow hover:shadow-lg transition font-semibold"
-            >
-              <Users className="w-5 h-5" />
-              Assign Patient
-            </Link>
-            <Link
-              to="/doctor-gamification"
-              className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-accent to-accent/80 text-accent-foreground rounded-lg shadow hover:shadow-lg transition font-semibold"
-            >
-              <Activity className="w-5 h-5" />
-              Doctor Gamification
-            </Link>
+        {/* SECTION C2 — Operational Alerts */}
+        <section className="rounded-xl border bg-card shadow-card overflow-hidden">
+          <div className="px-5 py-3 border-b">
+            <h2 className="font-semibold flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Operational Alerts</h2>
           </div>
-        </Panel>
-
-        {/* Appointment Management */}
-        <Panel
-          title="Appointment Management"
-          subtitle="View and manage all appointments"
-        >
-          <div className="space-y-4">
-            {/* Toolbar: branch filter + sort (left) and book button (right) */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <MapPin className="w-4 h-4" />
-                  <span>Branch:</span>
+          <div className="divide-y">
+            <AlertRow
+              icon={<Gift className="w-4 h-4 text-amber-600" />}
+              title="Reward Redemptions Pending"
+              detail={`${summary.systemHealth.pendingRewards} waiting for approval`}
+              action={<Link to="/reward-store" className="text-xs text-primary hover:underline">Review →</Link>}
+              visible={summary.systemHealth.pendingRewards > 0}
+            />
+            <AlertRow
+              icon={<Flag className="w-4 h-4 text-red-600" />}
+              title="Gamification Anomalies"
+              detail={`${summary.systemHealth.unresolvedAnomalies} flagged for review`}
+              action={<Link to="/gamification-analytics" className="text-xs text-primary hover:underline">Investigate →</Link>}
+              visible={summary.systemHealth.unresolvedAnomalies > 0}
+            />
+            {summary.systemHealth.pendingRewards === 0 &&
+              summary.systemHealth.unresolvedAnomalies === 0 && (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-emerald-500" />
+                  No active alerts.
                 </div>
-                <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                  <SelectTrigger className="w-44 h-9 text-sm">
-                    <SelectValue placeholder="All Branches" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">All Branches</SelectItem>
-                    {(branches as any[]).map((b: any) => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant={sortByBranch ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setSortByBranch((prev) => !prev)}
-                  className="gap-1.5 h-9 text-sm"
-                >
-                  <ArrowUpDown className="w-3.5 h-3.5" />
-                  {sortByBranch ? "Sorted by Branch" : "Sort by Branch"}
-                </Button>
-              </div>
-              <Button onClick={() => setShowModal(true)} className="gap-2">
-                <Calendar className="w-4 h-4" />
-                Book Appointment
-              </Button>
-            </div>
+              )}
+          </div>
+        </section>
 
-            {loadingAppointments ? (
-              <div className="space-y-3">
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
+        {/* SECTION D — Branch Health */}
+        <section className="rounded-xl border bg-card shadow-card overflow-hidden">
+          <div className="px-5 py-3 border-b flex items-center justify-between">
+            <h2 className="font-semibold flex items-center gap-2"><Building2 className="w-5 h-5 text-primary" /> Branch Health</h2>
+            <span className="text-xs text-muted-foreground">{summary.branches.length} branches</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-5 py-2 font-medium">Branch</th>
+                  <th className="text-right px-3 py-2 font-medium">Active Patients</th>
+                  <th className="text-right px-3 py-2 font-medium">Staff On Duty</th>
+                  <th className="text-right px-3 py-2 font-medium">Appts Today</th>
+                  <th className="text-right px-5 py-2 font-medium">Beds</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {summary.branches.map(b => (
+                  <tr key={b.id} className="hover:bg-muted/20">
+                    <td className="px-5 py-2 font-medium">
+                      {b.name}
+                      {!b.isActive && <Badge variant="outline" className="ml-2 text-[10px]">Inactive</Badge>}
+                    </td>
+                    <td className="px-3 py-2 text-right">{b.activePatients}</td>
+                    <td className="px-3 py-2 text-right">{b.staffOnDuty}</td>
+                    <td className="px-3 py-2 text-right">{b.appointmentsToday}</td>
+                    <td className="px-5 py-2 text-right text-xs">
+                      {b.bedsAvailable === null ? "—" : `${b.bedsAvailable}/${b.bedsTotal}`}
+                    </td>
+                  </tr>
+                ))}
+                {summary.branches.length === 0 && (
+                  <tr><td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">No branches configured.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* SECTION E — Todo Panel with assignment */}
+        <TodoPanel canAssign title="My Tasks" />
+        <AssignedByMePanel />
+
+        {/* SECTION G — Staff & Attendance Summary */}
+        <section className="rounded-xl border bg-card shadow-card overflow-hidden">
+          <div className="px-5 py-3 border-b flex items-center justify-between">
+            <h2 className="font-semibold flex items-center gap-2"><Clock className="w-5 h-5 text-primary" /> Today's Attendance</h2>
+            <Link to="/staff-schedule?tab=attendance" className="text-xs text-primary hover:underline">View Full →</Link>
+          </div>
+          <div className="overflow-x-auto max-h-[350px]">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-5 py-2 font-medium">Name</th>
+                  <th className="text-left px-3 py-2 font-medium">Role</th>
+                  <th className="text-left px-3 py-2 font-medium">Branch</th>
+                  <th className="text-left px-3 py-2 font-medium">In</th>
+                  <th className="text-left px-3 py-2 font-medium">Out</th>
+                  <th className="text-left px-5 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {summary.attendance.map(a => (
+                  <tr key={a.id} className="hover:bg-muted/20">
+                    <td className="px-5 py-2">{a.name}</td>
+                    <td className="px-3 py-2"><Badge variant="outline" className="text-[10px]">{a.role}</Badge></td>
+                    <td className="px-3 py-2">{a.branch || "—"}</td>
+                    <td className="px-3 py-2">{a.checkInAt ? new Date(a.checkInAt).toLocaleTimeString() : "—"}</td>
+                    <td className="px-3 py-2">{a.checkOutAt ? new Date(a.checkOutAt).toLocaleTimeString() : "—"}</td>
+                    <td className="px-5 py-2">
+                      <Badge variant="outline" className="text-[10px]">{a.status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+                {summary.attendance.length === 0 && (
+                  <tr><td colSpan={6} className="px-5 py-8 text-center text-muted-foreground">No attendance records today.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </PageTransition>
+    </AppLayout>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-xl font-semibold mt-1">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Critical Journey section — called out as its own dashboard card so
+ * admins can see the count + severity split at a glance and drill into
+ * the detailed list page via the CTA. Always visible (even when 0) so
+ * admins have a consistent surface to check adherence.
+ */
+function CriticalJourneySection({ total, high, medium, low }: {
+  total: number; high: number; medium: number; low: number;
+}) {
+  const tone = total === 0 ? "emerald" : high > 0 ? "red" : medium > 0 ? "amber" : "slate";
+  const toneClasses = {
+    emerald: { ring: "border-emerald-200", pill: "bg-emerald-500", text: "text-emerald-700" },
+    red:     { ring: "border-red-200",     pill: "bg-red-500",     text: "text-red-700" },
+    amber:   { ring: "border-amber-200",   pill: "bg-amber-500",   text: "text-amber-700" },
+    slate:   { ring: "border-slate-200",   pill: "bg-slate-500",   text: "text-slate-700" },
+  }[tone];
+  return (
+    <section className={cn("rounded-xl border bg-card shadow-card overflow-hidden", toneClasses.ring)}>
+      <div className="px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0", toneClasses.pill)}>
+            <HeartPulse className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-semibold">Critical Journey</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Patients auto-flagged for missed medications, missed vital uploads, or missed follow-ups.
+            </p>
+            {total > 0 && (
+              <div className="flex items-center gap-3 mt-2 text-xs">
+                <span className={cn("font-bold text-lg", toneClasses.text)}>{total}</span>
+                <span className="text-muted-foreground">active</span>
+                <div className="flex items-center gap-2 text-[11px]">
+                  {high   > 0 && <Badge className="bg-red-500 text-white">{high} high</Badge>}
+                  {medium > 0 && <Badge className="bg-amber-500 text-white">{medium} medium</Badge>}
+                  {low    > 0 && <Badge className="bg-slate-500 text-white">{low} low</Badge>}
+                </div>
               </div>
-            ) : (
-              <AppointmentList
-                appointments={appointments}
-                onEdit={handleEdit}
-                onCancel={handleCancel}
-                onApprove={handleApprove}
-                onReject={handleReject}
-                showPatientName={true}
-              />
+            )}
+            {total === 0 && (
+              <p className="text-xs text-emerald-700 mt-2 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" /> No critical patients right now.
+              </p>
             )}
           </div>
-        </Panel>
-
-        {/* Appointment Modal */}
-        <AppointmentModal
-          isOpen={showModal}
-          onClose={handleCloseModal}
-          onSuccess={handleAppointmentSuccess}
-          appointment={editingAppointment}
-        />
+        </div>
+        <Button asChild size="sm" className={total === 0 ? "" : toneClasses.pill.replace("bg-", "hover:bg-")}>
+          <Link to="/critical-journey">
+            <HeartPulse className="w-4 h-4 mr-2" />
+            View Critical Patients
+          </Link>
+        </Button>
       </div>
-    </AppLayout>
+    </section>
+  );
+}
+
+function AlertRow({ icon, title, detail, action, visible }: {
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  action: React.ReactNode;
+  visible: boolean;
+}) {
+  if (!visible) return null;
+  return (
+    <div className="px-5 py-3 flex items-center justify-between gap-3">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5">{icon}</div>
+        <div>
+          <div className="text-sm font-medium">{title}</div>
+          <div className="text-xs text-muted-foreground">{detail}</div>
+        </div>
+      </div>
+      {action}
+    </div>
   );
 }

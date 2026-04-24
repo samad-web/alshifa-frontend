@@ -19,6 +19,27 @@ import {
 import { communicationApi } from "@/services/communication.service";
 import { toast } from "sonner";
 import type { VisitSummaryEntry } from "@/types";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { GroupedByBranch } from "@/components/common/GroupedByBranch";
+
+function summaryBranchId(s: any): string | null {
+  return s?.branchId
+    ?? s?.appointment?.branchId
+    ?? s?.appointment?.patient?.user?.branchId
+    ?? s?.appointment?.patient?.branchId
+    ?? s?.appointment?.doctor?.branchId
+    ?? s?.patient?.user?.branchId
+    ?? s?.patient?.branchId
+    ?? null;
+}
+function summaryBranchName(s: any): string | null {
+  return s?.branch?.name
+    ?? s?.appointment?.branch?.name
+    ?? s?.appointment?.patient?.user?.branch?.name
+    ?? s?.appointment?.doctor?.branch?.name
+    ?? s?.patient?.user?.branch?.name
+    ?? null;
+}
 
 interface PrescriptionRow {
   medication: string;
@@ -59,6 +80,9 @@ export default function VisitSummary() {
 // ── Doctor View ───────────────────────────────────────────────────────────────
 
 function DoctorView({ userId }: { userId: string }) {
+  const { role } = useAuth();
+  const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  const { isAll, branchIdParam } = useBranchScope();
   const [summaries, setSummaries] = useState<VisitSummaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
@@ -411,61 +435,80 @@ function DoctorView({ userId }: { userId: string }) {
             </Card>
           ))}
         </div>
-      ) : summaries.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <FileText className="h-12 w-12 mb-4 opacity-40" />
-            <p className="text-lg font-medium">No visit summaries yet</p>
-            <p className="text-sm">Create your first post-visit summary</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {summaries.map((s) => (
-            <Card key={s.id} className="hover:shadow-sm transition-shadow">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="text-sm font-medium">
-                        Appointment: {s.appointmentId.slice(0, 8)}...
-                      </span>
-                      <Badge
-                        variant={s.sentToPatient ? "default" : "secondary"}
-                        className="text-[10px] py-0"
-                      >
-                        {s.sentToPatient ? (
-                          <span className="flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" /> Sent
-                          </span>
-                        ) : (
-                          "Draft"
-                        )}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {s.diagnosis || "No diagnosis recorded"}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formatDate(s.createdAt)}
-                    </p>
-                  </div>
-                  {!s.sentToPatient && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleSendExisting(s.id)}
-                    >
-                      <Send className="h-3 w-3 mr-1" />
-                      Send
-                    </Button>
-                  )}
-                </div>
+      ) : (() => {
+        const scoped = branchIdParam
+          ? summaries.filter((s) => summaryBranchId(s) === branchIdParam)
+          : summaries;
+        if (scoped.length === 0) {
+          return (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <FileText className="h-12 w-12 mb-4 opacity-40" />
+                <p className="text-lg font-medium">No visit summaries yet</p>
+                <p className="text-sm">Create your first post-visit summary</p>
               </CardContent>
             </Card>
-          ))}
-        </div>
-      )}
+          );
+        }
+        const renderSummary = (s: VisitSummaryEntry) => (
+          <Card key={s.id} className="hover:shadow-sm transition-shadow">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-sm font-medium">
+                      Appointment: {s.appointmentId.slice(0, 8)}...
+                    </span>
+                    <Badge
+                      variant={s.sentToPatient ? "default" : "secondary"}
+                      className="text-[10px] py-0"
+                    >
+                      {s.sentToPatient ? (
+                        <span className="flex items-center gap-1">
+                          <CheckCircle className="h-3 w-3" /> Sent
+                        </span>
+                      ) : (
+                        "Draft"
+                      )}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground truncate">
+                    {s.diagnosis || "No diagnosis recorded"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {formatDate(s.createdAt)}
+                  </p>
+                </div>
+                {!s.sentToPatient && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSendExisting(s.id)}
+                  >
+                    <Send className="h-3 w-3 mr-1" />
+                    Send
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+        if (isAdmin && isAll) {
+          return (
+            <GroupedByBranch
+              items={scoped}
+              getBranchId={summaryBranchId}
+              getBranchName={summaryBranchName}
+              renderItem={renderSummary}
+            />
+          );
+        }
+        return (
+          <div className="space-y-3">
+            {scoped.map(renderSummary)}
+          </div>
+        );
+      })()}
     </>
   );
 }

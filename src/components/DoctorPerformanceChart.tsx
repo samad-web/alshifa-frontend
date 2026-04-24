@@ -25,17 +25,25 @@ interface DoctorPerformance {
   totalPrescriptions: number;
 }
 
-export function DoctorPerformanceChart() {
+interface DoctorPerformanceChartProps {
+  branchId?: string;
+}
+
+export function DoctorPerformanceChart({ branchId }: DoctorPerformanceChartProps = {}) {
   const [data, setData] = useState<DoctorPerformance[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     apiClient
-      .get<{ data: DoctorPerformance[] }>("/api/reports/doctor-performance")
+      .get<{ data: DoctorPerformance[] }>(
+        "/api/reports/doctor-performance",
+        branchId ? { branchId } : undefined,
+      )
       .then(({ data: result }) => setData(result.data))
       .catch(() => toast.error("Failed to load doctor performance data"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [branchId]);
 
   if (loading) {
     return (

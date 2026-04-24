@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { TriageQuestionnaire } from "./triage/TriageQuestionnaire";
 import { apiClient } from "@/lib/api-client";
+import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
+import type { FollowUpPayload } from "@/services/followUp.service";
 
 interface AppointmentModalProps {
     isOpen: boolean;
@@ -57,6 +59,13 @@ export function AppointmentModal({
         phoneNumber: "",
         email: "",
     });
+    // Follow-up capture: when admin flips status → COMPLETED on an
+    // existing appointment, we intercept the submit and open the
+    // follow-up scheduler. The payload is then included in the PUT body
+    // so the backend writes both atomically.
+    const [pendingSubmit, setPendingSubmit] = useState(false);
+    const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+    const [followUpPayload, setFollowUpPayload] = useState<FollowUpPayload | null>(null);
 
     const { role, profile } = useAuth(); // Get current user's role and profile
     console.log('[AppointmentModal] Role:', role, 'Profile:', profile); // Debug log
@@ -295,19 +304,38 @@ Medications: ${resp.medications || 'None'}`;
                 combinedTherapistDateTime.setMinutes(parseInt(selectedMinute));
             }
 
-            const body = {
+            // When an admin marks an existing appointment COMPLETED,
+            // require the follow-up decision first. If we don't already
+            // have one queued (the modal flow), open the scheduler and
+            // short-circuit the submit — it will resume after the
+            // scheduler calls handleFollowUpSubmit.
+            const isFlippingToCompleted = isEditing
+                && formData.status === 'COMPLETED'
+                && appointment?.status !== 'COMPLETED';
+            if (isFlippingToCompleted && !followUpPayload) {
+                setShowFollowUpModal(true);
+                setPendingSubmit(true);
+                setLoading(false);
+                return;
+            }
+
+            const body: Record<string, unknown> = {
                 ...formData,
                 date: combinedDateTime.toISOString(),
                 therapistDate: combinedTherapistDateTime?.toISOString() || null,
                 contactDetails,
-                triageSessionId: triageSessionId
+                triageSessionId: triageSessionId,
             };
+            if (isFlippingToCompleted && followUpPayload) {
+                body.followUp = followUpPayload;
+            }
 
             if (isEditing) {
                 await apiClient.put(`/api/appointments/${appointment.id}`, body);
             } else {
                 await apiClient.post('/api/appointments', body);
             }
+            setFollowUpPayload(null);
 
             toast.success(isEditing ? "Appointment updated successfully" : "Appointment booked successfully");
             // Reset form
@@ -331,9 +359,10 @@ Medications: ${resp.medications || 'None'}`;
             onSuccess?.();
             onClose();
         } catch (error: any) {
-            // Handle specific error cases
-            if (error?.details?.length) {
-                const detailMessages = error.details.map((d: any) => d.message).join(", ");
+            // Handle specific error cases — guard against `details` being a
+            // non-array (some backends return a string) to avoid `.map` crashes.
+            if (Array.isArray(error?.details) && error.details.length > 0) {
+                const detailMessages = error.details.map((d: any) => d?.message ?? String(d)).join(", ");
                 toast.error(`Validation Error: ${detailMessages}`);
             } else {
                 toast.error(error?.message || "Failed to save appointment. Please try again.");
@@ -341,6 +370,20 @@ Medications: ${resp.medications || 'None'}`;
         } finally {
             setLoading(false);
         }
+    };
+
+    // Called by FollowUpSchedulerModal after the admin picks a cadence.
+    // We stash the payload and immediately re-run the form submit so the
+    // PUT includes `followUp` alongside the status change.
+    const handleFollowUpPicked = async (payload: FollowUpPayload) => {
+        setFollowUpPayload(payload);
+        setShowFollowUpModal(false);
+        // Synthesise a submit event so we reuse the same validation path.
+        setTimeout(() => {
+            const form = document.getElementById("appointment-modal-form") as HTMLFormElement | null;
+            if (form) form.requestSubmit();
+            setPendingSubmit(false);
+        }, 0);
     };
 
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
@@ -379,7 +422,7 @@ Medications: ${resp.medications || 'None'}`;
                         onCancel={onClose}
                     />
                 ) : (
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    <form id="appointment-modal-form" onSubmit={handleSubmit} className="space-y-6">
                         {/* Patient Selection (Admin only) */}
                         {isAdmin && (
                             <div className="space-y-2">
@@ -744,6 +787,17 @@ Medications: ${resp.medications || 'None'}`;
                     </form>
                 )}
             </DialogContent>
+            <FollowUpSchedulerModal
+                open={showFollowUpModal}
+                onClose={() => {
+                    setShowFollowUpModal(false);
+                    setPendingSubmit(false);
+                }}
+                onSubmit={handleFollowUpPicked}
+                submitting={pendingSubmit}
+                patientName={contactDetails.fullName || appointment?.patient?.fullName}
+                submitLabel="Mark Completed"
+            />
         </Dialog>
     );
 }

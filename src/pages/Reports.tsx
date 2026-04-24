@@ -10,10 +10,12 @@ import { DoctorPerformanceChart } from '@/components/DoctorPerformanceChart';
 import { BranchAnalyticsChart } from '@/components/BranchAnalyticsChart';
 import { PrescriptionAnalyticsChart } from '@/components/PrescriptionAnalyticsChart';
 import { useAuth } from '@/hooks/useAuth';
+import { useBranchScope } from '@/hooks/useBranchScope';
 
 export default function Reports() {
   const { role } = useAuth();
   const isAdmin = role === 'ADMIN' || role === 'ADMIN_DOCTOR';
+  const { branchIdParam } = useBranchScope();
   const [loading, setLoading] = useState(false);
 
   const handleExport = async (type: string, format: 'csv' | 'pdf') => {
@@ -21,8 +23,9 @@ export default function Reports() {
     try {
       const token = localStorage.getItem('accessToken');
       const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const qs = branchIdParam ? `?branchId=${encodeURIComponent(branchIdParam)}` : '';
       const response = await fetch(
-        `${apiBase}/api/reports/${type}/export/${format}`,
+        `${apiBase}/api/reports/${type}/export/${format}${qs}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -110,7 +113,7 @@ export default function Reports() {
                   </Button>
                 </div>
 
-                <MonthlyCompletedAppointments />
+                <MonthlyCompletedAppointments branchId={branchIdParam} />
               </Card>
             </TabsContent>
 
@@ -135,7 +138,7 @@ export default function Reports() {
                     Export CSV
                   </Button>
                 </div>
-                <PatientProgressChart />
+                <PatientProgressChart branchId={branchIdParam} />
               </Card>
             </TabsContent>
 
@@ -160,7 +163,7 @@ export default function Reports() {
                     Export PDF
                   </Button>
                 </div>
-                <DoctorPerformanceChart />
+                <DoctorPerformanceChart branchId={branchIdParam} />
               </Card>
             </TabsContent>
 
@@ -175,7 +178,7 @@ export default function Reports() {
                     <p className="text-sm text-muted-foreground">Top medications and prescribing patterns</p>
                   </div>
                 </div>
-                <PrescriptionAnalyticsChart />
+                <PrescriptionAnalyticsChart branchId={branchIdParam} />
               </Card>
             </TabsContent>
 
@@ -191,7 +194,7 @@ export default function Reports() {
                       <p className="text-sm text-muted-foreground">Compare performance across all active branches</p>
                     </div>
                   </div>
-                  <BranchAnalyticsChart />
+                  <BranchAnalyticsChart branchId={branchIdParam} />
                 </Card>
               </TabsContent>
             )}

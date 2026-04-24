@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Building2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -17,8 +18,11 @@ import {
   Megaphone, Pin, Plus, Clock, AlertTriangle, AlertCircle, Info, Circle,
 } from "lucide-react";
 import { communicationApi } from "@/services/communication.service";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import type { AnnouncementEntry, AnnouncementPriority } from "@/types";
+
+interface BranchOption { id: string; name: string }
 
 const PRIORITY_CONFIG: Record<AnnouncementPriority, { label: string; color: string; icon: React.ElementType }> = {
   URGENT: { label: "Urgent", color: "bg-red-100 text-red-700 border-red-200", icon: AlertTriangle },
@@ -48,12 +52,13 @@ export default function Announcements() {
   const [announcements, setAnnouncements] = useState<AnnouncementEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
 
   // Form state
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [priority, setPriority] = useState<AnnouncementPriority>("NORMAL");
-  const [branchId, setBranchId] = useState<string>("all");
+  const [branchIds, setBranchIds] = useState<string[]>([]);
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [isPinned, setIsPinned] = useState(false);
   const [expiresAt, setExpiresAt] = useState("");
@@ -62,6 +67,13 @@ export default function Announcements() {
   useEffect(() => {
     loadAnnouncements();
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    apiClient.get<BranchOption[]>('/api/branches')
+      .then(({ data }) => setBranches(Array.isArray(data) ? data : []))
+      .catch(() => setBranches([]));
+  }, [isAdmin]);
 
   const loadAnnouncements = async () => {
     try {
@@ -92,7 +104,7 @@ export default function Announcements() {
         title: title.trim(),
         message: message.trim(),
         priority,
-        branchId: branchId === "all" ? undefined : branchId,
+        branchIds: branchIds.length > 0 ? branchIds : undefined,
         targetRoles: targetRoles.length > 0 ? targetRoles : undefined,
         isPinned,
         expiresAt: expiresAt || undefined,
@@ -125,14 +137,27 @@ export default function Announcements() {
     );
   };
 
+  const toggleBranch = (id: string) => {
+    setBranchIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const resetForm = () => {
     setTitle("");
     setMessage("");
     setPriority("NORMAL");
-    setBranchId("all");
+    setBranchIds([]);
     setTargetRoles([]);
     setIsPinned(false);
     setExpiresAt("");
+  };
+
+  const formatBranches = (list: { id: string; name: string }[]) => {
+    if (!list || list.length === 0) return "All Branches";
+    if (list.length === 1) return list[0].name;
+    if (list.length <= 2) return list.map((b) => b.name).join(", ");
+    return `${list[0].name}, ${list[1].name} +${list.length - 2}`;
   };
 
   return (
@@ -169,32 +194,45 @@ export default function Announcements() {
                       onChange={(e) => setMessage(e.target.value)}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={priority} onValueChange={(v) => setPriority(v as AnnouncementPriority)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="URGENT">Urgent</SelectItem>
-                          <SelectItem value="HIGH">High</SelectItem>
-                          <SelectItem value="NORMAL">Normal</SelectItem>
-                          <SelectItem value="LOW">Low</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Branch</Label>
-                      <Select value={branchId} onValueChange={setBranchId}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Branches</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={priority} onValueChange={(v) => setPriority(v as AnnouncementPriority)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="URGENT">Urgent</SelectItem>
+                        <SelectItem value="HIGH">High</SelectItem>
+                        <SelectItem value="NORMAL">Normal</SelectItem>
+                        <SelectItem value="LOW">Low</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Target Branches</Label>
+                    {branches.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">Loading branches...</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {branches.map((b) => {
+                          const selected = branchIds.includes(b.id);
+                          return (
+                            <Badge
+                              key={b.id}
+                              variant={selected ? "default" : "outline"}
+                              className="cursor-pointer select-none"
+                              onClick={() => toggleBranch(b.id)}
+                            >
+                              <Building2 className="h-3 w-3 mr-1" />
+                              {b.name}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to broadcast to all branches. Select one or more to restrict.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label>Target Roles</Label>
@@ -302,7 +340,7 @@ export default function Announcements() {
                         <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                           <span>{a.authorName || "Admin"}</span>
                           <span className="text-muted-foreground/40">|</span>
-                          <span>{a.branchName || "All Branches"}</span>
+                          <span>{formatBranches(a.branches)}</span>
                           <span className="text-muted-foreground/40">|</span>
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />

@@ -1,22 +1,44 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, type SignInError, type SignInErrorKind } from "@/hooks/useAuth";
 import { getRoleRedirectPath } from "@/components/auth/ProtectedRoute";
-import { Activity, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Activity, Loader2, AlertCircle, CheckCircle2, WifiOff, ShieldAlert, Mail, Clock } from "lucide-react";
 import { Input } from "@/components/common/input";
 import { Label } from "@/components/common/label";
 import { Button } from "@/components/common/button";
 import { cn } from "@/lib/utils";
+import { isValidEmail, stripLeadingSpaces, stripEdgeSpaces } from "@/lib/input-validators";
+
+function errorCopy(kind: SignInErrorKind): { title: string; hint: string; icon: typeof AlertCircle } {
+  switch (kind) {
+    case "network":
+      return { title: "Can't reach the server", hint: "Check your internet connection or try again in a moment.", icon: WifiOff };
+    case "server":
+      return { title: "Server is having trouble", hint: "Our backend is down or restarting. Please try again in a few minutes.", icon: ShieldAlert };
+    case "rate_limited":
+      return { title: "Too many attempts", hint: "You've tried too many times. Wait a minute and try again.", icon: Clock };
+    case "email_not_verified":
+      return { title: "Email not verified", hint: "Check your inbox for the verification link, then sign in.", icon: Mail };
+    case "hospital_suspended":
+      return { title: "Account suspended", hint: "Your clinic's access is paused. Contact your administrator.", icon: ShieldAlert };
+    case "mfa_required":
+      return { title: "MFA required", hint: "Your account requires a second factor. Use the MFA flow to sign in.", icon: ShieldAlert };
+    case "invalid_credentials":
+      return { title: "Email or password is incorrect", hint: "Double-check your credentials. If you don't have an account yet, contact your clinic administrator.", icon: AlertCircle };
+    default:
+      return { title: "Sign-in failed", hint: "Something unexpected happened. Please try again.", icon: AlertCircle };
+  }
+}
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [signInErr, setSignInErr] = useState<SignInError | null>(null);
+  const [emailIssue, setEmailIssue] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { user, role, signIn, loading } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if already logged in with a role
   useEffect(() => {
     if (!loading && user && role) {
       navigate(getRoleRedirectPath(role), { replace: true });
@@ -25,20 +47,25 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setIsLoading(true);
+    setSignInErr(null);
+    setEmailIssue(null);
 
-    const { error: signInError } = await signIn(email, password);
-
-    if (signInError) {
-      setError("Invalid credentials. Please check your email and password.");
-      setIsLoading(false);
+    if (!isValidEmail(email)) {
+      setEmailIssue("Please enter a valid email address.");
       return;
     }
+    if (password.length === 0) return;
 
-    // The useEffect above will handle redirection when role is fetched
-    // Keep loading state while waiting
+    setIsLoading(true);
+    const { error } = await signIn(stripEdgeSpaces(email), stripEdgeSpaces(password));
+    if (error) {
+      setSignInErr(error);
+      setIsLoading(false);
+    }
   };
+
+  const copy = signInErr ? errorCopy(signInErr.kind) : null;
+  const ErrIcon = copy?.icon ?? AlertCircle;
 
   // Show loading if checking auth
   if (loading) {
@@ -116,11 +143,14 @@ export default function Login() {
           </div>
 
           {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {error && (
+          <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+            {copy && (
               <div className="flex items-start gap-3 p-4 rounded-xl bg-attention/5 border border-attention/20 animate-shake">
-                <AlertCircle className="w-5 h-5 text-attention shrink-0 mt-0.5" />
-                <p className="text-sm text-foreground">{error}</p>
+                <ErrIcon className="w-5 h-5 text-attention shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-foreground">{copy.title}</p>
+                  <p className="text-sm text-muted-foreground">{copy.hint}</p>
+                </div>
               </div>
             )}
 
@@ -129,13 +159,23 @@ export default function Login() {
               <Input
                 id="email"
                 type="email"
+                inputMode="email"
+                autoComplete="email"
+                spellCheck={false}
                 placeholder="doctor@alshifa.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(stripLeadingSpaces(e.target.value)); setEmailIssue(null); }}
+                onBlur={() => {
+                  const trimmed = stripEdgeSpaces(email);
+                  if (trimmed !== email) setEmail(trimmed);
+                  if (trimmed && !isValidEmail(trimmed)) setEmailIssue("Please enter a valid email address.");
+                }}
                 required
+                aria-invalid={emailIssue ? true : undefined}
                 className="h-14 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl text-lg"
                 disabled={isLoading}
               />
+              {emailIssue && <p className="text-xs text-attention ml-1">{emailIssue}</p>}
             </div>
 
             <div className="space-y-1.5">
@@ -143,9 +183,11 @@ export default function Login() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => setPassword(stripLeadingSpaces(e.target.value))}
+                onBlur={() => setPassword(p => stripEdgeSpaces(p))}
                 required
                 className="h-14 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl text-lg"
                 disabled={isLoading}
