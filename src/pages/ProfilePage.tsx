@@ -5,20 +5,65 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/lib/api-client";
 import {
   Pencil, Save, X, Mail, Phone, Cake, User, Building2, ShieldCheck, Briefcase,
   GraduationCap, Clock, Stethoscope, Activity, Check, Camera, Loader2, Trash2,
+  Languages, FileText, BadgeCheck,
 } from "lucide-react";
 import { sanitizeName, sanitizePhone, stripEdgeSpaces } from "@/lib/input-validators";
 
 const MAX_PHOTO_MB = 5;
+const BIO_MAX = 1000;
+const LANGUAGES_MAX = 10;
+
+type ClinicianProfile = {
+  id: string;
+  fullName: string | null;
+  specialization: string | null;
+  qualification: string | null;
+  yearsExperience: number | null;
+  clinic: string | null;
+  profilePhoto: string | null;
+  registrationNumber: string | null;
+  phoneNumber: string | null;
+  bio: string | null;
+  languages: string[] | null;
+  updatedAt?: string;
+};
+
+type PharmacistProfile = {
+  id: string;
+  fullName: string | null;
+  qualification: string | null;
+  yearsExperience: number | null;
+  profilePhoto: string | null;
+  phoneNumber: string | null;
+  bio: string | null;
+  languages: string[] | null;
+  updatedAt?: string;
+};
+
+type PatientProfile = {
+  id: string;
+  fullName: string | null;
+  dob: string | null;
+  age: number | null;
+  gender: string | null;
+  phoneNumber: string | null;
+  therapyType: string | null;
+  patientId: string | null;
+  zenPoints: number;
+  profilePhoto: string | null;
+};
 
 type MeResponse = {
   id: string;
@@ -29,10 +74,10 @@ type MeResponse = {
   mfaEnabled: boolean;
   branch: { id: string; name: string; address: string | null } | null;
   hospital: { id: string; name: string; slug: string; plan: string } | null;
-  doctor?: { id: string; fullName: string | null; specialization: string | null; qualification: string | null; yearsExperience: number | null; clinic: string | null; profilePhoto: string | null } | null;
-  therapist?: { id: string; fullName: string | null; specialization: string | null; qualification: string | null; yearsExperience: number | null; clinic: string | null; profilePhoto: string | null } | null;
-  pharmacist?: { id: string; fullName: string | null; qualification: string | null; yearsExperience: number | null; profilePhoto: string | null } | null;
-  patient?: { id: string; fullName: string | null; dob: string | null; age: number | null; gender: string | null; phoneNumber: string | null; therapyType: string | null; patientId: string | null; zenPoints: number; profilePhoto: string | null } | null;
+  doctor?: ClinicianProfile | null;
+  therapist?: ClinicianProfile | null;
+  pharmacist?: PharmacistProfile | null;
+  patient?: PatientProfile | null;
 };
 
 const GENDERS = [
@@ -48,13 +93,22 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+function parseLanguagesInput(raw: string): string[] {
+  return Array.from(
+    new Map(
+      raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)
+        .map((s) => [s.toLowerCase(), s]),
+    ).values(),
+  ).slice(0, LANGUAGES_MAX);
+}
+
 function Row({ icon: Icon, label, value }: { icon: any; label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 py-2.5 border-b last:border-0 border-border/50">
       <Icon className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className="text-sm font-medium text-foreground mt-0.5">
+        <div className="text-sm font-medium text-foreground mt-0.5 whitespace-pre-wrap break-words">
           {value === null || value === undefined || value === "" ? (
             <span className="text-muted-foreground italic">Not set</span>
           ) : value}
@@ -150,10 +204,15 @@ export default function ProfilePage() {
     const p: any = profileData || {};
     setBuf({
       fullName: p.fullName ?? "",
-      phoneNumber: me.patient?.phoneNumber ?? "",
+      // Patient-only
       dob: me.patient?.dob ? String(me.patient.dob).slice(0, 10) : "",
       gender: me.patient?.gender ?? "",
       therapyType: me.patient?.therapyType ?? "",
+      // Shared personal details (clinicians, pharmacist, patient)
+      phoneNumber: p.phoneNumber ?? me.patient?.phoneNumber ?? "",
+      bio: p.bio ?? "",
+      languagesText: Array.isArray(p.languages) ? p.languages.join(", ") : "",
+      // Clinician-only
       clinic: p.clinic ?? "",
     });
     setEditing(true);
@@ -176,6 +235,14 @@ export default function ProfilePage() {
     }
     if (me.role === "DOCTOR" || me.role === "ADMIN_DOCTOR" || me.role === "THERAPIST") {
       if (buf.clinic !== undefined) payload.clinic = stripEdgeSpaces(buf.clinic) || null;
+    }
+    if (me.role === "DOCTOR" || me.role === "ADMIN_DOCTOR" || me.role === "THERAPIST" || me.role === "PHARMACIST") {
+      if (buf.phoneNumber !== undefined) {
+        const cleanPhone = stripEdgeSpaces(buf.phoneNumber ?? "");
+        payload.phoneNumber = cleanPhone || null;
+      }
+      if (buf.bio !== undefined) payload.bio = stripEdgeSpaces(buf.bio) || null;
+      if (buf.languagesText !== undefined) payload.languages = parseLanguagesInput(buf.languagesText ?? "");
     }
 
     setSaving(true);
@@ -215,6 +282,26 @@ export default function ProfilePage() {
   const isPharmacist = me.role === "PHARMACIST";
   const isPatient = me.role === "PATIENT";
   const canEdit = isClinician || isPharmacist || isPatient;
+  const hasPersonalCard = isClinician || isPharmacist;
+
+  const clinicianData = (isClinician ? profileData : null) as ClinicianProfile | null;
+  const pharmacistData = (isPharmacist ? profileData : null) as PharmacistProfile | null;
+  const personalData = (clinicianData ?? pharmacistData) as
+    | { phoneNumber: string | null; bio: string | null; languages: string[] | null; updatedAt?: string }
+    | null;
+
+  const subtitle = clinicianData
+    ? [clinicianData.specialization, clinicianData.yearsExperience ? `${clinicianData.yearsExperience} yrs exp` : null]
+        .filter(Boolean).join(" • ")
+    : pharmacistData
+      ? [pharmacistData.qualification, pharmacistData.yearsExperience ? `${pharmacistData.yearsExperience} yrs exp` : null]
+          .filter(Boolean).join(" • ")
+      : "";
+
+  const languagesList = Array.isArray(personalData?.languages) ? personalData!.languages : [];
+
+  const bioCharCount = (buf.bio ?? "").length;
+  const bioOverLimit = bioCharCount > BIO_MAX;
 
   return (
     <AppLayout>
@@ -265,6 +352,9 @@ export default function ProfilePage() {
             </div>
             <div className="flex-1 min-w-0">
               <h1 className="text-2xl font-bold truncate">{displayName}</h1>
+              {subtitle && (
+                <p className="text-sm text-primary font-medium truncate mt-0.5">{subtitle}</p>
+              )}
               <p className="text-sm text-muted-foreground truncate">{me.email}</p>
               <div className="flex flex-wrap gap-2 mt-2">
                 <Badge variant="secondary">{me.role.replace("_", " ")}</Badge>
@@ -288,7 +378,7 @@ export default function ProfilePage() {
                 <Button variant="outline" onClick={cancel} disabled={saving}>
                   <X className="mr-2 h-4 w-4" /> Cancel
                 </Button>
-                <Button onClick={save} disabled={saving}>
+                <Button onClick={save} disabled={saving || bioOverLimit}>
                   <Save className="mr-2 h-4 w-4" /> {saving ? "Saving..." : "Save"}
                 </Button>
               </div>
@@ -378,10 +468,41 @@ export default function ProfilePage() {
           </Card>
         )}
 
-        {isClinician && (
+        {isClinician && clinicianData && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Clinical credentials</CardTitle>
+              <CardDescription>
+                Specialization, qualification, experience, and registration are managed by an administrator. You can update your clinic below.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Row icon={Briefcase}      label="Specialization"      value={clinicianData.specialization} />
+              <Row icon={GraduationCap}  label="Qualification"       value={clinicianData.qualification} />
+              <Row icon={Clock}          label="Years of experience" value={clinicianData.yearsExperience} />
+              <Row icon={BadgeCheck}     label="Registration number" value={clinicianData.registrationNumber} />
+              {editing ? (
+                <div className="pt-3">
+                  <Label htmlFor="clinic">Clinic / Practice</Label>
+                  <Input id="clinic" value={buf.clinic}
+                         placeholder="e.g. Vaidya Clinic, Mumbai"
+                         onChange={(e) => setBuf({ ...buf, clinic: e.target.value })}
+                         onBlur={() => setBuf(b => ({ ...b, clinic: stripEdgeSpaces(b.clinic ?? "") }))} />
+                </div>
+              ) : (
+                <Row icon={Building2}    label="Clinic / Practice"   value={clinicianData.clinic} />
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {hasPersonalCard && personalData && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Personal details</CardTitle>
+              <CardDescription>
+                Help patients and colleagues reach you and get to know your background.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {editing ? (
@@ -393,53 +514,76 @@ export default function ProfilePage() {
                            onBlur={() => setBuf(b => ({ ...b, fullName: stripEdgeSpaces(b.fullName ?? "") }))} />
                   </div>
                   <div>
-                    <Label htmlFor="clinic">Clinic / Practice</Label>
-                    <Input id="clinic" value={buf.clinic}
-                           onChange={(e) => setBuf({ ...buf, clinic: e.target.value })}
-                           onBlur={() => setBuf(b => ({ ...b, clinic: stripEdgeSpaces(b.clinic ?? "") }))} />
+                    <Label htmlFor="phone">Contact phone</Label>
+                    <Input id="phone" type="tel" inputMode="tel" autoComplete="tel"
+                           placeholder="+919876543210" value={buf.phoneNumber}
+                           onChange={(e) => setBuf({ ...buf, phoneNumber: sanitizePhone(e.target.value) })}
+                           onBlur={() => setBuf(b => ({ ...b, phoneNumber: stripEdgeSpaces(b.phoneNumber ?? "") }))} />
+                    <p className="text-xs text-muted-foreground mt-1">Visible to admins and staff for coordination. 7–15 digits, optional leading +.</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Specialization, qualification, and years of experience are managed by an administrator.
-                  </p>
+                  <div>
+                    <Label htmlFor="languages">Languages spoken</Label>
+                    <Input id="languages" value={buf.languagesText}
+                           placeholder="English, Tamil, Hindi"
+                           onChange={(e) => setBuf({ ...buf, languagesText: e.target.value })} />
+                    <p className="text-xs text-muted-foreground mt-1">Comma-separated. Up to {LANGUAGES_MAX} languages.</p>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="bio">About / bio</Label>
+                      <span className={`text-xs ${bioOverLimit ? "text-destructive" : "text-muted-foreground"}`}>
+                        {bioCharCount}/{BIO_MAX}
+                      </span>
+                    </div>
+                    <Textarea
+                      id="bio"
+                      rows={5}
+                      value={buf.bio}
+                      placeholder="A short professional bio — areas of focus, approach to care, anything patients should know."
+                      onChange={(e) => setBuf({ ...buf, bio: e.target.value })}
+                    />
+                    {bioOverLimit && (
+                      <p className="text-xs text-destructive mt-1">Bio must be {BIO_MAX} characters or fewer.</p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <>
-                  <Row icon={User}           label="Full name"        value={(profileData as any)?.fullName} />
-                  <Row icon={Briefcase}      label="Specialization"   value={(profileData as any)?.specialization} />
-                  <Row icon={GraduationCap}  label="Qualification"    value={(profileData as any)?.qualification} />
-                  <Row icon={Clock}          label="Years of experience" value={(profileData as any)?.yearsExperience} />
-                  <Row icon={Building2}      label="Clinic / Practice" value={(profileData as any)?.clinic} />
+                  <Row icon={User}      label="Full name"    value={(profileData as any)?.fullName} />
+                  <Row icon={Phone}     label="Contact phone" value={personalData.phoneNumber} />
+                  <Row icon={Languages} label="Languages" value={
+                    languagesList.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {languagesList.map((lang) => (
+                          <Badge key={lang} variant="secondary" className="font-normal">{lang}</Badge>
+                        ))}
+                      </div>
+                    ) : null
+                  } />
+                  <Row icon={FileText}  label="About" value={personalData.bio} />
+                  {personalData.updatedAt && (
+                    <>
+                      <Separator className="my-2" />
+                      <p className="text-xs text-muted-foreground">
+                        Last updated {new Date(personalData.updatedAt).toLocaleString()}
+                      </p>
+                    </>
+                  )}
                 </>
               )}
             </CardContent>
           </Card>
         )}
 
-        {isPharmacist && (
+        {isPharmacist && pharmacistData && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Pharmacist credentials</CardTitle>
+              <CardDescription>Qualification and years of experience are managed by an administrator.</CardDescription>
             </CardHeader>
             <CardContent>
-              {editing ? (
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="fullName">Full name</Label>
-                    <Input id="fullName" value={buf.fullName}
-                           onChange={(e) => setBuf({ ...buf, fullName: sanitizeName(e.target.value) })}
-                           onBlur={() => setBuf(b => ({ ...b, fullName: stripEdgeSpaces(b.fullName ?? "") }))} />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Qualification and years of experience are managed by an administrator.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <Row icon={User}          label="Full name"            value={me.pharmacist?.fullName} />
-                  <Row icon={GraduationCap} label="Qualification"        value={me.pharmacist?.qualification} />
-                  <Row icon={Clock}         label="Years of experience"  value={me.pharmacist?.yearsExperience} />
-                </>
-              )}
+              <Row icon={GraduationCap} label="Qualification"        value={pharmacistData.qualification} />
+              <Row icon={Clock}         label="Years of experience"  value={pharmacistData.yearsExperience} />
             </CardContent>
           </Card>
         )}

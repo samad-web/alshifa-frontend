@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   Activity, AlertTriangle, CheckCircle2, Users, UserPlus, Trophy, Clock,
   Stethoscope, Settings, BarChart3, BellRing, FileText, Share2, HeartPulse,
+  TrendingUp,
 } from "lucide-react";
 import {
   dashboardSummaryApi,
@@ -182,7 +183,10 @@ export default function DoctorAdminDashboard() {
           </div>
         </section>
 
-        {/* SECTION C — Staff Overview & Workload */}
+        {/* SECTION C — Staff Overview & Workload.
+            Full oversight view: clinical throughput (appts / completion /
+            no-show) alongside gamification signals (XP / level) so the
+            admin doctor can supervise both dimensions in one place. */}
         <section className="rounded-xl border bg-card shadow-card overflow-hidden">
           <div className="px-5 py-3 border-b flex items-center justify-between">
             <h2 className="font-semibold flex items-center gap-2"><Users className="w-5 h-5 text-primary" /> Staff Overview</h2>
@@ -196,7 +200,10 @@ export default function DoctorAdminDashboard() {
                   <th className="text-left px-3 py-2 font-medium">Role</th>
                   <th className="text-right px-3 py-2 font-medium">Appts Today</th>
                   <th className="text-right px-3 py-2 font-medium">Pending</th>
-                  <th className="text-right px-3 py-2 font-medium">Patients</th>
+                  <th className="text-right px-3 py-2 font-medium">Active Patients</th>
+                  <th className="text-right px-3 py-2 font-medium">Completed (Mo)</th>
+                  <th className="text-right px-3 py-2 font-medium">Completion %</th>
+                  <th className="text-right px-3 py-2 font-medium">No-Show %</th>
                   <th className="text-right px-3 py-2 font-medium">XP</th>
                   <th className="text-right px-5 py-2 font-medium">Level</th>
                 </tr>
@@ -216,6 +223,30 @@ export default function DoctorAdminDashboard() {
                     <td className="px-3 py-2 text-right">{s.pendingApprovals}</td>
                     <td className="px-3 py-2 text-right">{s.patientLoad}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
+                      {s.monthlyCompleted}
+                      <span className="text-xs text-muted-foreground"> / {s.monthlyTotal}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {s.completionRate === null ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <span className={cn(
+                          s.completionRate >= 80 ? "text-emerald-600"
+                          : s.completionRate >= 60 ? "text-amber-600"
+                          : "text-red-600",
+                        )}>{s.completionRate}%</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {s.noShowRate === null ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <span className={cn(s.noShowRate >= 15 ? "text-red-600" : "text-muted-foreground")}>
+                          {s.noShowRate}%
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
                       {(s.totalXP ?? 0).toLocaleString()}
                     </td>
                     <td className="px-5 py-2 text-right">
@@ -230,7 +261,7 @@ export default function DoctorAdminDashboard() {
                   </tr>
                 ))}
                 {summary.staff.length === 0 && (
-                  <tr><td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">No clinicians in this scope.</td></tr>
+                  <tr><td colSpan={10} className="px-5 py-8 text-center text-muted-foreground">No clinicians in this scope.</td></tr>
                 )}
               </tbody>
             </table>
@@ -264,11 +295,131 @@ export default function DoctorAdminDashboard() {
           </div>
         </section>
 
-        {/* SECTION E — Todo Panel with Assignment Capability */}
+        {/* SECTION E — Todo Panel with Assignment Capability. Admin doctor
+            sees the XP rewards on assigned tasks so they can calibrate
+            awards for the clinicians they manage. */}
         <TodoPanel canAssign title="My Tasks" />
         <AssignedByMePanel />
 
-        {/* SECTION F — Gamification Oversight */}
+        {/* SECTION F — Performance Analytics (replaces gamification oversight).
+            Data-centric view of clinical throughput: top performers by
+            completed consults, monthly workload distribution, and the
+            operational KPI of delegated-task follow-through. */}
+        <section className="rounded-xl border bg-card shadow-card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold flex items-center gap-2"><TrendingUp className="w-5 h-5 text-primary" /> Performance Analytics</h2>
+            <Link to="/performance-scorecards" className="text-xs text-primary hover:underline">
+              Full scorecards →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Monthly Consults Completed</div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {summary.analytics.monthlyCompleted.toLocaleString()}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                of {summary.analytics.monthlyTotal.toLocaleString()} scheduled
+              </div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Completion Rate (Mo)</div>
+              <div className={cn(
+                "text-2xl font-semibold tabular-nums mt-1",
+                summary.analytics.monthlyCompletionRate === null ? ""
+                : summary.analytics.monthlyCompletionRate >= 80 ? "text-emerald-600"
+                : summary.analytics.monthlyCompletionRate >= 60 ? "text-amber-600"
+                : "text-red-600",
+              )}>
+                {summary.analytics.monthlyCompletionRate === null
+                  ? "—"
+                  : `${summary.analytics.monthlyCompletionRate}%`}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Completed ÷ scheduled this month
+              </div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Task Follow-Through (7d)</div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {summary.analytics.todoCompletionRate === null
+                  ? "—"
+                  : `${summary.analytics.todoCompletionRate}%`}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Delegated tasks completed this week
+              </div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Clinicians In Scope</div>
+              <div className="text-2xl font-semibold tabular-nums mt-1">
+                {summary.staff.length}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Active DOCTOR + THERAPIST staff
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs text-muted-foreground mb-2">Top Performers — Completed Consults (This Month)</div>
+              <div className="space-y-2">
+                {summary.analytics.topPerformers.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">No completed consultations yet this month.</div>
+                ) : (
+                  summary.analytics.topPerformers.map((e, i) => (
+                    <div key={e.userId} className="flex items-center gap-2 text-sm">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-muted text-xs font-medium shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate">{e.name}</div>
+                        <div className="text-[10px] text-muted-foreground truncate">
+                          {e.role}{e.completionRate !== null ? ` · ${e.completionRate}% completion` : ""}
+                        </div>
+                      </div>
+                      <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                        {e.monthlyCompleted} consults
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-2">Monthly Workload Distribution</div>
+              <div className="space-y-1">
+                {(() => {
+                  const buckets = summary.analytics.workloadDistribution;
+                  const maxCount = buckets.reduce((m, b) => Math.max(m, b.count), 0) || 1;
+                  if (buckets.every(b => b.count === 0)) {
+                    return <div className="text-xs text-muted-foreground">No completed consults to bucket yet.</div>;
+                  }
+                  return buckets.map(b => (
+                    <div key={b.label} className="flex items-center gap-2 text-xs">
+                      <span className="w-16 text-muted-foreground shrink-0">{b.label}</span>
+                      <div className="flex-1 h-2 bg-muted rounded overflow-hidden">
+                        <div
+                          className="h-full bg-primary/60 transition-all"
+                          style={{ width: `${(b.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right tabular-nums">{b.count}</span>
+                    </div>
+                  ));
+                })()}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-2">
+                Clinicians grouped by consults completed this month
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION F2 — Gamification Oversight. Admin doctor supervises the
+            engagement program: leaderboard standings, level distribution
+            across the org, and delegated-task follow-through. Read-only —
+            admin doctor does not earn XP themselves. */}
         <section className="rounded-xl border bg-card shadow-card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold flex items-center gap-2"><Trophy className="w-5 h-5 text-primary" /> Gamification Oversight</h2>

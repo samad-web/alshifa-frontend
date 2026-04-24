@@ -8,6 +8,7 @@ import {
 import { MedicineOrderForm } from "@/components/pharmacy/MedicineOrderForm";
 import { PrescribedVitalsManager } from "@/components/patients/PrescribedVitalsManager";
 import { VitalChart } from "@/components/vitals/VitalChart";
+import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -445,28 +446,39 @@ export default function PatientDetails() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  if (!canEditClinical) return <div className="p-6 text-center">Access denied.</div>;
+  if (!canEditClinical) {
+    return (
+      <AppLayout>
+        <div className="p-6 text-center">Access denied.</div>
+      </AppLayout>
+    );
+  }
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-6 max-w-4xl space-y-4">
-        <Skeleton className="h-10 w-64" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
+      <AppLayout>
+        <div className="container mx-auto px-4 py-6 max-w-4xl space-y-4">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </AppLayout>
     );
   }
 
   if (error || !patient) {
     return (
-      <div className="container mx-auto px-4 py-12 max-w-4xl text-center">
-        <p className="text-rose-600 mb-4">{error || "Patient not found."}</p>
-      </div>
+      <AppLayout>
+        <div className="container mx-auto px-4 py-12 max-w-4xl text-center">
+          <p className="text-rose-600 mb-4">{error || "Patient not found."}</p>
+        </div>
+      </AppLayout>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-4xl">
+    <AppLayout>
+      <div className="container mx-auto px-4 py-6 max-w-4xl">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold leading-tight">
@@ -508,6 +520,7 @@ export default function PatientDetails() {
           )}
         </div>
       </Tabs>
-    </div>
+      </div>
+    </AppLayout>
   );
 }

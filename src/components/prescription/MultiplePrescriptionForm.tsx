@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Panel } from "@/components/ui/panel";
-import { Plus, Trash2, Search, Loader2, CheckCircle2, PlaySquare, ChevronsUpDown, Check, Video, X, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Search, Loader2, CheckCircle2, PlaySquare, ChevronsUpDown, Check, Video, X, ExternalLink, Package } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -35,6 +35,7 @@ interface Medicine {
     name: string;
     brand: string;
     category: string;
+    type?: string;
     price: number;
     totalStock: number;
     videoUrl?: string;
@@ -128,8 +129,76 @@ export function MultiplePrescriptionForm({
     onCancel,
 }: MultiplePrescriptionFormProps) {
     const [loading, setLoading] = useState(false);
-    const [medicines, setMedicines] = useState<Medicine[]>([]);
     const [videos, setVideos] = useState<ExternalVideo[]>([]);
+
+    // Per-row server-side search state. Each medication line has its
+    // own query + filter combination + result cache so opening a
+    // picker doesn't invalidate the others. Inventory can have 1000s
+    // of medicines, so we never load the full catalogue — every
+    // change re-hits /api/pharmacy/medicines/search with a 50-row cap.
+    type RowSearch = {
+        query: string;
+        results: Medicine[];
+        total: number;
+        loading: boolean;
+        fetched: boolean;
+        inStockOnly: boolean;
+    };
+    const defaultRowSearch: RowSearch = {
+        query: "", results: [], total: 0, loading: false, fetched: false, inStockOnly: false,
+    };
+    const [searchByRow, setSearchByRow] = useState<Record<number, RowSearch>>({});
+    const [openRowIndex, setOpenRowIndex] = useState<number | null>(null);
+
+    const updateRowSearch = useCallback((i: number, patch: Partial<RowSearch>) => {
+        setSearchByRow(prev => ({ ...prev, [i]: { ...(prev[i] ?? defaultRowSearch), ...patch } }));
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+    }, []);
+
+    const fetchRowResults = useCallback(async (i: number) => {
+        const s = searchByRow[i] ?? defaultRowSearch;
+        const params: Record<string, string | number | boolean | undefined> = {
+            limit: 50, sortBy: "name", sortOrder: "asc",
+        };
+        if (s.query.trim())  params.q = s.query.trim();
+        if (s.inStockOnly)   params.availability = "IN_STOCK";
+
+        updateRowSearch(i, { loading: true });
+        try {
+            const { data } = await apiClient.get<{ medicines: Medicine[]; pagination: { total: number } }>(
+                '/api/pharmacy/medicines/search', params,
+            );
+            updateRowSearch(i, {
+                results: data?.medicines || [],
+                total: data?.pagination?.total || 0,
+                loading: false,
+                fetched: true,
+            });
+        } catch (err) {
+            console.error("Medicine search failed:", err);
+            updateRowSearch(i, { loading: false, fetched: true });
+        }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+    }, [searchByRow, updateRowSearch]);
+
+    // Debounced refetch when the OPEN row's filters change. Closed rows
+    // don't refire — their last results stay cached until reopened.
+    const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (openRowIndex === null) return;
+        if (debounceTimer.current) clearTimeout(debounceTimer.current);
+        debounceTimer.current = setTimeout(() => {
+            fetchRowResults(openRowIndex);
+        }, 250);
+        return () => {
+            if (debounceTimer.current) clearTimeout(debounceTimer.current);
+        };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+    }, [
+        openRowIndex,
+        searchByRow[openRowIndex ?? -1]?.query,
+        searchByRow[openRowIndex ?? -1]?.inStockOnly,
+    ]);
     const [prescriptionItems, setPrescriptionItems] = useState<PrescriptionItem[]>([
         {
             medicationName: "",
@@ -144,7 +213,6 @@ export function MultiplePrescriptionForm({
     ]);
 
     useEffect(() => {
-        fetchMedicines();
         fetchVideos();
     }, []);
 
@@ -154,15 +222,6 @@ export function MultiplePrescriptionForm({
             setVideos(data);
         } catch (error) {
             console.error("Failed to fetch videos:", error);
-        }
-    };
-
-    const fetchMedicines = async () => {
-        try {
-            const { data } = await apiClient.get<Medicine[]>('/api/pharmacy/medicines');
-            setMedicines(data);
-        } catch (error) {
-            console.error("Failed to fetch medicines:", error);
         }
     };
 
@@ -193,13 +252,15 @@ export function MultiplePrescriptionForm({
         const newItems = [...prescriptionItems];
         newItems[index] = { ...newItems[index], [field]: value };
 
-        // If updating medicationName (manual or via combobox), try to find medicineId, videoUrl and SKU
+        // If updating medicationName via free-text typing, try to match
+        // against the most recent search results for this row to
+        // auto-link the medicineId / SKU / video.
         if (field === "medicationName") {
-            const med = medicines.find(m => m.name.toLowerCase() === value.toLowerCase());
+            const cached = searchByRow[index]?.results || [];
+            const med = cached.find(m => m.name.toLowerCase() === value.toLowerCase());
             if (med) {
                 newItems[index].medicineId = med.id;
                 newItems[index].sku = med.sku;
-                // @ts-ignore
                 if (med.videoUrl) {
                     newItems[index].videoUrl = med.videoUrl;
                 }
@@ -279,7 +340,19 @@ export function MultiplePrescriptionForm({
                             <div className="md:col-span-2 space-y-2">
                                 <Label>Medication Name (Search by Name or SKU) *</Label>
                                 <div className="relative">
-                                    <Popover>
+                                    <Popover
+                                        onOpenChange={(open) => {
+                                            if (open) {
+                                                setOpenRowIndex(index);
+                                                // Trigger initial fetch only if this row hasn't loaded yet
+                                                if (!searchByRow[index]?.fetched) {
+                                                    fetchRowResults(index);
+                                                }
+                                            } else if (openRowIndex === index) {
+                                                setOpenRowIndex(null);
+                                            }
+                                        }}
+                                    >
                                         <PopoverTrigger asChild>
                                             <Button
                                                 variant="outline"
@@ -295,21 +368,64 @@ export function MultiplePrescriptionForm({
                                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                             </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-[calc(100vw-2rem)] md:w-[400px] p-0" align="start">
-                                            <Command>
-                                                <CommandInput placeholder="Search medicine or SKU..." />
-                                                <CommandEmpty>No medicine found.</CommandEmpty>
-                                                <CommandList>
+                                        <PopoverContent className="w-[calc(100vw-2rem)] md:w-[480px] p-0" align="start">
+                                            {/* shouldFilter=false because we're driving the
+                                                result list from the server via /medicines/search.
+                                                Letting Command also filter would cause flicker. */}
+                                            <Command shouldFilter={false}>
+                                                <CommandInput
+                                                    placeholder="Search medicine, SKU, brand…"
+                                                    value={searchByRow[index]?.query ?? ""}
+                                                    onValueChange={(v) => updateRowSearch(index, { query: v })}
+                                                />
+                                                {/* In-stock-only toggle — narrows the search to
+                                                    medicines with available stock. Kept as the
+                                                    only inline filter; Type/Category were removed
+                                                    per request to reduce visual noise. */}
+                                                <div className="px-2 pt-2 pb-2 border-b border-border/40 flex items-center justify-between">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateRowSearch(index, { inStockOnly: !(searchByRow[index]?.inStockOnly) })}
+                                                        className={cn(
+                                                            "inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors",
+                                                            searchByRow[index]?.inStockOnly
+                                                                ? "bg-emerald-600 text-white border-emerald-600"
+                                                                : "bg-background hover:bg-muted/60 border-border text-muted-foreground",
+                                                        )}
+                                                    >
+                                                        <Package className="w-3 h-3" />
+                                                        In stock only
+                                                    </button>
+                                                    {searchByRow[index]?.inStockOnly && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => updateRowSearch(index, { inStockOnly: false })}
+                                                            className="text-[10px] text-muted-foreground hover:text-destructive underline-offset-2 hover:underline"
+                                                        >
+                                                            Clear filter
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <CommandEmpty>
+                                                    {searchByRow[index]?.loading ? (
+                                                        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground py-3">
+                                                            <Loader2 className="w-3 h-3 animate-spin" /> Searching inventory…
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-muted-foreground py-3 inline-block">
+                                                            No medicines match these filters.
+                                                        </span>
+                                                    )}
+                                                </CommandEmpty>
+                                                <CommandList className="max-h-[320px]">
                                                     <CommandGroup>
-                                                        {medicines.map((med) => (
+                                                        {(searchByRow[index]?.results ?? []).map((med) => (
                                                             <CommandItem
                                                                 key={med.id}
                                                                 value={`${med.name} ${med.sku || ""}`}
-                                                                onSelect={() => {
-                                                                    handleSelectMedicine(index, med);
-                                                                }}
+                                                                onSelect={() => handleSelectMedicine(index, med)}
                                                             >
-                                                                <div className="flex flex-col">
+                                                                <div className="flex flex-col w-full">
                                                                     <div className="flex items-center gap-2">
                                                                         <Check
                                                                             className={cn(
@@ -323,11 +439,17 @@ export function MultiplePrescriptionForm({
                                                                                 {med.sku}
                                                                             </Badge>
                                                                         )}
+                                                                        {med.type && (
+                                                                            <Badge variant="outline" className="text-[9px] py-0 px-1">
+                                                                                {med.type}
+                                                                            </Badge>
+                                                                        )}
                                                                     </div>
                                                                     <div className="ml-6 flex items-center gap-3 text-[10px] text-muted-foreground">
                                                                         <span>{med.brand || "Generics"}</span>
+                                                                        {med.category && <span>· {med.category}</span>}
                                                                         <span className={med.totalStock < 10 ? "text-attention font-bold" : ""}>
-                                                                            {med.totalStock} in stock
+                                                                            · {med.totalStock} in stock
                                                                         </span>
                                                                     </div>
                                                                 </div>
@@ -335,6 +457,25 @@ export function MultiplePrescriptionForm({
                                                         ))}
                                                     </CommandGroup>
                                                 </CommandList>
+                                                {/* Footer: showing X of Y. Hint to refine if truncated. */}
+                                                <div className="px-3 py-2 border-t border-border/40 text-[10px] text-muted-foreground flex items-center justify-between">
+                                                    {searchByRow[index]?.loading ? (
+                                                        <span className="inline-flex items-center gap-1.5">
+                                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                                            Searching…
+                                                        </span>
+                                                    ) : (
+                                                        <span>
+                                                            Showing <strong>{searchByRow[index]?.results.length ?? 0}</strong>
+                                                            {" of "}
+                                                            <strong>{searchByRow[index]?.total ?? 0}</strong>
+                                                            {" matching medicines"}
+                                                        </span>
+                                                    )}
+                                                    {(searchByRow[index]?.total ?? 0) > (searchByRow[index]?.results.length ?? 0) && (
+                                                        <span className="italic">Refine search to narrow results</span>
+                                                    )}
+                                                </div>
                                             </Command>
                                         </PopoverContent>
                                     </Popover>
