@@ -618,7 +618,7 @@ export interface PerformanceScorecard {
 
 // ── Feature 9: Attendance ───────────────────────────────────────────────────
 
-export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT' | 'HALF_DAY' | 'LEAVE';
+export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT' | 'HALF_DAY' | 'LEAVE' | 'WFH';
 
 export interface StaffAttendanceEntry {
   id: string;
@@ -628,16 +628,82 @@ export interface StaffAttendanceEntry {
   clockIn?: string;
   clockOut?: string;
   scheduledStart?: string;
+  scheduledEnd?: string;
   status: AttendanceStatus;
   lateMinutes: number;
+  notes?: string;
 }
 
 export interface AttendanceStats {
   presentDays: number;
   lateDays: number;
   absentDays: number;
+  halfDays?: number;
+  leaveDays?: number;
+  wfhDays?: number;
   avgLateMinutes: number;
   totalDays: number;
+}
+
+// ── Unified Clinician Calendar ──────────────────────────────────────────────
+
+export type BlockKind = 'LEAVE' | 'WFH' | 'OFF' | 'OTHER';
+
+export interface CalendarBlock {
+  id: string;
+  kind: BlockKind;
+  startTime: string;
+  endTime: string;
+  reason: string | null;
+  recurring: boolean;
+}
+
+export interface CalendarDay {
+  date: string;              // YYYY-MM-DD
+  dayOfWeek: number;         // 0 = Sunday
+  hasSchedule: boolean;
+  schedule: { start: string; end: string; source: 'DECLARED' | 'BRANCH_HOURS' } | null;
+  blocks: CalendarBlock[];
+  leaveToday: boolean;
+  wfhToday: boolean;
+  attendance: {
+    status: AttendanceStatus;
+    clockIn: string | null;
+    clockOut: string | null;
+    lateMinutes: number;
+  } | null;
+  appointments: {
+    total: number;
+    morning: number;
+    afternoon: number;
+    evening: number;
+    online: number;
+  };
+}
+
+export interface ClinicianCalendar {
+  clinician: { userId: string; role: string; fullName: string; branchName: string | null };
+  range: { from: string; to: string };
+  days: CalendarDay[];
+}
+
+export interface BranchCalendarRow {
+  userId: string;
+  role: string;
+  fullName: string;
+  days: Array<{
+    date: string;
+    appointments: number;
+    leaveToday: boolean;
+    wfhToday: boolean;
+    attendanceStatus: AttendanceStatus | null;
+    lateMinutes: number;
+  }>;
+}
+
+export interface BranchCalendar {
+  range: { from: string; to: string };
+  rows: BranchCalendarRow[];
 }
 
 // ── Feature 13: Staff Skill Matrix ──────────────────────────────────────────
