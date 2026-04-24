@@ -1,24 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Edit2 } from "lucide-react";
+import { Plus, Search, Edit2, Upload, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MedicineModal } from "@/components/pharmacy/MedicineModal";
+import { MedicineImportModal } from "@/components/pharmacy/MedicineImportModal";
 import { apiClient } from "@/lib/api-client";
+import { useBranchScope } from "@/hooks/useBranchScope";
 
 export default function MedicineInventory() {
+    const { branchIdParam } = useBranchScope();
     const [medicines, setMedicines] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [selectedMedicine, setSelectedMedicine] = useState<any>(null);
+    const [page, setPage] = useState(1);
+    const PAGE_SIZE = 30;
 
     const fetchMedicines = async () => {
+        setLoading(true);
         try {
-            const { data } = await apiClient.get<any[]>('/api/pharmacy/medicines');
+            // Backend scopes per-branch stock when branchId is given; totalStock
+            // is recomputed from the filtered stocks server-side.
+            const { data } = await apiClient.get<any[]>(
+                '/api/pharmacy/medicines',
+                branchIdParam ? { branchId: branchIdParam } : undefined
+            );
             if (Array.isArray(data)) {
                 setMedicines(data);
             } else {
@@ -34,7 +46,8 @@ export default function MedicineInventory() {
 
     useEffect(() => {
         fetchMedicines();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [branchIdParam]);
 
     const handleAdd = () => {
         setSelectedMedicine(null);
@@ -46,11 +59,23 @@ export default function MedicineInventory() {
         setIsModalOpen(true);
     };
 
-    const filteredMedicines = medicines.filter(m =>
-        m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        m.brand?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        m.sku?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredMedicines = useMemo(() => (
+        medicines.filter(m =>
+            m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            m.brand?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            m.sku?.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+    ), [medicines, searchTerm]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredMedicines.length / PAGE_SIZE));
+    const currentPage = Math.min(page, totalPages);
+    const pageStart = (currentPage - 1) * PAGE_SIZE;
+    const pageEnd = pageStart + PAGE_SIZE;
+    const pagedMedicines = filteredMedicines.slice(pageStart, pageEnd);
+
+    useEffect(() => {
+        setPage(1);
+    }, [searchTerm, branchIdParam]);
 
     return (
         <AppLayout>
@@ -71,10 +96,16 @@ export default function MedicineInventory() {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <Button className="gap-2 w-full md:w-auto" onClick={handleAdd}>
-                        <Plus className="h-4 w-4" />
-                        Add Medicine
-                    </Button>
+                    <div className="flex gap-2 w-full md:w-auto">
+                        <Button variant="outline" className="gap-2 flex-1 md:flex-none" onClick={() => setIsImportOpen(true)}>
+                            <Upload className="h-4 w-4" />
+                            Import CSV
+                        </Button>
+                        <Button className="gap-2 flex-1 md:flex-none" onClick={handleAdd}>
+                            <Plus className="h-4 w-4" />
+                            Add Medicine
+                        </Button>
+                    </div>
                 </div>
 
                 <Panel title="Medicine List" subtitle="Comprehensive list of all drugs in stock">
@@ -82,10 +113,10 @@ export default function MedicineInventory() {
                     <div className="grid grid-cols-1 gap-4 md:hidden">
                         {loading ? (
                             <div className="py-12 text-center text-muted-foreground">Loading inventory...</div>
-                        ) : filteredMedicines.length === 0 ? (
+                        ) : pagedMedicines.length === 0 ? (
                             <div className="py-12 text-center text-muted-foreground">No medicines found</div>
                         ) : (
-                            filteredMedicines.map((med) => (
+                            pagedMedicines.map((med) => (
                                 <div key={med.id} className="p-4 rounded-xl border border-border/50 bg-card space-y-4">
                                     <div className="flex justify-between items-start">
                                         <div>
@@ -142,12 +173,12 @@ export default function MedicineInventory() {
                                     <tr>
                                         <td colSpan={6} className="py-12 text-center text-muted-foreground">Loading inventory...</td>
                                     </tr>
-                                ) : filteredMedicines.length === 0 ? (
+                                ) : pagedMedicines.length === 0 ? (
                                     <tr>
                                         <td colSpan={6} className="py-12 text-center text-muted-foreground">No medicines found</td>
                                     </tr>
                                 ) : (
-                                    filteredMedicines.map((med) => (
+                                    pagedMedicines.map((med) => (
                                         <tr key={med.id} className="group hover:bg-secondary/50 transition">
                                             <td className="py-4">
                                                 <div className="font-medium">{med.name}</div>
@@ -187,6 +218,41 @@ export default function MedicineInventory() {
                             </tbody>
                         </table>
                     </div>
+
+                    {!loading && filteredMedicines.length > 0 && (
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-4 mt-4 border-t border-border/40">
+                            <p className="text-xs text-muted-foreground">
+                                Showing <span className="font-semibold text-foreground">{pageStart + 1}</span>
+                                {"–"}
+                                <span className="font-semibold text-foreground">{Math.min(pageEnd, filteredMedicines.length)}</span>
+                                {" of "}
+                                <span className="font-semibold text-foreground">{filteredMedicines.length}</span>
+                            </p>
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-1"
+                                    disabled={currentPage <= 1}
+                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                >
+                                    <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                                </Button>
+                                <span className="text-xs px-3 font-medium">
+                                    Page {currentPage} of {totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-1"
+                                    disabled={currentPage >= totalPages}
+                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                >
+                                    Next <ChevronRight className="h-3.5 w-3.5" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </Panel>
             </div>
 
@@ -195,6 +261,12 @@ export default function MedicineInventory() {
                 onClose={() => setIsModalOpen(false)}
                 onSuccess={fetchMedicines}
                 medicine={selectedMedicine}
+            />
+
+            <MedicineImportModal
+                isOpen={isImportOpen}
+                onClose={() => setIsImportOpen(false)}
+                onSuccess={fetchMedicines}
             />
         </AppLayout>
     );

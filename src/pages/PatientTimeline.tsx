@@ -69,8 +69,12 @@ export default function PatientTimeline() {
             const params: Record<string, string> = {};
             if (fromDate) params.from = fromDate;
             if (toDate)   params.to   = toDate;
-            const { data } = await apiClient.get<TimelineEvent[]>(`/api/patients/${patientId}/timeline`, params);
-            setEvents(data);
+            // Backend wraps the list as { patientId, total, events } — pull `events` out.
+            const { data } = await apiClient.get<{ patientId: string; total: number; events: TimelineEvent[] }>(
+                `/api/patients/${patientId}/timeline`,
+                params
+            );
+            setEvents(Array.isArray(data?.events) ? data.events : []);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Unexpected error";
             setError(msg);

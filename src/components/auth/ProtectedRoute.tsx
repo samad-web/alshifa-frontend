@@ -43,6 +43,8 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
 export function getRoleRedirectPath(role: AppRole | null): string {
   switch (role) {
+    case "SUPER_ADMIN":
+      return "/super-admin";
     case "ADMIN":
       return "/admin";
     case "ADMIN_DOCTOR":

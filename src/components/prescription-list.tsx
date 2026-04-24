@@ -1,6 +1,11 @@
-import { Download, FileText, Calendar, ExternalLink } from "lucide-react";
+import { useState } from "react";
+import { Download, FileText, Calendar, ExternalLink, Activity, Ban } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
+import { PrescriptionAdherenceModal } from "@/components/prescription/PrescriptionAdherenceModal";
+import { DiscontinuePrescriptionDialog } from "@/components/prescription/DiscontinuePrescriptionDialog";
 
 /**
  * Convert any YouTube URL format to a proper embed URL.
@@ -38,6 +43,8 @@ interface Prescription {
     fileUrl?: string;
     videoUrl?: string;
     createdAt: string;
+    discontinuedAt?: string | null;
+    discontinuedReason?: string | null;
     doctor?: {
         fullName?: string;
         user: {
@@ -55,12 +62,20 @@ interface Prescription {
 interface PrescriptionListProps {
     prescriptions: Prescription[];
     emptyMessage?: string;
+    onChange?: () => void;
 }
+
+const CLINICAL_ROLES = new Set(["DOCTOR", "THERAPIST", "ADMIN", "ADMIN_DOCTOR"]);
 
 export function PrescriptionList({
     prescriptions,
     emptyMessage = "No prescriptions available yet.",
+    onChange,
 }: PrescriptionListProps) {
+    const { role } = useAuth();
+    const canManage = !!role && CLINICAL_ROLES.has(role);
+    const [adherenceFor, setAdherenceFor] = useState<string | null>(null);
+    const [discontinueFor, setDiscontinueFor] = useState<{ id: string; name: string } | null>(null);
     const handleDownload = (fileUrl: string) => {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
         const filename = fileUrl.split("/").pop();
@@ -85,21 +100,37 @@ export function PrescriptionList({
                     rx.doctor?.user?.email ||
                     rx.therapist?.user?.email ||
                     "Unknown";
-                const role = rx.doctor ? "Doctor" : "Therapist";
+                const roleLabel = rx.doctor ? "Doctor" : "Therapist";
+                const discontinued = !!rx.discontinuedAt;
 
                 return (
-                    <Card key={rx.id} className="p-5 hover:shadow-md transition-shadow">
+                    <Card
+                        key={rx.id}
+                        className={`p-5 hover:shadow-md transition-shadow ${discontinued ? "opacity-70" : ""}`}
+                    >
                         <div className="flex items-start justify-between gap-4">
                             <div className="flex-1 space-y-3">
                                 {/* Header */}
                                 <div className="flex items-start justify-between">
                                     <div>
-                                        <h4 className="font-bold text-lg text-foreground">
-                                            {rx.medicationName}
-                                        </h4>
+                                        <div className="flex items-center gap-2">
+                                            <h4 className="font-bold text-lg text-foreground">
+                                                {rx.medicationName}
+                                            </h4>
+                                            {discontinued && (
+                                                <Badge variant="outline" className="border-red-300 text-red-700 text-[10px]">
+                                                    Discontinued
+                                                </Badge>
+                                            )}
+                                        </div>
                                         <p className="text-sm text-muted-foreground">
-                                            Prescribed by {prescriber} ({role})
+                                            Prescribed by {prescriber} ({roleLabel})
                                         </p>
+                                        {discontinued && rx.discontinuedReason && (
+                                            <p className="text-xs text-red-700 mt-1">
+                                                Reason: {rx.discontinuedReason}
+                                            </p>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <Calendar className="w-3 h-3" />
@@ -190,11 +221,48 @@ export function PrescriptionList({
                                         </Button>
                                     </div>
                                 )}
+
+                                {/* Clinical actions (DOCTOR / THERAPIST / ADMIN / ADMIN_DOCTOR only) */}
+                                {canManage && (
+                                    <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-border/50">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="gap-2 h-8 text-xs"
+                                            onClick={() => setAdherenceFor(rx.id)}
+                                        >
+                                            <Activity className="w-3.5 h-3.5" />
+                                            Adherence
+                                        </Button>
+                                        {!discontinued && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="gap-2 h-8 text-xs text-red-700 hover:text-red-800 hover:bg-red-50"
+                                                onClick={() => setDiscontinueFor({ id: rx.id, name: rx.medicationName })}
+                                            >
+                                                <Ban className="w-3.5 h-3.5" />
+                                                Discontinue
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </Card>
                 );
             })}
+
+            <PrescriptionAdherenceModal
+                prescriptionId={adherenceFor}
+                onClose={() => setAdherenceFor(null)}
+            />
+            <DiscontinuePrescriptionDialog
+                prescriptionId={discontinueFor?.id ?? null}
+                medicationName={discontinueFor?.name}
+                onClose={() => setDiscontinueFor(null)}
+                onDiscontinued={() => { onChange?.(); }}
+            />
         </div>
     );
 }

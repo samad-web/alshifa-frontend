@@ -10,11 +10,12 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Progress } from '@/components/ui/progress';
-import { ChevronLeft, ChevronRight, Check, Star } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Star, Activity } from 'lucide-react';
 import { BodyMap, type PainRegion } from './BodyMap';
 import { TriageResultCard } from './TriageResultCard';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 
 const SUGGESTION_CHIPS = [
   'Digestive disorders', 'Joint pain', 'Skin conditions', 'Stress & anxiety',
@@ -26,6 +27,14 @@ const ONSET_PATTERNS = ['Sudden', 'Gradual', 'Recurrent'];
 const DIET_TYPES = ['Vegetarian', 'Non-vegetarian', 'Vegan'];
 const BOWEL_OPTIONS = ['Regular', 'Irregular', 'Constipated'];
 const APPETITE_OPTIONS = ['Normal', 'Reduced', 'Increased'];
+
+interface VitalsInput {
+  BP_SYSTOLIC?: number;
+  BP_DIASTOLIC?: number;
+  SPO2?: number;
+  GLUCOSE?: number;
+  HEART_RATE?: number;
+}
 
 interface TriageData {
   chiefComplaint: string;
@@ -39,6 +48,8 @@ interface TriageData {
   dietType: string;
   bowelRegularity: string;
   appetite: string;
+  isPregnant: boolean | null; // null = prefer-not-to-say / not applicable
+  recentVitals: VitalsInput;
 }
 
 const STORAGE_KEY = 'alshifa-triage-wizard';
@@ -55,11 +66,21 @@ const defaultData: TriageData = {
   dietType: '',
   bowelRegularity: '',
   appetite: '',
+  isPregnant: null,
+  recentVitals: {},
 };
 
 export function TriageWizard() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { profile } = useAuth();
+  const patient = (profile?.patient as { age?: number | null; dob?: string | null; gender?: string | null } | undefined) ?? undefined;
+  const profileAge = patient?.age ?? (patient?.dob
+    ? Math.floor((Date.now() - new Date(patient.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : null);
+  // Case-insensitive so legacy rows ("female", "Female") behave the same as the
+  // canonical "FEMALE" written by the new user-creation flow.
+  const showPregnancyField = (patient?.gender ?? '').toUpperCase() === 'FEMALE';
   const [step, setStep] = useState(1);
   const [data, setData] = useState<TriageData>(() => {
     try {
@@ -107,6 +128,8 @@ export function TriageWizard() {
           bowelRegularity: data.bowelRegularity,
           appetite: data.appetite,
         },
+        ...(data.isPregnant !== null ? { isPregnant: data.isPregnant } : {}),
+        ...(Object.keys(data.recentVitals).length > 0 ? { recentVitals: data.recentVitals } : {}),
       };
 
       const res = await apiClient.post('/api/triage', payload);
@@ -242,6 +265,93 @@ export function TriageWizard() {
                   ))}
                 </ToggleGroup>
               </div>
+
+              {/* Age from profile (read-only, makes it obvious age is being used) */}
+              {profileAge !== null && (
+                <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">Age used for assessment:</span>
+                  <span className="font-medium">{profileAge}</span>
+                  <span className="text-xs text-muted-foreground">(from your profile)</span>
+                </div>
+              )}
+
+              {/* Pregnancy toggle — only shown when gender is female */}
+              {showPregnancyField && (
+                <div className="space-y-2">
+                  <Label>Currently pregnant?</Label>
+                  <ToggleGroup
+                    type="single"
+                    value={data.isPregnant === null ? '' : data.isPregnant ? 'yes' : 'no'}
+                    onValueChange={val => update('isPregnant', val === 'yes' ? true : val === 'no' ? false : null)}
+                    className="flex gap-2"
+                  >
+                    <ToggleGroupItem value="yes" className="text-sm">Yes</ToggleGroupItem>
+                    <ToggleGroupItem value="no"  className="text-sm">No</ToggleGroupItem>
+                    <ToggleGroupItem value=""    className="text-sm">Prefer not to say</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              )}
+
+              {/* Optional vitals quick-entry — skip if you don't know */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5" />
+                  Recent vitals <span className="text-xs text-muted-foreground font-normal">(optional — leave blank to skip)</span>
+                </Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">BP Systolic (mmHg)</Label>
+                    <Input
+                      type="number" inputMode="numeric" min={50} max={260}
+                      value={data.recentVitals.BP_SYSTOLIC ?? ''}
+                      onChange={e => {
+                        const v = e.target.value === '' ? undefined : Number(e.target.value);
+                        update('recentVitals', { ...data.recentVitals, BP_SYSTOLIC: v });
+                      }}
+                      placeholder="e.g. 120"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">BP Diastolic (mmHg)</Label>
+                    <Input
+                      type="number" inputMode="numeric" min={30} max={180}
+                      value={data.recentVitals.BP_DIASTOLIC ?? ''}
+                      onChange={e => {
+                        const v = e.target.value === '' ? undefined : Number(e.target.value);
+                        update('recentVitals', { ...data.recentVitals, BP_DIASTOLIC: v });
+                      }}
+                      placeholder="e.g. 80"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">SpO₂ (%)</Label>
+                    <Input
+                      type="number" inputMode="numeric" min={50} max={100}
+                      value={data.recentVitals.SPO2 ?? ''}
+                      onChange={e => {
+                        const v = e.target.value === '' ? undefined : Number(e.target.value);
+                        update('recentVitals', { ...data.recentVitals, SPO2: v });
+                      }}
+                      placeholder="e.g. 98"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Glucose (mg/dL)</Label>
+                    <Input
+                      type="number" inputMode="numeric" min={20} max={800}
+                      value={data.recentVitals.GLUCOSE ?? ''}
+                      onChange={e => {
+                        const v = e.target.value === '' ? undefined : Number(e.target.value);
+                        update('recentVitals', { ...data.recentVitals, GLUCOSE: v });
+                      }}
+                      placeholder="e.g. 95"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  We use these to adjust urgency — e.g. SpO₂ ≤ 92% forces a critical assessment.
+                </p>
+              </div>
             </>
           )}
 
@@ -364,6 +474,15 @@ export function TriageWizard() {
                 )}
                 {data.onsetPattern && (
                   <p className="text-sm"><span className="text-muted-foreground">Onset:</span> {data.onsetPattern}</p>
+                )}
+                {profileAge !== null && (
+                  <p className="text-sm"><span className="text-muted-foreground">Age:</span> {profileAge}</p>
+                )}
+                {data.isPregnant !== null && (
+                  <p className="text-sm"><span className="text-muted-foreground">Pregnancy:</span> {data.isPregnant ? 'Yes' : 'No'}</p>
+                )}
+                {Object.keys(data.recentVitals).length > 0 && (
+                  <p className="text-sm"><span className="text-muted-foreground">Vitals:</span> {Object.entries(data.recentVitals).filter(([, v]) => v !== undefined).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(', ')}</p>
                 )}
               </div>
 

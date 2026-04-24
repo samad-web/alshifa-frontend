@@ -39,17 +39,25 @@ const SLICE_COLORS = [
   "#10b981",
 ];
 
-export function PrescriptionAnalyticsChart() {
+interface PrescriptionAnalyticsChartProps {
+  branchId?: string;
+}
+
+export function PrescriptionAnalyticsChart({ branchId }: PrescriptionAnalyticsChartProps = {}) {
   const [data, setData] = useState<PrescriptionAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     apiClient
-      .get<{ data: PrescriptionAnalytics }>("/api/reports/prescriptions")
+      .get<{ data: PrescriptionAnalytics }>(
+        "/api/reports/prescriptions",
+        branchId ? { branchId } : undefined,
+      )
       .then(({ data: result }) => setData(result.data))
       .catch(() => toast.error("Failed to load prescription analytics"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [branchId]);
 
   if (loading) {
     return (

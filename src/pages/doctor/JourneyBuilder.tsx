@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, GripVertical, Trash2, Pill, Dumbbell, Salad, Heart, Leaf, Award, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
+import { AppLayout } from '@/components/layout/app-layout';
 
 const TASK_TYPES = [
   { value: 'MEDICATION', label: 'Medication', icon: '💊' },
@@ -152,6 +153,7 @@ export default function JourneyBuilder() {
   }
 
   return (
+    <AppLayout>
     <div className="max-w-3xl mx-auto p-4 space-y-6">
       <h1 className="text-2xl font-bold">Create Treatment Journey</h1>
 
@@ -294,5 +296,6 @@ export default function JourneyBuilder() {
         </Button>
       </div>
     </div>
+    </AppLayout>
   );
 }

@@ -16,15 +16,39 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { GroupedByBranch } from "@/components/common/GroupedByBranch";
+
+function orderBranchId(o: any): string | null {
+    return o?.branchId
+        ?? o?.branch?.id
+        ?? o?.patient?.user?.branchId
+        ?? o?.patient?.branchId
+        ?? null;
+}
+function orderBranchName(o: any): string | null {
+    return o?.branch?.name
+        ?? o?.patient?.user?.branch?.name
+        ?? o?.patient?.branch?.name
+        ?? null;
+}
 
 export default function PharmacyOrders() {
+    const { role } = useAuth();
+    const { isAll, branchIdParam } = useBranchScope();
+    const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
     const [orders, setOrders] = useState<any[]>([]);
     const [pagination, setPagination] = useState<any>({ total: 0, page: 1, limit: 20, totalPages: 0 });
     const [loading, setLoading] = useState(true);
 
     const fetchOrders = async () => {
+        setLoading(true);
         try {
-            const { data } = await apiClient.get<any>('/api/pharmacy/orders');
+            const { data } = await apiClient.get<any>(
+                '/api/pharmacy/orders',
+                branchIdParam ? { branchId: branchIdParam } : undefined
+            );
             if (data.orders) {
                 setOrders(data.orders);
                 setPagination(data.pagination);
@@ -40,7 +64,13 @@ export default function PharmacyOrders() {
 
     useEffect(() => {
         fetchOrders();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [branchIdParam]);
+
+    // Extra client-side safety filter in case server hasn't narrowed results
+    const scopedOrders = branchIdParam
+        ? orders.filter((o) => orderBranchId(o) === branchIdParam)
+        : orders;
 
     const updateStatus = async (orderId: string, status: string) => {
         try {
@@ -71,6 +101,94 @@ export default function PharmacyOrders() {
         }
     };
 
+    const renderOrderBody = (order: any) => (
+        <div className="flex flex-col md:flex-row gap-6">
+            {/* Order Info */}
+            <div className="flex-1 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono text-muted-foreground">#{order.id.slice(0, 8)}</span>
+                        {getUrgencyBadge(order.urgency)}
+                        {getStatusBadge(order.status)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        {new Date(order.createdAt).toLocaleString()}
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+                    <div className="space-y-2">
+                        <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Patient Information</div>
+                        <div className="flex items-center gap-2">
+                            <User className="w-4 h-4 text-primary" />
+                            <span className="font-semibold">{order.patient?.fullName || "Aakash"}</span>
+                        </div>
+                        {order.prescription && (
+                            <div className="text-xs text-muted-foreground">
+                                Prescribed by {order.prescription.doctor?.fullName || "Staff"}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="space-y-2">
+                        <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Medicines ordered</div>
+                        <div className="space-y-1">
+                            {order.items.map((item: any) => (
+                                <div key={item.id} className="text-sm flex items-center gap-2">
+                                    <Pill className="w-3 h-3 text-wellness" />
+                                    <span>{item.medicine.name}</span>
+                                    <span className="text-muted-foreground">x {item.quantity}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {order.notes && (
+                    <div className="bg-accent/50 p-2 rounded text-xs italic border-l-2 border-primary/50">
+                        Note: {order.notes}
+                    </div>
+                )}
+            </div>
+
+            {/* Action Panel */}
+            <div className="md:w-64 border-t md:border-t-0 md:border-l pt-4 md:pt-0 md:pl-6 flex flex-col justify-between space-y-4">
+                <div className="text-center">
+                    <div className="text-xs text-muted-foreground uppercase mb-1">Total Amount</div>
+                    <div className="text-2xl font-bold">₹{order.totalAmount}</div>
+                </div>
+
+                <div className="space-y-2">
+                    {order.status === 'PENDING' && (
+                        <Button className="w-full" onClick={() => updateStatus(order.id, 'APPROVED')}>
+                            <CheckCircle2 className="w-4 h-4 mr-2" /> Approve Order
+                        </Button>
+                    )}
+                    {order.status === 'APPROVED' && (
+                        <Button className="w-full bg-wellness hover:bg-wellness/90" onClick={() => updateStatus(order.id, 'DISPATCHED')}>
+                            <Truck className="w-4 h-4 mr-2" /> Mark Dispatched
+                        </Button>
+                    )}
+                    {order.status === 'DISPATCHED' && (
+                        <Button className="w-full variant-secondary" onClick={() => updateStatus(order.id, 'DELIVERED')}>
+                            <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Delivered
+                        </Button>
+                    )}
+                    {(order.status === 'PENDING' || order.status === 'APPROVED') && (
+                        <Button variant="ghost" className="w-full text-risk hover:bg-risk/10" onClick={() => updateStatus(order.id, 'CANCELLED')}>
+                            <AlertCircle className="w-4 h-4 mr-2" /> Cancel
+                        </Button>
+                    )}
+                    {order.status === 'DELIVERED' && (
+                        <div className="text-center py-2 text-wellness font-semibold flex items-center justify-center gap-2">
+                            <CheckCircle2 className="w-5 h-5" /> Completed
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+
     return (
         <AppLayout>
             <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
@@ -83,102 +201,29 @@ export default function PharmacyOrders() {
                     <div className="flex justify-center p-12">
                         <Clock className="w-8 h-8 animate-spin text-primary" />
                     </div>
-                ) : orders.length === 0 ? (
+                ) : scopedOrders.length === 0 ? (
                     <Panel title="No Orders" subtitle="No active orders found in the system">
                         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                             <ClipboardList className="w-12 h-12 mb-4 opacity-20" />
                             <p>There are no medicine orders to process right now.</p>
                         </div>
                     </Panel>
+                ) : isAdmin && isAll ? (
+                    <GroupedByBranch
+                        items={scopedOrders}
+                        getBranchId={orderBranchId}
+                        getBranchName={orderBranchName}
+                        renderItem={(order) => (
+                            <Panel key={order.id} title={`Order #${order.id.slice(0, 8)}`} className="overflow-hidden">
+                                {renderOrderBody(order)}
+                            </Panel>
+                        )}
+                    />
                 ) : (
                     <div className="space-y-4">
-                        {orders.map((order) => (
+                        {scopedOrders.map((order) => (
                             <Panel key={order.id} title={`Order #${order.id.slice(0, 8)}`} className="overflow-hidden">
-                                <div className="flex flex-col md:flex-row gap-6">
-                                    {/* Order Info */}
-                                    <div className="flex-1 space-y-4">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-sm font-mono text-muted-foreground">#{order.id.slice(0, 8)}</span>
-                                                {getUrgencyBadge(order.urgency)}
-                                                {getStatusBadge(order.status)}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground">
-                                                {new Date(order.createdAt).toLocaleString()}
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
-                                            <div className="space-y-2">
-                                                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Patient Information</div>
-                                                <div className="flex items-center gap-2">
-                                                    <User className="w-4 h-4 text-primary" />
-                                                    <span className="font-semibold">{order.patient?.fullName || "Aakash"}</span>
-                                                </div>
-                                                {order.prescription && (
-                                                    <div className="text-xs text-muted-foreground">
-                                                        Prescribed by {order.prescription.doctor?.fullName || "Staff"}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Medicines ordered</div>
-                                                <div className="space-y-1">
-                                                    {order.items.map((item: any) => (
-                                                        <div key={item.id} className="text-sm flex items-center gap-2">
-                                                            <Pill className="w-3 h-3 text-wellness" />
-                                                            <span>{item.medicine.name}</span>
-                                                            <span className="text-muted-foreground">x {item.quantity}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {order.notes && (
-                                            <div className="bg-accent/50 p-2 rounded text-xs italic border-l-2 border-primary/50">
-                                                Note: {order.notes}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Action Panel */}
-                                    <div className="md:w-64 border-t md:border-t-0 md:border-l pt-4 md:pt-0 md:pl-6 flex flex-col justify-between space-y-4">
-                                        <div className="text-center">
-                                            <div className="text-xs text-muted-foreground uppercase mb-1">Total Amount</div>
-                                            <div className="text-2xl font-bold">₹{order.totalAmount}</div>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            {order.status === 'PENDING' && (
-                                                <Button className="w-full" onClick={() => updateStatus(order.id, 'APPROVED')}>
-                                                    <CheckCircle2 className="w-4 h-4 mr-2" /> Approve Order
-                                                </Button>
-                                            )}
-                                            {order.status === 'APPROVED' && (
-                                                <Button className="w-full bg-wellness hover:bg-wellness/90" onClick={() => updateStatus(order.id, 'DISPATCHED')}>
-                                                    <Truck className="w-4 h-4 mr-2" /> Mark Dispatched
-                                                </Button>
-                                            )}
-                                            {order.status === 'DISPATCHED' && (
-                                                <Button className="w-full variant-secondary" onClick={() => updateStatus(order.id, 'DELIVERED')}>
-                                                    <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Delivered
-                                                </Button>
-                                            )}
-                                            {(order.status === 'PENDING' || order.status === 'APPROVED') && (
-                                                <Button variant="ghost" className="w-full text-risk hover:bg-risk/10" onClick={() => updateStatus(order.id, 'CANCELLED')}>
-                                                    <AlertCircle className="w-4 h-4 mr-2" /> Cancel
-                                                </Button>
-                                            )}
-                                            {order.status === 'DELIVERED' && (
-                                                <div className="text-center py-2 text-wellness font-semibold flex items-center justify-center gap-2">
-                                                    <CheckCircle2 className="w-5 h-5" /> Completed
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+                                {renderOrderBody(order)}
                             </Panel>
                         ))}
                     </div>

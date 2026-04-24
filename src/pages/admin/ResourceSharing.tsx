@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -17,10 +18,19 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { operationsApi } from "@/services/operations.service";
+import { apiClient } from "@/lib/api-client";
 import type { ResourceSharingEntry, SharingStatus } from "@/types";
 import {
-  Loader2, ArrowRightLeft, Plus, CheckCircle, XCircle, Users, Clock,
+  Loader2, ArrowRightLeft, Plus, CheckCircle, XCircle, Users, Clock, AlertTriangle,
 } from "lucide-react";
+import { useBranchScope } from "@/hooks/useBranchScope";
+
+function sharingFromBranchId(r: any): string | null {
+  return r?.fromBranchId ?? r?.fromBranch?.id ?? null;
+}
+function sharingFromBranchName(r: any): string | null {
+  return r?.fromBranch?.name ?? null;
+}
 
 const statusBadge: Record<SharingStatus, { className: string; label: string }> = {
   PENDING: { className: "bg-yellow-100 text-yellow-800 border-yellow-300", label: "Pending" },
@@ -34,12 +44,17 @@ export default function ResourceSharing() {
   const { role } = useAuth();
   const { branches } = useBranches();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  const { isAll, branchIdParam } = useBranchScope();
 
   const [requests, setRequests] = useState<ResourceSharingEntry[]>([]);
   const [todayShared, setTodayShared] = useState<ResourceSharingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Staff roster populated once for the Staff dropdown.
+  type StaffOption = { userId: string; name: string; role: string; branchId: string | null };
+  const [staff, setStaff] = useState<StaffOption[]>([]);
 
   // Form state
   const [formUserId, setFormUserId] = useState("");
@@ -50,6 +65,67 @@ export default function ResourceSharing() {
   const [formEndTime, setFormEndTime] = useState("17:00");
   const [formReason, setFormReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Live availability check — fires after user/date/time are filled. Admins
+  // see "on leave" / "blocked" warnings before they can submit.
+  const [availability, setAvailability] = useState<{ available: boolean; reason?: string } | null>(null);
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+
+  // Fetch assignable staff via the dashboard summary endpoint (auth'd for ADMIN/ADMIN_DOCTOR).
+  useEffect(() => {
+    if (!dialogOpen || staff.length > 0) return;
+    (async () => {
+      try {
+        const { data } = await apiClient.get<{ staff: Array<{ id: string; name: string; role: string; branch: string | null }> }>(
+          "/api/dashboards/staff/assignable"
+        );
+        const clinicians = (data.staff || []).filter(s => s.role === "DOCTOR" || s.role === "THERAPIST");
+        // Cross-reference branchId from branches list by name (since the staff endpoint
+        // only gives us the branch NAME, not id). Leaves branchId null if no match.
+        const byName = new Map<string, string>((branches as Array<{ id: string; name: string }>).map(b => [b.name, b.id]));
+        setStaff(clinicians.map(s => ({
+          userId: s.id,
+          name: s.name,
+          role: s.role,
+          branchId: s.branch ? byName.get(s.branch) ?? null : null,
+        })));
+      } catch { /* non-fatal */ }
+    })();
+  }, [dialogOpen, staff.length, branches]);
+
+  // Auto-fill From Branch when a staff member is picked.
+  const handleSelectStaff = (userId: string) => {
+    setFormUserId(userId);
+    const s = staff.find(x => x.userId === userId);
+    if (s?.branchId) setFormFromBranch(s.branchId);
+  };
+
+  // Debounced availability check — re-runs whenever the staff / date / time changes.
+  useEffect(() => {
+    if (!dialogOpen || !formUserId || !formDate || !formStartTime || !formEndTime) {
+      setAvailability(null);
+      return;
+    }
+    if (formStartTime >= formEndTime) {
+      setAvailability(null);
+      return;
+    }
+    let cancelled = false;
+    setCheckingAvailability(true);
+    const t = setTimeout(async () => {
+      try {
+        const result = await operationsApi.checkStaffAvailability(formUserId, {
+          date: formDate, startTime: formStartTime, endTime: formEndTime,
+        });
+        if (!cancelled) setAvailability(result);
+      } catch {
+        if (!cancelled) setAvailability(null);
+      } finally {
+        if (!cancelled) setCheckingAvailability(false);
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [dialogOpen, formUserId, formDate, formStartTime, formEndTime]);
 
   const fetchData = async () => {
     try {
@@ -87,8 +163,11 @@ export default function ResourceSharing() {
       setDialogOpen(false);
       resetForm();
       await fetchData();
-    } catch {
-      alert("Failed to create sharing request");
+    } catch (err: unknown) {
+      // Surface the backend reason verbatim — it carries the availability
+      // rejection text (e.g. "on leave", "has a blocked slot").
+      const msg = err instanceof Error && err.message ? err.message : "Failed to create sharing request";
+      alert(msg);
     } finally {
       setSubmitting(false);
     }
@@ -102,6 +181,7 @@ export default function ResourceSharing() {
     setFormStartTime("09:00");
     setFormEndTime("17:00");
     setFormReason("");
+    setAvailability(null);
   };
 
   const handleApprove = async (id: string) => {
@@ -167,26 +247,32 @@ export default function ResourceSharing() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {todayShared.length === 0 ? (
-              <p className="text-muted-foreground text-sm text-center py-6">No staff shared today</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {todayShared.map(entry => (
-                  <div key={entry.id} className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                    <ArrowRightLeft className="w-5 h-5 text-primary flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{getStaffName(entry)}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {entry.fromBranch?.name || "Branch"} &rarr; {entry.toBranch?.name || "Branch"}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {entry.startTime} - {entry.endTime}
-                      </p>
+            {(() => {
+              const scopedToday = branchIdParam
+                ? todayShared.filter(e => e.fromBranchId === branchIdParam || e.toBranchId === branchIdParam)
+                : todayShared;
+              if (scopedToday.length === 0) {
+                return <p className="text-muted-foreground text-sm text-center py-6">No staff shared today</p>;
+              }
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {scopedToday.map(entry => (
+                    <div key={entry.id} className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
+                      <ArrowRightLeft className="w-5 h-5 text-primary flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{getStaffName(entry)}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {entry.fromBranch?.name || "Branch"} &rarr; {entry.toBranch?.name || "Branch"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {entry.startTime} - {entry.endTime}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 
@@ -199,71 +285,116 @@ export default function ResourceSharing() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {requests.length === 0 ? (
-              <div className="text-center py-12">
-                <ArrowRightLeft className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">No sharing requests yet</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Staff</TableHead>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Status</TableHead>
-                      {isAdmin && <TableHead>Actions</TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {requests.map(req => {
-                      const cfg = statusBadge[req.status];
-                      return (
-                        <TableRow key={req.id}>
-                          <TableCell className="font-medium">{getStaffName(req)}</TableCell>
-                          <TableCell>{req.fromBranch?.name || req.fromBranchId.slice(0, 8)}</TableCell>
-                          <TableCell>{req.toBranch?.name || req.toBranchId.slice(0, 8)}</TableCell>
-                          <TableCell>{new Date(req.date).toLocaleDateString()}</TableCell>
-                          <TableCell className="text-xs">{req.startTime} - {req.endTime}</TableCell>
-                          <TableCell className="max-w-[150px] truncate text-xs">{req.reason || "--"}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={cfg.className}>{cfg.label}</Badge>
-                          </TableCell>
-                          {isAdmin && (
+            {(() => {
+              const scopedRequests = branchIdParam
+                ? requests.filter(r => r.fromBranchId === branchIdParam || r.toBranchId === branchIdParam)
+                : requests;
+              if (scopedRequests.length === 0) {
+                return (
+                  <div className="text-center py-12">
+                    <ArrowRightLeft className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+                    <p className="text-muted-foreground">No sharing requests yet</p>
+                  </div>
+                );
+              }
+
+              const renderTable = (rows: ResourceSharingEntry[]) => (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Staff</TableHead>
+                        <TableHead>From</TableHead>
+                        <TableHead>To</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Status</TableHead>
+                        {isAdmin && <TableHead>Actions</TableHead>}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map(req => {
+                        const cfg = statusBadge[req.status];
+                        return (
+                          <TableRow key={req.id}>
+                            <TableCell className="font-medium">{getStaffName(req)}</TableCell>
+                            <TableCell>{req.fromBranch?.name || req.fromBranchId.slice(0, 8)}</TableCell>
+                            <TableCell>{req.toBranch?.name || req.toBranchId.slice(0, 8)}</TableCell>
+                            <TableCell>{new Date(req.date).toLocaleDateString()}</TableCell>
+                            <TableCell className="text-xs">{req.startTime} - {req.endTime}</TableCell>
+                            <TableCell className="max-w-[150px] truncate text-xs">{req.reason || "--"}</TableCell>
                             <TableCell>
-                              {req.status === "PENDING" && (
-                                <div className="flex items-center gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                    onClick={() => handleApprove(req.id)}
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                    onClick={() => handleReject(req.id)}
-                                  >
-                                    <XCircle className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              )}
+                              <Badge variant="outline" className={cfg.className}>{cfg.label}</Badge>
                             </TableCell>
-                          )}
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+                            {isAdmin && (
+                              <TableCell>
+                                {req.status === "PENDING" && (
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                      onClick={() => handleApprove(req.id)}
+                                    >
+                                      <CheckCircle className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      onClick={() => handleReject(req.id)}
+                                    >
+                                      <XCircle className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              );
+
+              if (isAdmin && isAll) {
+                // Group by fromBranchId so admins see outgoing sharing per branch.
+                const map = new Map<string, { name: string; rows: ResourceSharingEntry[] }>();
+                for (const r of scopedRequests) {
+                  const id = sharingFromBranchId(r) ?? "__unassigned__";
+                  const name = sharingFromBranchName(r) ?? (id === "__unassigned__" ? "Unassigned" : id);
+                  if (!map.has(id)) map.set(id, { name, rows: [] });
+                  map.get(id)!.rows.push(r);
+                }
+                const groups = Array.from(map.entries())
+                  .map(([id, g]) => ({ id, ...g }))
+                  .sort((a, b) => {
+                    if (a.id === "__unassigned__") return 1;
+                    if (b.id === "__unassigned__") return -1;
+                    return a.name.localeCompare(b.name);
+                  });
+                return (
+                  <div className="space-y-4">
+                    {groups.map((g) => (
+                      <section key={g.id} className="rounded-lg border bg-card/30 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 text-sm font-medium">
+                          <Users className="w-4 h-4 text-muted-foreground" />
+                          <span>From: {g.name}</span>
+                          <span className="text-xs text-muted-foreground font-normal">({g.rows.length})</span>
+                        </div>
+                        <div className="p-2">
+                          {renderTable(g.rows)}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                );
+              }
+
+              return renderTable(scopedRequests);
+            })()}
           </CardContent>
         </Card>
 
@@ -278,39 +409,43 @@ export default function ResourceSharing() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">Staff User ID</label>
-                <Input
-                  placeholder="Enter staff user ID"
+                <label className="text-sm font-medium">Staff Member</label>
+                <SearchableSelect
                   value={formUserId}
-                  onChange={e => setFormUserId(e.target.value)}
+                  onChange={handleSelectStaff}
+                  placeholder={staff.length === 0 ? "Loading staff…" : "Select a doctor or therapist"}
+                  searchPlaceholder="Search staff…"
+                  loading={staff.length === 0}
+                  items={staff.map((s) => ({
+                    value: s.userId,
+                    label: s.name,
+                    sub:   s.role,
+                  }))}
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  Their home branch auto-fills as "From Branch" — you can still change it.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">From Branch</label>
-                  <Select value={formFromBranch} onValueChange={setFormFromBranch}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(branches as any[]).map((b: any) => (
-                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={formFromBranch}
+                    onChange={setFormFromBranch}
+                    placeholder="Select"
+                    searchPlaceholder="Search branches…"
+                    items={(branches as any[]).map((b: any) => ({ value: b.id, label: b.name }))}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">To Branch</label>
-                  <Select value={formToBranch} onValueChange={setFormToBranch}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(branches as any[]).map((b: any) => (
-                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={formToBranch}
+                    onChange={setFormToBranch}
+                    placeholder="Select"
+                    searchPlaceholder="Search branches…"
+                    items={(branches as any[]).map((b: any) => ({ value: b.id, label: b.name }))}
+                  />
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -335,10 +470,39 @@ export default function ResourceSharing() {
                   onChange={e => setFormReason(e.target.value)}
                 />
               </div>
+
+              {/* Live availability verdict — shown once the staff + time window are filled */}
+              {formUserId && formStartTime < formEndTime && (
+                <div className="pt-1">
+                  {checkingAvailability ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking staff availability…
+                    </div>
+                  ) : availability?.available ? (
+                    <div className="flex items-start gap-2 p-2.5 rounded-lg bg-green-50 border border-green-200">
+                      <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-xs text-green-800">
+                        <span className="font-semibold">Marked available</span> — no blocks or leave on this window.
+                      </div>
+                    </div>
+                  ) : availability && !availability.available ? (
+                    <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
+                      <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-xs text-red-800">
+                        <div className="font-semibold">Not available for sharing</div>
+                        <div className="text-red-700">{availability.reason || "No published availability for this window."}</div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={submitting}>
+              <Button
+                onClick={handleCreate}
+                disabled={submitting || checkingAvailability || availability?.available === false}
+              >
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                 Create Request
               </Button>

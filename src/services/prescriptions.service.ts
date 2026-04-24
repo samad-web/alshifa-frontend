@@ -29,4 +29,47 @@ export const prescriptionsApi = {
   async delete(id: string): Promise<void> {
     await apiClient.delete(`/api/prescriptions/${id}`);
   },
+
+  async getAdherence(id: string): Promise<PrescriptionAdherence> {
+    const { data } = await apiClient.get<PrescriptionAdherence>(`/api/prescriptions/${id}/adherence`);
+    return data;
+  },
+
+  async discontinue(id: string, reason?: string): Promise<Prescription> {
+    const { data } = await apiClient.post<Prescription>(`/api/prescriptions/${id}/discontinue`, { reason: reason || '' });
+    return data;
+  },
 };
+
+// ── Adherence types ──────────────────────────────────────────────────────
+
+export interface PrescriptionDispenseHistoryItem {
+  id: string;
+  createdAt: string;
+  totalAmount: number;
+  items: Array<{ quantity: number; medicine: { name: string } | null }>;
+}
+
+export interface PrescriptionMissedSlot {
+  id: string;
+  date: string;
+  notes: string | null;
+}
+
+export interface PrescriptionAdherence {
+  prescriptionId: string;
+  medicationName: string;
+  dosage: string;
+  frequency: string;
+  dailyDoseCount: number;
+  adherenceRate7d: number | null;
+  adherenceRate30d: number | null;
+  logsLast7d: number;
+  logsLast30d: number;
+  missedSlots: PrescriptionMissedSlot[];
+  dispenseHistory: PrescriptionDispenseHistoryItem[];
+  dispensedQty: number;
+  consumedQty: number;
+  startDate: string | null;
+  expectedEndDate: string | null;
+}

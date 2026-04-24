@@ -150,40 +150,47 @@ export default function XPDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-1 w-full">
-              {LEVEL_TIERS.map((tier) => {
-                const isActive = tier.level === profile.level;
-                const isPast = tier.level < profile.level;
-                return (
-                  <div key={tier.level} className="flex-1 flex flex-col items-center gap-2">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
-                        isActive
-                          ? "bg-primary border-primary text-primary-foreground scale-110 shadow-lg shadow-primary/25"
-                          : isPast
-                          ? "bg-primary/20 border-primary/40 text-primary"
-                          : "bg-muted border-muted-foreground/20 text-muted-foreground"
-                      }`}
-                    >
-                      <tier.icon className="w-5 h-5" />
-                    </div>
-                    <span
-                      className={`text-xs font-medium text-center ${
-                        isActive ? "text-primary font-bold" : isPast ? "text-foreground" : "text-muted-foreground"
-                      }`}
-                    >
-                      {tier.title}
-                    </span>
-                    {/* connector line */}
-                    {tier.level < LEVEL_TIERS.length && (
+            <div className="relative">
+              {/* background track — sits behind the icon row, vertically centred on the 40px icon (top: 20px = 1.25rem) */}
+              <div className="pointer-events-none absolute left-0 right-0 top-5 h-0.5 bg-muted" />
+              {/* progress fill — stops at the active tier's icon centre */}
+              <div
+                className="pointer-events-none absolute left-0 top-5 h-0.5 bg-primary transition-all"
+                style={{
+                  width:
+                    LEVEL_TIERS.length > 1
+                      ? `${((Math.min(profile.level, LEVEL_TIERS.length) - 1) / (LEVEL_TIERS.length - 1)) * 100}%`
+                      : "0%",
+                }}
+              />
+              <div className="relative flex items-start gap-1 w-full">
+                {LEVEL_TIERS.map((tier) => {
+                  const isActive = tier.level === profile.level;
+                  const isPast = tier.level < profile.level;
+                  return (
+                    <div key={tier.level} className="flex-1 flex flex-col items-center gap-2">
                       <div
-                        className={`absolute h-0.5 ${isPast ? "bg-primary" : "bg-muted"}`}
-                        style={{ width: "100%" }}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+                        className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
+                          isActive
+                            ? "bg-primary border-primary text-primary-foreground scale-110 shadow-lg shadow-primary/25"
+                            : isPast
+                            ? "bg-primary/20 border-primary/40 text-primary"
+                            : "bg-muted border-muted-foreground/20 text-muted-foreground"
+                        }`}
+                      >
+                        <tier.icon className="w-5 h-5" />
+                      </div>
+                      <span
+                        className={`text-xs font-medium text-center ${
+                          isActive ? "text-primary font-bold" : isPast ? "text-foreground" : "text-muted-foreground"
+                        }`}
+                      >
+                        {tier.title}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </CardContent>
         </Card>

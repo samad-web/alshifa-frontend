@@ -35,6 +35,9 @@ export interface ApiError {
   code?: string;
   details?: Array<{ path: string; message: string }>;
   status: number;
+  /** Raw response body — used by callers that need structured error data
+   *  beyond `details` (e.g. the diet-package assign flow reads `conflicts`). */
+  payload?: unknown;
 }
 
 export interface ApiResponse<T> {
@@ -46,13 +49,23 @@ export class ApiClientError extends Error {
   code?: string;
   status: number;
   details?: Array<{ path: string; message: string }>;
+  payload?: unknown;
 
   constructor(error: ApiError) {
-    super(error.message);
+    // Fold structured validation errors into the human message so callers that
+    // only show `err.message` still see field-level detail. Zod returns
+    // `{ path: string, message: string }[]` in `details`.
+    const tail = error.details && error.details.length > 0
+      ? '\n' + error.details
+          .map((d) => (d.path ? `• ${d.path}: ${d.message}` : `• ${d.message}`))
+          .join('\n')
+      : '';
+    super(`${error.message}${tail}`);
     this.name = 'ApiClientError';
     this.code = error.code;
     this.status = error.status;
     this.details = error.details;
+    this.payload = error.payload;
   }
 }
 
@@ -87,8 +100,11 @@ async function request<T>(
     if (qs) url += `?${qs}`;
   }
 
+  // Don't force Content-Type for FormData — the browser must set
+  // `multipart/form-data; boundary=...` itself or the server can't parse it.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
@@ -125,6 +141,7 @@ async function request<T>(
       code: errorPayload.code,
       details: errorPayload.details,
       status: response.status,
+      payload: errorPayload,
     });
   }
 

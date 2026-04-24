@@ -31,17 +31,25 @@ interface BranchSummary {
   totalTherapists: number;
 }
 
-export function BranchAnalyticsChart() {
+interface BranchAnalyticsChartProps {
+  branchId?: string;
+}
+
+export function BranchAnalyticsChart({ branchId }: BranchAnalyticsChartProps = {}) {
   const [data, setData] = useState<BranchSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     apiClient
-      .get<{ data: BranchSummary[] }>("/api/reports/branch-summary")
+      .get<{ data: BranchSummary[] }>(
+        "/api/reports/branch-summary",
+        branchId ? { branchId } : undefined,
+      )
       .then(({ data: result }) => setData(result.data))
       .catch(() => toast.error("Failed to load branch analytics"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [branchId]);
 
   if (loading) {
     return (

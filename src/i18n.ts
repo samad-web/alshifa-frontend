@@ -80,6 +80,43 @@ const resources = {
                 "reports": "Reports",
                 "chat": "Chat",
                 "settings": "Settings"
+            },
+            "today": {
+                "greeting_morning": "Good morning",
+                "greeting_afternoon": "Good afternoon",
+                "greeting_evening": "Good evening",
+                "subtitle": "Here's what matters today.",
+                "cards": {
+                    "tasks": "Today's tasks",
+                    "medications": "Today's medications",
+                    "vitals": "Vitals",
+                    "pain_map": "Pain map",
+                    "zen": "Zen Points",
+                    "smart_messages": "Smart messages",
+                    "journey": "Treatment journey",
+                    "breathe": "Breathe",
+                    "records": "My Records"
+                },
+                "empty": {
+                    "no_prescriptions": "No active prescriptions.",
+                    "no_pain": "No active pain points logged.",
+                    "no_messages": "No messages.",
+                    "no_vitals_prescribed": "No vitals to track yet",
+                    "no_vitals_prescribed_body": "Your doctor hasn't prescribed any vitals to track. They'll appear here once added during your next consultation."
+                },
+                "checkin": {
+                    "title": "Daily check-in",
+                    "mood_prompt": "How's your overall mood today?",
+                    "pain_prompt": "Pain level (0–10)",
+                    "pain_hint": "0 = none, 10 = worst imaginable",
+                    "sleep_prompt": "How was your sleep last night?"
+                },
+                "prescribed_vitals": {
+                    "title": "Prescribed Vitals",
+                    "empty": "No vitals prescribed yet. Use Add to specify which vitals this patient should track daily.",
+                    "add": "Add",
+                    "choose_type": "Choose vital to track"
+                }
             }
         }
     },
@@ -161,6 +198,43 @@ const resources = {
                 "reports": "அறிக்கைகள்",
                 "chat": "செய்தி",
                 "settings": "அமைப்புகள்"
+            },
+            "today": {
+                "greeting_morning": "காலை வணக்கம்",
+                "greeting_afternoon": "மதிய வணக்கம்",
+                "greeting_evening": "மாலை வணக்கம்",
+                "subtitle": "இன்றைக்கு முக்கியமானவை இதோ.",
+                "cards": {
+                    "tasks": "இன்றைய பணிகள்",
+                    "medications": "இன்றைய மருந்துகள்",
+                    "vitals": "உடல் அளவீடுகள்",
+                    "pain_map": "வலி வரைபடம்",
+                    "zen": "ஜென் புள்ளிகள்",
+                    "smart_messages": "ஸ்மார்ட் செய்திகள்",
+                    "journey": "சிகிச்சை பயணம்",
+                    "breathe": "மூச்சு",
+                    "records": "என் பதிவுகள்"
+                },
+                "empty": {
+                    "no_prescriptions": "செயலில் உள்ள மருந்துகள் இல்லை.",
+                    "no_pain": "செயலில் உள்ள வலி புள்ளிகள் பதிவாகவில்லை.",
+                    "no_messages": "செய்திகள் இல்லை.",
+                    "no_vitals_prescribed": "கண்காணிக்க உடல் அளவீடுகள் எதுவுமில்லை",
+                    "no_vitals_prescribed_body": "உங்கள் மருத்துவர் இன்னும் எந்த உடல் அளவீடுகளையும் பரிந்துரைக்கவில்லை. அடுத்த ஆலோசனையின் போது சேர்க்கப்படும்."
+                },
+                "checkin": {
+                    "title": "தினசரி பதிவு",
+                    "mood_prompt": "இன்று உங்கள் ஒட்டுமொத்த மனநிலை எப்படி உள்ளது?",
+                    "pain_prompt": "வலி நிலை (0–10)",
+                    "pain_hint": "0 = இல்லை, 10 = மோசமானது",
+                    "sleep_prompt": "நேற்றிரவு உங்கள் தூக்கம் எப்படி இருந்தது?"
+                },
+                "prescribed_vitals": {
+                    "title": "பரிந்துரைக்கப்பட்ட உடல் அளவீடுகள்",
+                    "empty": "இன்னும் உடல் அளவீடுகள் பரிந்துரைக்கப்படவில்லை. இந்த நோயாளி தினசரி எந்த அளவீடுகளைக் கண்காணிக்க வேண்டும் என்பதைக் குறிப்பிட Add ஐ பயன்படுத்தவும்.",
+                    "add": "சேர்",
+                    "choose_type": "கண்காணிக்க உடல் அளவீட்டைத் தேர்ந்தெடுக்கவும்"
+                }
             }
         }
     }

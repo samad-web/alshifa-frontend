@@ -7,7 +7,6 @@ import { useAuth } from '@/hooks/useAuth';
 const PAGES = [
   { label: 'Dashboard', path: '/patient', roles: ['PATIENT'], icon: Activity },
   { label: 'My Appointments', path: '/appointments', roles: ['PATIENT'], icon: Calendar },
-  { label: 'Wellness Dashboard', path: '/wellness-dashboard', roles: ['PATIENT'], icon: Activity },
   { label: 'Triage Assessment', path: '/triage', roles: ['PATIENT'], icon: FileText },
   { label: 'Exercise Library', path: '/exercise-library', roles: ['PATIENT'], icon: Activity },
   { label: 'Dashboard', path: '/doctor', roles: ['DOCTOR'], icon: Activity },
