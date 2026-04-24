@@ -117,6 +117,32 @@ const PATH_TO_FEATURE: Record<string, string> = {
 };
 
 /**
+ * Match the current pathname against a nav leaf's path. Exact match for
+ * top-level entries like "/" or "/chat"; otherwise prefix match so deep
+ * sub-routes (e.g. `/pharmacy/orders/123`) still highlight their parent
+ * nav entry (`/pharmacy/orders`).
+ */
+function pathMatchesNav(pathname: string, navPath: string): boolean {
+  if (navPath === "/") return pathname === "/";
+  if (pathname === navPath) return true;
+  return pathname.startsWith(navPath + "/");
+}
+
+/**
+ * When multiple nav leaves prefix-match the pathname (e.g. `/pharmacy` and
+ * `/pharmacy/orders` both match `/pharmacy/orders`), pick the longest — so
+ * only the most-specific entry lights up as active.
+ */
+function bestMatchingPath(pathname: string, paths: string[]): string | null {
+  let best: string | null = null;
+  for (const p of paths) {
+    if (!pathMatchesNav(pathname, p)) continue;
+    if (best === null || p.length > best.length) best = p;
+  }
+  return best;
+}
+
+/**
  * Filter nav items by the tenant's enabled feature set. Disabled features are
  * removed from nav entirely; direct URL access still hits the route but is
  * caught by <FeatureGate> which renders the "contact admin to upgrade" screen.
@@ -215,6 +241,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
+        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "ADMIN_DOCTOR":
       return [
@@ -271,6 +298,10 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/critical-journey", label: "Critical Journey", icon: HeartPulse, section: "Operations" },
           ],
         },
+        // Admin doctor supervises the gamification program without
+        // participating — all oversight surfaces are included here so they
+        // have full visibility into XP, challenges, rewards, leaderboards,
+        // and achievements of the clinicians they manage.
         {
           label: "Engagement",
           icon: Trophy,
@@ -289,6 +320,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/reports", label: "Reports", icon: BarChart3 },
             { path: "/chat", label: "Chat", icon: MessageSquare },
+            { path: "/staff-chat", label: "Team Chat", icon: Users },
           ],
         },
       ];
@@ -341,6 +373,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
+        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "THERAPIST":
       return [
@@ -387,6 +420,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
         { path: "/chat", label: "Chat", icon: MessageSquare },
+        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "PATIENT":
       return [
@@ -426,6 +460,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         { path: "/pharmacy/dispense", label: "Dispense", icon: ShoppingCart },
         { path: "/pharmacy/history", label: "History", icon: History },
         { path: "/chat", label: "Chat", icon: MessageSquare },
+        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     default:
       return [];
@@ -466,6 +501,14 @@ function HoverNavGroup({
 
   const GroupIcon = entry.icon;
 
+  // Pick the single best-matching leaf inside this group so prefix-matched
+  // parents don't light up alongside their children (e.g. "/pharmacy" stays
+  // dim when the user is on "/pharmacy/orders"). The trigger surfaces that
+  // leaf's label so it's obvious which section-child you're in without
+  // opening the dropdown.
+  const activeLeafPath = bestMatchingPath(pathname, entry.items.map((i) => i.path));
+  const activeLeaf = entry.items.find((i) => i.path === activeLeafPath) ?? null;
+
   return (
     <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger
@@ -474,14 +517,25 @@ function HoverNavGroup({
         // Radix moves focus off the trigger when the menu opens — using
         // onFocus/onBlur here caused an open/close race. Intentionally omitted.
         className={cn(
-          "flex items-center gap-2 px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap outline-none",
+          "relative flex items-center gap-2 px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap outline-none",
+          // Active-group treatment: stronger background, accent foreground,
+          // bolder weight, and an underline bar anchored to the bottom edge
+          // so the current section is unmistakable even when the dropdown
+          // is closed.
           active
-            ? "bg-primary/10 text-primary"
+            ? "bg-primary/15 text-primary font-semibold after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-primary after:rounded-full"
             : "text-muted-foreground hover:text-foreground hover:bg-secondary"
         )}
       >
         <GroupIcon className="h-4 w-4" />
-        <span className="hidden lg:inline">{entry.label}</span>
+        <span className="hidden lg:inline">
+          {entry.label}
+          {active && activeLeaf && (
+            <span className="ml-1.5 text-xs font-normal opacity-80">
+              · {activeLeaf.label}
+            </span>
+          )}
+        </span>
         <span className="lg:hidden">{entry.label.split(" ")[0]}</span>
         <ChevronDown className="h-3.5 w-3.5 opacity-70" />
       </DropdownMenuTrigger>
@@ -495,7 +549,7 @@ function HoverNavGroup({
       >
         {entry.items.map((item, idx) => {
           const ItemIcon = item.icon;
-          const isActive = pathname === item.path;
+          const isActive = item.path === activeLeafPath;
           const prev = idx > 0 ? entry.items[idx - 1] : null;
           const showSection = item.section && (!prev || prev.section !== item.section);
           return (
@@ -513,7 +567,7 @@ function HoverNavGroup({
                   to={item.path}
                   className={cn(
                     "flex items-center gap-2 w-full cursor-pointer",
-                    isActive && "text-primary"
+                    isActive && "bg-primary/10 text-primary font-semibold"
                   )}
                 >
                   <ItemIcon className="h-4 w-4" />
@@ -551,7 +605,7 @@ export function Navigation() {
     setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
 
   const groupHasActive = (group: NavGroup) =>
-    group.items.some((item) => location.pathname === item.path);
+    group.items.some((item) => pathMatchesNav(location.pathname, item.path));
 
   if (!user) {
     return null;
@@ -573,15 +627,18 @@ export function Navigation() {
             {navItems.map((entry) => {
               if (!isGroup(entry)) {
                 const Icon = entry.icon;
-                const isActive = location.pathname === entry.path;
+                const isActive = pathMatchesNav(location.pathname, entry.path);
                 return (
                   <Link
                     key={entry.path}
                     to={entry.path}
                     className={cn(
-                      "flex items-center gap-2 px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
+                      "relative flex items-center gap-2 px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
+                      // Same active treatment as group triggers — stronger
+                      // background, bolder weight, and a bottom accent bar so
+                      // the selected section is unmistakable at a glance.
                       isActive
-                        ? "bg-primary/10 text-primary"
+                        ? "bg-primary/15 text-primary font-semibold after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-primary after:rounded-full"
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                     )}
                   >
@@ -650,17 +707,17 @@ export function Navigation() {
             {navItems.map((entry) => {
               if (!isGroup(entry)) {
                 const Icon = entry.icon;
-                const isActive = location.pathname === entry.path;
+                const isActive = pathMatchesNav(location.pathname, entry.path);
                 return (
                   <Link
                     key={entry.path}
                     to={entry.path}
                     onClick={() => setMobileOpen(false)}
                     className={cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors",
+                      "flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors border-l-4",
                       isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                        ? "bg-primary/15 text-primary font-semibold border-primary"
+                        : "text-muted-foreground border-transparent hover:text-foreground hover:bg-secondary"
                     )}
                   >
                     <Icon className="h-5 w-5" />
@@ -672,19 +729,28 @@ export function Navigation() {
               const GroupIcon = entry.icon;
               const groupActive = groupHasActive(entry);
               const expanded = openSections[entry.label] ?? groupActive;
+              const activeLeafPath = bestMatchingPath(location.pathname, entry.items.map((i) => i.path));
+              const activeLeaf = entry.items.find((i) => i.path === activeLeafPath) ?? null;
               return (
                 <div key={entry.label} className="flex flex-col">
                   <button
                     onClick={() => toggleSection(entry.label)}
                     className={cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors",
+                      "flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors border-l-4",
                       groupActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                        ? "bg-primary/15 text-primary font-semibold border-primary"
+                        : "text-muted-foreground border-transparent hover:text-foreground hover:bg-secondary"
                     )}
                   >
                     <GroupIcon className="h-5 w-5" />
-                    <span className="flex-1 text-left">{entry.label}</span>
+                    <span className="flex-1 text-left">
+                      {entry.label}
+                      {groupActive && activeLeaf && (
+                        <span className="ml-2 text-xs font-normal opacity-80">
+                          · {activeLeaf.label}
+                        </span>
+                      )}
+                    </span>
                     <ChevronDown
                       className={cn(
                         "h-4 w-4 transition-transform",
@@ -696,7 +762,7 @@ export function Navigation() {
                     <div className="ml-4 pl-4 border-l border-border flex flex-col gap-1 mt-1 mb-1">
                       {entry.items.map((item) => {
                         const ItemIcon = item.icon;
-                        const isActive = location.pathname === item.path;
+                        const isActive = item.path === activeLeafPath;
                         return (
                           <Link
                             key={item.path}
@@ -705,7 +771,7 @@ export function Navigation() {
                             className={cn(
                               "flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
                               isActive
-                                ? "bg-primary/10 text-primary"
+                                ? "bg-primary/15 text-primary font-semibold"
                                 : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                             )}
                           >

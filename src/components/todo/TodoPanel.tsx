@@ -22,6 +22,9 @@ interface TodoPanelProps {
   canAssign?: boolean;
   className?: string;
   title?: string;
+  // Hide XP badges / "XP earned" toasts — used by oversight-only surfaces
+  // (ADMIN_DOCTOR dashboard) that must not expose gamification.
+  hideXP?: boolean;
 }
 
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
@@ -54,7 +57,7 @@ function formatRelative(date: string | null): string {
   return d.toLocaleDateString();
 }
 
-export default function TodoPanel({ canAssign = false, className, title = "My Tasks" }: TodoPanelProps) {
+export default function TodoPanel({ canAssign = false, className, title = "My Tasks", hideXP = false }: TodoPanelProps) {
   const { toast } = useToast();
   const [data, setData] = useState<TodoListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,7 +90,7 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
       await todosApi.setStatus(todo.id, "COMPLETED");
       toast({
         title: "Task completed",
-        description: todo.isSelfCreated ? "Nicely done." : `+${todo.xpReward} XP earned`,
+        description: hideXP || todo.isSelfCreated ? "Nicely done." : `+${todo.xpReward} XP earned`,
       });
       refresh(tab);
     } catch (err) {
@@ -111,10 +114,10 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
     const { pending, completedToday, xpToday, overdue } = data.summary;
     const parts = [`${pending} pending`];
     if (completedToday > 0) parts.push(`${completedToday} completed today`);
-    if (xpToday > 0) parts.push(`+${xpToday} XP earned`);
+    if (!hideXP && xpToday > 0) parts.push(`+${xpToday} XP earned`);
     if (overdue > 0) parts.push(`${overdue} overdue`);
     return parts.join(" · ");
-  }, [data]);
+  }, [data, hideXP]);
 
   return (
     <div className={cn("rounded-xl border bg-card shadow-card overflow-hidden", className)}>
@@ -184,9 +187,11 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
                   {t.isOverdue && (
                     <Badge className="text-[10px] h-5 bg-red-600 text-white">OVERDUE</Badge>
                   )}
-                  <span className="text-[10px] text-muted-foreground ml-auto">
-                    {t.isSelfCreated ? "No XP" : `+${t.xpReward} XP`}
-                  </span>
+                  {!hideXP && (
+                    <span className="text-[10px] text-muted-foreground ml-auto">
+                      {t.isSelfCreated ? "No XP" : `+${t.xpReward} XP`}
+                    </span>
+                  )}
                 </div>
                 <div className="font-medium text-sm">{t.title}</div>
                 {t.description && (
@@ -239,9 +244,9 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
         <div className="px-5 py-3 border-t bg-muted/20 text-xs text-muted-foreground">{footerText}</div>
       )}
 
-      <AddTaskDialog open={addOpen} onOpenChange={setAddOpen} onCreated={() => refresh(tab)} />
+      <AddTaskDialog open={addOpen} onOpenChange={setAddOpen} onCreated={() => refresh(tab)} hideXP={hideXP} />
       {canAssign && (
-        <AssignTaskDialog open={assignOpen} onOpenChange={setAssignOpen} onCreated={() => refresh(tab)} />
+        <AssignTaskDialog open={assignOpen} onOpenChange={setAssignOpen} onCreated={() => refresh(tab)} hideXP={hideXP} />
       )}
     </div>
   );
@@ -255,9 +260,10 @@ interface TaskDialogProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated: () => void;
+  hideXP?: boolean;
 }
 
-function AddTaskDialog({ open, onOpenChange, onCreated }: TaskDialogProps) {
+function AddTaskDialog({ open, onOpenChange, onCreated, hideXP = false }: TaskDialogProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -300,9 +306,11 @@ function AddTaskDialog({ open, onOpenChange, onCreated }: TaskDialogProps) {
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
         </DialogHeader>
-        <div className="text-xs text-muted-foreground -mt-2 mb-2 rounded bg-muted/40 px-3 py-2">
-          Self-created tasks don't earn XP — only tasks assigned to you by an Admin or Admin Doctor reward XP on completion.
-        </div>
+        {!hideXP && (
+          <div className="text-xs text-muted-foreground -mt-2 mb-2 rounded bg-muted/40 px-3 py-2">
+            Self-created tasks don't earn XP — only tasks assigned to you by an Admin or Admin Doctor reward XP on completion.
+          </div>
+        )}
         <div className="space-y-3">
           <div>
             <Label>Title</Label>
@@ -346,7 +354,7 @@ function AddTaskDialog({ open, onOpenChange, onCreated }: TaskDialogProps) {
  *  Assign Task Dialog (ADMIN / ADMIN_DOCTOR)
  * ──────────────────────────────────────────────────────────────────── */
 
-function AssignTaskDialog({ open, onOpenChange, onCreated }: TaskDialogProps) {
+function AssignTaskDialog({ open, onOpenChange, onCreated, hideXP = false }: TaskDialogProps) {
   const { toast } = useToast();
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [title, setTitle] = useState("");
@@ -440,17 +448,19 @@ function AssignTaskDialog({ open, onOpenChange, onCreated }: TaskDialogProps) {
               <Input type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
           </div>
-          <div>
-            <Label>XP Override (10–200; default {DEFAULT_XP[priority]})</Label>
-            <Input
-              type="number"
-              min={10}
-              max={200}
-              value={xpOverride}
-              onChange={(e) => setXpOverride(e.target.value)}
-              placeholder={String(DEFAULT_XP[priority])}
-            />
-          </div>
+          {!hideXP && (
+            <div>
+              <Label>XP Override (10–200; default {DEFAULT_XP[priority]})</Label>
+              <Input
+                type="number"
+                min={10}
+                max={200}
+                value={xpOverride}
+                onChange={(e) => setXpOverride(e.target.value)}
+                placeholder={String(DEFAULT_XP[priority])}
+              />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -467,7 +477,7 @@ function AssignTaskDialog({ open, onOpenChange, onCreated }: TaskDialogProps) {
  *  Tasks I've Assigned — management view for ADMIN / ADMIN_DOCTOR
  * ──────────────────────────────────────────────────────────────────── */
 
-export function AssignedByMePanel({ className }: { className?: string }) {
+export function AssignedByMePanel({ className, hideXP = false }: { className?: string; hideXP?: boolean }) {
   const { toast } = useToast();
   const [data, setData] = useState<Awaited<ReturnType<typeof todosApi.listAssignedByMe>> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -536,7 +546,8 @@ export function AssignedByMePanel({ className }: { className?: string }) {
               </div>
               <div className="font-medium text-sm">{t.title}</div>
               <div className="text-[11px] text-muted-foreground">
-                {t.assignedTo?.name} · {t.dueDate ? `due ${formatRelative(t.dueDate)}` : "no due date"} · {t.xpReward} XP
+                {t.assignedTo?.name} · {t.dueDate ? `due ${formatRelative(t.dueDate)}` : "no due date"}
+                {!hideXP && ` · ${t.xpReward} XP`}
               </div>
             </div>
             <div className="flex items-center gap-1">

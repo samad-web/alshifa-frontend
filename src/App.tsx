@@ -32,6 +32,7 @@ const PatientOnboarding = lazy(() => import("./pages/PatientOnboarding"));
 const PatientAppointments = lazy(() => import("./pages/PatientAppointments"));
 const ExerciseLibrary = lazy(() => import("./pages/ExerciseLibrary"));
 const Chat = lazy(() => import("./pages/Chat"));
+const StaffChat = lazy(() => import("./pages/StaffChat"));
 const PatientTimeline = lazy(() => import("./pages/PatientTimeline"));
 const PharmacyDashboard = lazy(() => import("./pages/PharmacyDashboard"));
 const PharmacyDispense = lazy(() => import("./pages/PharmacyDispense"));
@@ -353,6 +354,16 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["PATIENT", "DOCTOR", "ADMIN", "ADMIN_DOCTOR", "THERAPIST", "PHARMACIST"]}>
             <Chat />
+          </ProtectedRoute>
+        }
+      />
+      {/* Staff messaging: 1-on-1 DMs + branch group chats. Patients are
+          excluded — they have their own care-team chat at /chat. */}
+      <Route
+        path="/staff-chat"
+        element={
+          <ProtectedRoute allowedRoles={["DOCTOR", "ADMIN", "ADMIN_DOCTOR", "THERAPIST", "PHARMACIST"]}>
+            <StaffChat />
           </ProtectedRoute>
         }
       />

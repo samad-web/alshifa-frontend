@@ -127,6 +127,10 @@ export interface TherapistDashboardSummary {
 
 // ── Admin Doctor ──────────────────────────────────────────────────────────
 
+// Staff row on the ADMIN_DOCTOR dashboard. Admin doctor is a program
+// supervisor — the row carries BOTH clinical throughput (completion / no-
+// show) and gamification signals (XP / level / title) so they get full
+// oversight visibility in a single surface.
 export interface StaffRow {
   id: string;
   name: string;
@@ -137,6 +141,23 @@ export interface StaffRow {
   appointmentsToday: number;
   pendingApprovals: number;
   patientLoad: number;
+  monthlyCompleted: number;
+  monthlyTotal: number;
+  completionRate: number | null;
+  noShowRate: number | null;
+}
+
+export interface AdminDoctorTopPerformer {
+  userId: string;
+  name: string;
+  role: string;
+  monthlyCompleted: number;
+  completionRate: number | null;
+}
+
+export interface WorkloadBucket {
+  label: string;
+  count: number;
 }
 
 export interface EscalationItem {
@@ -174,6 +195,18 @@ export interface AdminDoctorDashboardSummary {
   escalations: EscalationItem[];
   todos: TodoSummary;
   assignedByMe: AssignedByMeRow[];
+  // Clinical throughput analytics (top performers, workload distribution,
+  // monthly completion). Coexists with `gamification` below.
+  analytics: {
+    topPerformers: AdminDoctorTopPerformer[];
+    workloadDistribution: WorkloadBucket[];
+    todoCompletionRate: number | null;
+    monthlyCompleted: number;
+    monthlyTotal: number;
+    monthlyCompletionRate: number | null;
+  };
+  // Gamification oversight — admin doctor supervises the engagement program
+  // (leaderboards, XP distribution) without participating in it themselves.
   gamification: {
     topPodium: LeaderboardEntry[];
     xpDistribution: { level: number; count: number }[];
