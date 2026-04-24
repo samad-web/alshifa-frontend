@@ -28,6 +28,8 @@ function clinicianBranchName(c: any): string | null {
         ?? null;
 }
 
+type BlockKind = 'LEAVE' | 'WFH' | 'OFF' | 'OTHER';
+
 interface BlockedSlot {
     id: string;
     doctorId: string | null;
@@ -37,6 +39,7 @@ interface BlockedSlot {
     startTime: string;
     endTime: string;
     reason?: string;
+    kind?: BlockKind | null;
 }
 
 export default function DoctorAvailability({ embedded = false }: { embedded?: boolean } = {}) {
@@ -54,6 +57,10 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
     const [endTime, setEndTime] = useState("17:00");
     const [reason, setReason] = useState("");
     const [recurringDay, setRecurringDay] = useState<string>("1");
+    // Attendance integration — tagging a block as LEAVE / WFH / OFF tells
+    // the nightly reconciliation to set the correct attendance status
+    // automatically. OTHER (default) behaves like the old generic block.
+    const [kind, setKind] = useState<BlockKind>("OTHER");
 
     useEffect(() => {
         if (role === 'ADMIN' || role === 'ADMIN_DOCTOR') {
@@ -109,7 +116,8 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
         const payload: any = {
             startTime,
             endTime,
-            reason
+            reason,
+            kind,
         };
 
         // Determine if we are blocking for a doctor or therapist
@@ -250,9 +258,27 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
                             </div>
 
                             <div className="space-y-2">
+                                <Label>Type</Label>
+                                <Select value={kind} onValueChange={(v) => setKind(v as BlockKind)}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="LEAVE">Approved Leave</SelectItem>
+                                        <SelectItem value="WFH">Work From Home</SelectItem>
+                                        <SelectItem value="OFF">Off / Not Scheduled</SelectItem>
+                                        <SelectItem value="OTHER">Other (generic block)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-[11px] text-muted-foreground">
+                                    Leave / WFH blocks are reflected automatically on the attendance calendar.
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
                                 <Label>Reason (Optional)</Label>
                                 <Input
-                                    placeholder="e.g., Leave, Conference"
+                                    placeholder="e.g., Personal, Conference"
                                     value={reason}
                                     onChange={e => setReason(e.target.value)}
                                 />
@@ -298,7 +324,7 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
                                                             : slot.date ? format(new Date(slot.date), "PPP") : "Unknown Date"}
                                                     </p>
                                                     <p className="text-sm text-muted-foreground">
-                                                        {slot.startTime} - {slot.endTime} • {slot.reason || "Unavailable"}
+                                                        {slot.startTime} - {slot.endTime} • {slot.kind && slot.kind !== 'OTHER' ? `${slot.kind}${slot.reason ? ` (${slot.reason})` : ''}` : (slot.reason || "Unavailable")}
                                                     </p>
                                                 </div>
                                             </div>

@@ -7,7 +7,8 @@ import apiClient from '@/lib/api-client';
 import type {
   ResourceSharingEntry, CentralizedInventoryItem, StockTransferEntry,
   StaffActivityEntry, PerformanceScorecard, StaffAttendanceEntry,
-  AttendanceStats, StaffSkillEntry, SkillMatrixRow
+  AttendanceStats, StaffSkillEntry, SkillMatrixRow,
+  ClinicianCalendar, BranchCalendar,
 } from '@/types';
 
 export const operationsApi = {
@@ -149,6 +150,54 @@ export const operationsApi = {
 
   async getPunctualityReport(branchId: string, params?: { startDate?: string; endDate?: string }): Promise<unknown> {
     const { data } = await apiClient.get(`/api/operations/attendance/report/${branchId}`, params);
+    return data;
+  },
+
+  // Admin override — set/edit a staff member's clock-in/out for a given date.
+  // Status is re-derived from the schedule unless `status` is passed explicitly.
+  async setAttendance(userId: string, body: {
+    date: string;          // YYYY-MM-DD
+    clockIn?: string;      // HH:mm
+    clockOut?: string;     // HH:mm
+    status?: import('@/types').AttendanceStatus;
+    notes?: string;
+  }): Promise<StaffAttendanceEntry> {
+    const { data } = await apiClient.put<StaffAttendanceEntry>(`/api/operations/attendance/user/${userId}`, body);
+    return data;
+  },
+
+  async deleteAttendance(userId: string, date: string): Promise<{ deleted: boolean }> {
+    const { data } = await apiClient.delete<{ deleted: boolean }>(
+      `/api/operations/attendance/user/${encodeURIComponent(userId)}?date=${encodeURIComponent(date)}`
+    );
+    return data;
+  },
+
+  // Admin-initiated reconciliation — flip leave/WFH/absent for a given date.
+  async reconcileAttendance(branchId: string, params?: { date?: string }): Promise<{
+    date: string; absent: number; leave: number; wfh: number; autoClosed: number; skipped: number;
+  }> {
+    const qs = params?.date ? `?date=${encodeURIComponent(params.date)}` : '';
+    const { data } = await apiClient.post<{
+      date: string; absent: number; leave: number; wfh: number; autoClosed: number; skipped: number;
+    }>(`/api/operations/attendance/reconcile/${branchId}${qs}`, {});
+    return data;
+  },
+
+  // ── Unified Calendar ──────────────────────────────────────────────────────
+
+  async getClinicianCalendar(params?: { userId?: string; year?: number; month?: number }): Promise<ClinicianCalendar> {
+    const path = params?.userId
+      ? `/api/operations/calendar/clinician/${params.userId}`
+      : '/api/operations/calendar/clinician';
+    const { data } = await apiClient.get<ClinicianCalendar>(path, {
+      year: params?.year, month: params?.month,
+    });
+    return data;
+  },
+
+  async getBranchCalendar(branchId: string, params?: { year?: number; month?: number }): Promise<BranchCalendar> {
+    const { data } = await apiClient.get<BranchCalendar>(`/api/operations/calendar/branch/${branchId}`, params);
     return data;
   },
 
