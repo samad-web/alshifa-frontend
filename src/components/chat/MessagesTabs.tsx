@@ -16,8 +16,18 @@ export function MessagesTabs() {
     const { role } = useAuth();
     const isPatient = role === "PATIENT";
 
+    // The patient↔clinician surface is labelled differently per audience:
+    // patients see "Care Team" (chatting with their providers); clinicians
+    // see "Patients" (chatting with their patients). Staff also get a "Team"
+    // tab for staff↔staff DMs and branch group chats — the unified Chat
+    // entry in the sidebar lands here and lets them switch in-page.
     const tabs = [
-        { to: "/chat", label: "Patients", icon: MessageSquare, active: pathname.startsWith("/chat") && !pathname.startsWith("/staff-chat") },
+        {
+            to: "/chat",
+            label: isPatient ? "Care Team" : "Patients",
+            icon: MessageSquare,
+            active: pathname.startsWith("/chat") && !pathname.startsWith("/staff-chat"),
+        },
         ...(isPatient ? [] : [{ to: "/staff-chat", label: "Team", icon: Users, active: pathname.startsWith("/staff-chat") }]),
     ];
 

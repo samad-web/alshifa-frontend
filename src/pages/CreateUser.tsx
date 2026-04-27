@@ -18,11 +18,12 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
-type Role = "ADMIN" | "ADMIN_DOCTOR" | "DOCTOR" | "THERAPIST" | "PATIENT" | "PHARMACIST";
+type Role = "ADMIN" | "ADMIN_DOCTOR" | "BRANCH_ADMIN" | "DOCTOR" | "THERAPIST" | "PATIENT" | "PHARMACIST";
 
 const roles: { value: Role; label: string }[] = [
   { value: "ADMIN", label: "System Admin" },
   { value: "ADMIN_DOCTOR", label: "Admin Doctor" },
+  { value: "BRANCH_ADMIN", label: "Branch Admin" },
   { value: "DOCTOR", label: "Practicing Doctor" },
   { value: "THERAPIST", label: "Clinical Therapist" },
   { value: "PATIENT", label: "Patient" },
@@ -140,6 +141,10 @@ const REQUIRED_BY_ROLE: Record<Role, (keyof FormState)[]> = {
   THERAPIST:     ["specialization", "qualification", "yearsExperience", "registrationNumber"],
   PHARMACIST:    ["qualification", "yearsExperience"],
   ADMIN:         [],
+  // BRANCH_ADMIN is a flat User pinned to a single branch — no profile
+  // table to populate. branchId is already required for everyone, which
+  // covers BRANCH_ADMIN's hard-pinning requirement.
+  BRANCH_ADMIN:  [],
 };
 
 export default function CreateUser() {
@@ -372,6 +377,12 @@ export default function CreateUser() {
                       <li>• Years of experience</li>
                     </>)}
                     {form.role === "ADMIN" && <li>• No additional profile fields</li>}
+                    {form.role === "BRANCH_ADMIN" && (
+                      <>
+                        <li>• Pinned to the assigned branch above</li>
+                        <li>• No additional profile fields</li>
+                      </>
+                    )}
                   </ul>
                 </div>
               </CardContent>

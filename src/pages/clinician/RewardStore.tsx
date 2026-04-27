@@ -53,14 +53,23 @@ export default function RewardStore() {
   useEffect(() => {
     async function load() {
       try {
-        const [r, rd, p] = await Promise.all([
-          clinicianGamificationApi.getAvailableRewards(),
-          clinicianGamificationApi.getMyRedemptions(),
-          clinicianGamificationApi.getXPProfile(),
-        ]);
-        setRewards(r);
-        setRedemptions(rd.redemptions);
-        setProfile(p);
+        // Admins curate the catalogue but don't participate, so XP profile
+        // and personal redemptions don't apply — calling those clinician-only
+        // endpoints as ADMIN/ADMIN_DOCTOR would 403 and poison the Promise.all,
+        // which is what was producing the "Failed to load" error on this page.
+        if (isAdmin) {
+          const r = await clinicianGamificationApi.getAvailableRewards();
+          setRewards(r);
+        } else {
+          const [r, rd, p] = await Promise.all([
+            clinicianGamificationApi.getAvailableRewards(),
+            clinicianGamificationApi.getMyRedemptions(),
+            clinicianGamificationApi.getXPProfile(),
+          ]);
+          setRewards(r);
+          setRedemptions(rd.redemptions);
+          setProfile(p);
+        }
       } catch {
         setError("Failed to load store data");
       } finally {
@@ -68,7 +77,7 @@ export default function RewardStore() {
       }
     }
     load();
-  }, []);
+  }, [isAdmin]);
 
   async function handleRedeem(rewardId: string) {
     setRedeeming(rewardId);
@@ -153,8 +162,8 @@ export default function RewardStore() {
           )}
         </PageHeader>
 
-        {/* ── Balance Display ────────────────────────────────────── */}
-        {profile && (
+        {/* ── Balance Display (participants only) ───────────────── */}
+        {!isAdmin && profile && (
           <div className="flex flex-wrap gap-4">
             <Card className="bg-gradient-to-r from-yellow-500/10 to-amber-500/5 border-yellow-500/20">
               <CardContent className="py-4 px-6 flex items-center gap-3">
@@ -236,20 +245,22 @@ export default function RewardStore() {
                           </span>
                         )}
                       </div>
-                      <Button
-                        className="w-full"
-                        disabled={redeeming === reward.id || (reward.stock != null && reward.stock <= 0)}
-                        onClick={() => handleRedeem(reward.id)}
-                      >
-                        {redeeming === reward.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <>
-                            <Gift className="w-4 h-4 mr-2" />
-                            Redeem
-                          </>
-                        )}
-                      </Button>
+                      {!isAdmin && (
+                        <Button
+                          className="w-full"
+                          disabled={redeeming === reward.id || (reward.stock != null && reward.stock <= 0)}
+                          onClick={() => handleRedeem(reward.id)}
+                        >
+                          {redeeming === reward.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <>
+                              <Gift className="w-4 h-4 mr-2" />
+                              Redeem
+                            </>
+                          )}
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -258,7 +269,8 @@ export default function RewardStore() {
           </TabsContent>
         </Tabs>
 
-        {/* ── My Redemptions ─────────────────────────────────────── */}
+        {/* ── My Redemptions (participants only) ─────────────────── */}
+        {!isAdmin && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -305,6 +317,7 @@ export default function RewardStore() {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* ── Admin: Process Redemptions ─────────────────────────── */}
         {isAdmin && redemptions.length > 0 && (

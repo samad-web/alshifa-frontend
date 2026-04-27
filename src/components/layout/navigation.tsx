@@ -152,6 +152,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
       return [
         { path: "/admin", label: "Dashboard", icon: Stethoscope },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
+        { path: "/admin/live-queue", label: "Live Queue", icon: Activity },
         {
           label: "Clinical",
           icon: FilePlus2,
@@ -219,13 +220,16 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           ],
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
+        // Patient + team chats are surfaced as tabs inside `/chat` via
+        // <MessagesTabs>, so the sidebar carries a single entry. /staff-chat
+        // remains routable for deep links from notifications.
         { path: "/chat", label: "Chat", icon: MessageSquare },
-        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "ADMIN_DOCTOR":
       return [
         { path: "/doctor-admin", label: "Dashboard", icon: Stethoscope },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
+        { path: "/admin/live-queue", label: "Live Queue", icon: Activity },
         {
           label: "Clinical",
           icon: FilePlus2,
@@ -277,14 +281,15 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           ],
         },
         {
+          // ADMIN_DOCTOR is oversight + curator: they don't earn XP, redeem
+          // rewards, or appear on the leaderboard, but they DO author the
+          // challenges and reward catalogue alongside ADMIN, and retain
+          // hospital-wide gamification analytics.
           label: "Engagement",
           icon: Trophy,
           items: [
-            { path: "/xp-dashboard", label: "XP & Level", icon: Sparkles },
-            { path: "/seasonal-challenges", label: "Challenges", icon: Swords },
-            { path: "/reward-store", label: "Rewards", icon: Gift },
-            { path: "/mentor-hub", label: "Mentoring", icon: GraduationCap },
-            { path: "/doctor-gamification", label: "Leaderboard", icon: Activity },
+            { path: "/seasonal-challenges", label: "Challenges", icon: Trophy },
+            { path: "/reward-store", label: "Reward Store", icon: Trophy },
             { path: "/gamification-analytics", label: "Analytics", icon: Trophy },
           ],
         },
@@ -293,14 +298,15 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           icon: BarChart3,
           items: [
             { path: "/reports", label: "Reports", icon: BarChart3 },
+            // Patient + team chats are unified at /chat (in-page tab strip).
             { path: "/chat", label: "Chat", icon: MessageSquare },
-            { path: "/staff-chat", label: "Team Chat", icon: Users },
           ],
         },
       ];
     case "BRANCH_ADMIN":
       return [
         { path: "/branch-admin", label: "Dashboard", icon: Stethoscope },
+        { path: "/branch-admin/live-queue", label: "Live Queue", icon: Activity },
         { path: "/branch-admin/staff", label: "Staff Directory", icon: Users },
         {
           label: "Patients",
@@ -320,8 +326,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays },
           ],
         },
+        // Patient + team chats are unified at /chat (in-page tab strip).
         { path: "/chat", label: "Chat", icon: MessageSquare },
-        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "DOCTOR":
       return [
@@ -420,8 +426,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           ],
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
+        // Patient + team chats are unified at /chat (in-page tab strip).
         { path: "/chat", label: "Chat", icon: MessageSquare },
-        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "PATIENT":
       return [
@@ -456,8 +462,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         { path: "/pharmacy/inventory", label: "Inventory", icon: Package },
         { path: "/pharmacy/dispense", label: "Dispense", icon: ShoppingCart },
         { path: "/pharmacy/history", label: "Dispense History", icon: History },
+        // Patient + team chats are unified at /chat (in-page tab strip).
         { path: "/chat", label: "Chat", icon: MessageSquare },
-        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     default:
       return [];

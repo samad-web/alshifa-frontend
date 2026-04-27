@@ -19,7 +19,7 @@ import {
 } from "@/services/messaging.service";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 
-const CHANNELS: DeliveryChannel[] = ["WHATSAPP", "SMS", "EMAIL", "IN_APP"];
+const CHANNELS: DeliveryChannel[] = ["WHATSAPP", "IN_APP"];
 
 export default function ReminderSettings() {
   const [setting, setSetting] = useState<ReminderSetting | null>(null);
@@ -73,7 +73,7 @@ export default function ReminderSettings() {
   async function triggerNow() {
     const ok = await confirm({
       title: "Send daily reminder broadcast now?",
-      description: "WhatsApp / SMS / email reminders will be sent to every eligible patient immediately. This bypasses the scheduled time.",
+      description: "WhatsApp + in-app reminders will be sent to every eligible patient immediately. This bypasses the scheduled time.",
       confirmLabel: "Send now",
       tone: "danger",
     });

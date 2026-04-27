@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Download, FileText, Calendar, ExternalLink, Activity, Ban } from "lucide-react";
+import { Download, FileText, Calendar, ExternalLink, Activity, Ban, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
 import { PrescriptionAdherenceModal } from "@/components/prescription/PrescriptionAdherenceModal";
 import { DiscontinuePrescriptionDialog } from "@/components/prescription/DiscontinuePrescriptionDialog";
 
@@ -47,12 +49,18 @@ interface Prescription {
     discontinuedReason?: string | null;
     doctor?: {
         fullName?: string;
+        qualification?: string | null;
+        specialization?: string | null;
+        registrationNumber?: string | null;
         user: {
             email: string;
         };
     };
     therapist?: {
         fullName?: string;
+        qualification?: string | null;
+        specialization?: string | null;
+        registrationNumber?: string | null;
         user: {
             email: string;
         };
@@ -76,10 +84,39 @@ export function PrescriptionList({
     const canManage = !!role && CLINICAL_ROLES.has(role);
     const [adherenceFor, setAdherenceFor] = useState<string | null>(null);
     const [discontinueFor, setDiscontinueFor] = useState<{ id: string; name: string } | null>(null);
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const handleDownload = (fileUrl: string) => {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
         const filename = fileUrl.split("/").pop();
         window.open(`${API_BASE_URL}/api/prescriptions/download/${filename}`, "_blank");
+    };
+
+    /**
+     * Pull a generated-on-the-fly PDF rendition of the prescription and
+     * trigger a browser download. Goes through apiClient.getBlob so the
+     * Authorization header is attached and the existing 401-refresh flow
+     * still applies.
+     */
+    const handleDownloadPdf = async (rx: Prescription) => {
+        setDownloadingId(rx.id);
+        try {
+            const blob = await apiClient.getBlob(`/api/prescriptions/${rx.id}/pdf`);
+            const url = URL.createObjectURL(blob);
+            const safeMed = rx.medicationName.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+            const dateSlug = new Date(rx.createdAt).toISOString().slice(0, 10);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `prescription-${safeMed}-${dateSlug}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            const msg = err instanceof Error && err.message ? err.message : "Download failed";
+            toast.error(msg);
+        } finally {
+            setDownloadingId(null);
+        }
     };
 
     if (!prescriptions?.length) {
@@ -94,14 +131,18 @@ export function PrescriptionList({
     return (
         <div className="space-y-4">
             {prescriptions.map((rx) => {
-                const prescriber =
-                    rx.doctor?.fullName ||
-                    rx.therapist?.fullName ||
+                const prescriberPerson = rx.doctor || rx.therapist;
+                const prescriberName =
+                    prescriberPerson?.fullName ||
                     rx.doctor?.user?.email ||
                     rx.therapist?.user?.email ||
                     "Unknown";
+                const namePrefix = rx.doctor ? "Dr. " : "";
+                const qualification = prescriberPerson?.qualification?.trim() || null;
+                const specialization = prescriberPerson?.specialization?.trim() || null;
                 const roleLabel = rx.doctor ? "Doctor" : "Therapist";
                 const discontinued = !!rx.discontinuedAt;
+                const downloading = downloadingId === rx.id;
 
                 return (
                     <Card
@@ -124,17 +165,37 @@ export function PrescriptionList({
                                             )}
                                         </div>
                                         <p className="text-sm text-muted-foreground">
-                                            Prescribed by {prescriber} ({roleLabel})
+                                            Prescribed by {namePrefix}{prescriberName}
+                                            {qualification && <span>, <span className="font-medium text-foreground/80">{qualification}</span></span>}
+                                            {" "}({roleLabel})
                                         </p>
+                                        {specialization && (
+                                            <p className="text-xs text-muted-foreground/80 mt-0.5">{specialization}</p>
+                                        )}
                                         {discontinued && rx.discontinuedReason && (
                                             <p className="text-xs text-red-700 mt-1">
                                                 Reason: {rx.discontinuedReason}
                                             </p>
                                         )}
                                     </div>
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                        <Calendar className="w-3 h-3" />
-                                        {new Date(rx.createdAt).toLocaleDateString()}
+                                    <div className="flex flex-col items-end gap-2">
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <Calendar className="w-3 h-3" />
+                                            {new Date(rx.createdAt).toLocaleDateString()}
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={downloading}
+                                            onClick={() => handleDownloadPdf(rx)}
+                                            className="gap-2 h-8 text-xs"
+                                            title="Download a PDF copy of this prescription"
+                                        >
+                                            {downloading
+                                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                : <Download className="w-3.5 h-3.5" />}
+                                            {downloading ? "Preparing…" : "Download"}
+                                        </Button>
                                     </div>
                                 </div>
 

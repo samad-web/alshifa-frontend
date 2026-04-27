@@ -28,6 +28,7 @@ const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const DoctorAdminDashboard = lazy(() => import("./pages/DoctorAdminDashboard"));
 const BranchAdminDashboard = lazy(() => import("./pages/branch-admin/BranchAdminDashboard"));
 const BranchAdminStaffDirectory = lazy(() => import("./pages/branch-admin/StaffDirectory"));
+const LiveQueueBoard = lazy(() => import("./pages/admin/LiveQueueBoard"));
 const DoctorDashboard = lazy(() => import("./pages/DoctorDashboard"));
 const DoctorAvailability = lazy(() => import("./pages/DoctorAvailability"));
 const DoctorGamification = lazy(() => import("./pages/DoctorGamification"));
@@ -235,6 +236,23 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* ── Live Patient Queue Board (real-time arrival board) ──────────── */}
+      <Route
+        path="/branch-admin/live-queue"
+        element={
+          <ProtectedRoute allowedRoles={["BRANCH_ADMIN"]}>
+            <LiveQueueBoard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/live-queue"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "SUPER_ADMIN"]}>
+            <LiveQueueBoard />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/assign-patient"
         element={
@@ -246,7 +264,7 @@ function AppRoutes() {
       <Route
         path="/doctor-gamification"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "DOCTOR", "THERAPIST"]}>
             <DoctorGamification />
           </ProtectedRoute>
         }
@@ -510,7 +528,7 @@ function AppRoutes() {
       <Route
         path="/attendance"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "THERAPIST", "PHARMACIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
             <FeatureGate feature="STAFF_ATTENDANCE" title="Staff Attendance isn't enabled">
               <AttendanceTracker />
             </FeatureGate>
@@ -552,7 +570,7 @@ function AppRoutes() {
       <Route
         path="/xp-dashboard"
         element={
-          <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR"]}>
+          <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST"]}>
             <FeatureGate feature="CLINICIAN_XP" title="Clinician XP isn't enabled">
               <XPDashboard />
             </FeatureGate>
@@ -572,7 +590,7 @@ function AppRoutes() {
       <Route
         path="/achievement-showcase"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "DOCTOR", "THERAPIST"]}>
             <FeatureGate feature="ACHIEVEMENT_SHOWCASE" title="Achievement Showcase isn't enabled">
               <AchievementShowcase />
             </FeatureGate>
@@ -582,7 +600,7 @@ function AppRoutes() {
       <Route
         path="/achievement-showcase/:userId"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "DOCTOR", "THERAPIST"]}>
             <FeatureGate feature="ACHIEVEMENT_SHOWCASE" title="Achievement Showcase isn't enabled">
               <AchievementShowcase />
             </FeatureGate>
@@ -602,7 +620,7 @@ function AppRoutes() {
       <Route
         path="/mentor-hub"
         element={
-          <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR"]}>
+          <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST"]}>
             <FeatureGate feature="MENTOR_SESSIONS" title="Mentor Sessions isn't enabled">
               <MentorHub />
             </FeatureGate>

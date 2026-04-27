@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Bell, Pill, Activity, AlertCircle, CheckCircle2, Clock, Sparkles,
   Trophy, Flame, Calendar, ArrowRight, Plus, MessageSquare, MapPin,
-  Smartphone, MessageCircle, AtSign, Mail, Send, Smile, Frown, Meh,
+  Smartphone, MessageCircle, Send, Smile, Frown, Meh,
   Heart, ChevronRight, Loader2, X, Target, Award, Wind, TrendingUp,
   Megaphone, Pin, Info, Stethoscope, UserPlus,
 } from "lucide-react";
@@ -524,8 +524,6 @@ function SmartMessagesPanel({
         <div className="flex items-center gap-1.5">
           {channels.pushEnabled && <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />}
           {channels.whatsappEnabled && <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />}
-          {channels.smsEnabled && <AtSign className="h-3.5 w-3.5 text-muted-foreground" />}
-          {channels.emailEnabled && <Mail className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
       </CardHeader>
       <CardContent className="pt-0 space-y-2 max-h-80 overflow-y-auto">

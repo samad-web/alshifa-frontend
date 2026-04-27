@@ -12,10 +12,10 @@ type Tab = "availability" | "attendance";
 export default function StaffSchedule() {
   const [params, setParams] = useSearchParams();
   const { role } = useAuth();
-  // Doctors no longer self-mark attendance — branch admins do it for them.
-  // The attendance tab is still available to every other role that lands on
-  // this page (admins managing the branch, therapists self-clock-in, etc.).
-  const showAttendance = role !== "DOCTOR";
+  // Attendance is owned by ADMIN / ADMIN_DOCTOR / BRANCH_ADMIN. Clinicians
+  // and pharmacists no longer see (or self-clock from) the Attendance tab —
+  // mirrors the standalone /attendance route guard.
+  const showAttendance = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "BRANCH_ADMIN";
   const initial = ((params.get("tab") as Tab) || (showAttendance ? "attendance" : "availability")) as Tab;
   const effective: Tab = !showAttendance && initial === "attendance" ? "availability" : initial;
 
