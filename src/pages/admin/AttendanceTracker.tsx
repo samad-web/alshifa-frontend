@@ -17,6 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import { operationsApi } from "@/services/operations.service";
 import { apiClient } from "@/lib/api-client";
 import type {
@@ -590,15 +592,15 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                   <Users className="w-5 h-5 text-primary" />
                   Branch Attendance
                   <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    {(branches as any[]).find((b: any) => b.id === branchId)?.name || "—"} · switch via navbar
+                    {(branches as any[]).find((b: any) => b.id === branchId)?.name || "—"}
+                    {!isBranchAdmin && " · switch via navbar"}
                   </span>
                 </CardTitle>
                 <div className="flex items-center gap-3">
-                  <input
-                    type="date"
+                  <DatePicker
                     value={selectedDate}
-                    onChange={e => setSelectedDate(e.target.value)}
-                    className="h-10 px-3 border rounded-md text-sm bg-background"
+                    onChange={(iso) => setSelectedDate(iso)}
+                    className="h-10 w-[170px]"
                   />
                   {!isBranchAdmin && (
                     <Button
@@ -808,11 +810,10 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Date</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={editDialog.date}
+                      onChange={(iso) => setEditDialog((d) => ({ ...d, date: iso }))}
                       disabled={editDialog.mode === 'edit'}
-                      onChange={(e) => setEditDialog((d) => ({ ...d, date: e.target.value }))}
                     />
                   </div>
                   <div className="space-y-2">
@@ -837,18 +838,16 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Clock in</Label>
-                    <Input
-                      type="time"
+                    <TimePicker
                       value={editDialog.clockIn}
-                      onChange={(e) => setEditDialog((d) => ({ ...d, clockIn: e.target.value }))}
+                      onChange={(hhmm) => setEditDialog((d) => ({ ...d, clockIn: hhmm }))}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Clock out</Label>
-                    <Input
-                      type="time"
+                    <TimePicker
                       value={editDialog.clockOut}
-                      onChange={(e) => setEditDialog((d) => ({ ...d, clockOut: e.target.value }))}
+                      onChange={(hhmm) => setEditDialog((d) => ({ ...d, clockOut: hhmm }))}
                     />
                   </div>
                 </div>

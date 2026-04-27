@@ -10,7 +10,7 @@ import { PageTransition } from "@/components/ui/page-transition";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import {
-  Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift, CheckCircle2,
+  Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift,
   Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse, Bell, RefreshCw, Loader2, Download,
 } from "lucide-react";
 import {
@@ -22,6 +22,7 @@ import { useBranchScope } from "@/hooks/useBranchScope";
 import { apiClient } from "@/lib/api-client";
 import { iwisApi } from "@/services/iwis.service";
 import { describeActivity, formatRelative, type ActivityFeedItem } from "@/lib/auditActivity";
+import { AlertsPopup, AlertRow } from "@/components/common/AlertsPopup";
 
 export default function AdminDashboard() {
   const { toast } = useToast();
@@ -113,6 +114,38 @@ export default function AdminDashboard() {
             subtitle={new Date().toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
           />
           <div className="flex items-center gap-2">
+            <AlertsPopup
+              title="Operational Alerts"
+              alertLabel="Operational Alerts"
+              emptyLabel="Operational Alerts"
+              count={
+                (summary.systemHealth.pendingRewards > 0 ? 1 : 0) +
+                (summary.systemHealth.unresolvedAnomalies > 0 ? 1 : 0) +
+                (pendingDietCount > 0 ? 1 : 0)
+              }
+            >
+              <AlertRow
+                icon={<Gift className="w-4 h-4 text-amber-600" />}
+                title="Reward Redemptions Pending"
+                detail={`${summary.systemHealth.pendingRewards} waiting for approval`}
+                action={<Link to="/reward-store" className="text-xs text-primary hover:underline">Review →</Link>}
+                visible={summary.systemHealth.pendingRewards > 0}
+              />
+              <AlertRow
+                icon={<Flag className="w-4 h-4 text-red-600" />}
+                title="Gamification Anomalies"
+                detail={`${summary.systemHealth.unresolvedAnomalies} flagged for review`}
+                action={<Link to="/gamification-analytics" className="text-xs text-primary hover:underline">Investigate →</Link>}
+                visible={summary.systemHealth.unresolvedAnomalies > 0}
+              />
+              <AlertRow
+                icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}
+                title="Diet Packages Awaiting Review"
+                detail={`${pendingDietCount} diet package${pendingDietCount === 1 ? "" : "s"} pending approval`}
+                action={<Link to="/diet-packages" className="text-xs text-primary hover:underline">Review →</Link>}
+                visible={pendingDietCount > 0}
+              />
+            </AlertsPopup>
             <Button
               variant="outline"
               size="sm"
@@ -183,43 +216,7 @@ export default function AdminDashboard() {
           low={summary.systemHealth.criticalPatientsLow ?? 0}
         />
 
-        {/* SECTION C2 — Operational Alerts */}
-        <section className="rounded-xl border bg-card shadow-card overflow-hidden">
-          <div className="px-5 py-3 border-b">
-            <h2 className="font-semibold flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Operational Alerts</h2>
-          </div>
-          <div className="divide-y">
-            <AlertRow
-              icon={<Gift className="w-4 h-4 text-amber-600" />}
-              title="Reward Redemptions Pending"
-              detail={`${summary.systemHealth.pendingRewards} waiting for approval`}
-              action={<Link to="/reward-store" className="text-xs text-primary hover:underline">Review →</Link>}
-              visible={summary.systemHealth.pendingRewards > 0}
-            />
-            <AlertRow
-              icon={<Flag className="w-4 h-4 text-red-600" />}
-              title="Gamification Anomalies"
-              detail={`${summary.systemHealth.unresolvedAnomalies} flagged for review`}
-              action={<Link to="/gamification-analytics" className="text-xs text-primary hover:underline">Investigate →</Link>}
-              visible={summary.systemHealth.unresolvedAnomalies > 0}
-            />
-            <AlertRow
-              icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}
-              title="Diet Packages Awaiting Review"
-              detail={`${pendingDietCount} diet package${pendingDietCount === 1 ? "" : "s"} pending approval`}
-              action={<Link to="/diet-packages" className="text-xs text-primary hover:underline">Review →</Link>}
-              visible={pendingDietCount > 0}
-            />
-            {summary.systemHealth.pendingRewards === 0 &&
-              summary.systemHealth.unresolvedAnomalies === 0 &&
-              pendingDietCount === 0 && (
-                <div className="p-6 text-center text-sm text-muted-foreground">
-                  <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-emerald-500" />
-                  No active alerts.
-                </div>
-              )}
-          </div>
-        </section>
+        {/* SECTION C2 — Operational Alerts moved to popup in header. */}
 
         {/* SECTION C3 — Recent Activity Feed (system-wide audit-log surface) */}
         <ActivityFeedSection />
@@ -374,28 +371,6 @@ function CriticalJourneySection({ total, high, medium, low }: {
         </Button>
       </div>
     </section>
-  );
-}
-
-function AlertRow({ icon, title, detail, action, visible }: {
-  icon: React.ReactNode;
-  title: string;
-  detail: string;
-  action: React.ReactNode;
-  visible: boolean;
-}) {
-  if (!visible) return null;
-  return (
-    <div className="px-5 py-3 flex items-center justify-between gap-3">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5">{icon}</div>
-        <div>
-          <div className="text-sm font-medium">{title}</div>
-          <div className="text-xs text-muted-foreground">{detail}</div>
-        </div>
-      </div>
-      {action}
-    </div>
   );
 }
 

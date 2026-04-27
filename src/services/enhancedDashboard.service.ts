@@ -179,8 +179,6 @@ export interface DashboardSummary {
   smartMessages: SmartMessage[];
   careTeam: DashboardCareTeam;
   channels: {
-    emailEnabled: boolean;
-    smsEnabled: boolean;
     pushEnabled: boolean;
     whatsappEnabled: boolean;
   };

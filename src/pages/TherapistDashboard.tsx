@@ -11,7 +11,8 @@ import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
 import {
-  Calendar, Clock, Users, Heart, Trophy, Play, Bell, AlertTriangle, Sparkles, Activity, Video,
+  Calendar, Users, Heart, Trophy, Play, Bell, AlertTriangle, Sparkles, Activity, Video,
+  ChevronDown, ChevronRight,
 } from "lucide-react";
 import {
   dashboardSummaryApi,
@@ -22,6 +23,7 @@ import { appointmentsApi } from "@/services/appointments.service";
 import TodoPanel from "@/components/todo/TodoPanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
+import { SelfExamBundlePanel, urgencyBadge } from "@/components/dashboard/SelfExamBundlePanel";
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -38,6 +40,10 @@ export default function TherapistDashboard() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"pending" | "today">("pending");
   const [availableToday, setAvailableToday] = useState(true);
+  // Per-card expand state for triage details / pre-consultation kit on pending
+  // session cards. Mirrors the doctor dashboard pattern so the therapist sees
+  // the same depth of context before approving a session.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   async function refresh() {
     setLoading(true);
@@ -93,7 +99,8 @@ export default function TherapistDashboard() {
             subtitle={`${new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}${summary.greeting.branch ? ` • ${summary.greeting.branch}` : ""}`}
           />
           <div className="flex items-center gap-2">
-            <Link to="/staff-schedule?tab=attendance"><Button variant="outline" size="sm"><Clock className="w-4 h-4 mr-1" /> Check In / Out</Button></Link>
+            {/* Attendance is owned by ADMIN / ADMIN_DOCTOR / BRANCH_ADMIN —
+                clinicians no longer self-clock from their dashboard. */}
             <Button
               size="sm"
               variant={availableToday ? "default" : "outline"}
@@ -140,6 +147,8 @@ export default function TherapistDashboard() {
                 <PendingSessionCard
                   key={s.id}
                   appt={s}
+                  expanded={!!expanded[s.id]}
+                  onToggle={() => setExpanded(e => ({ ...e, [s.id]: !e[s.id] }))}
                   onApprove={() => approveAppointment(s.id, true)}
                   onDecline={() => approveAppointment(s.id, false)}
                 />
@@ -161,11 +170,14 @@ export default function TherapistDashboard() {
             {summary.exercisePrescriptions.length === 0 ? (
               <EmptyState text="No active exercise prescriptions." />
             ) : summary.exercisePrescriptions.map(p => {
-              const rate = p.completionRate;
-              const rateColor =
-                rate === null ? "text-muted-foreground"
-                  : rate < 30 ? "text-red-600"
-                    : rate < 60 ? "text-amber-600"
+              // "Patient progress" = the patient's active-journey wellnessScore,
+              // surfaced here so the therapist can spot patients drifting
+              // before chasing each individual exercise log.
+              const score = p.wellnessScore;
+              const scoreColor =
+                score === null ? "text-muted-foreground"
+                  : score < 30 ? "text-red-600"
+                    : score < 60 ? "text-amber-600"
                       : "text-emerald-600";
               return (
                 <div key={p.id} className="px-5 py-3 flex items-center gap-3">
@@ -175,8 +187,13 @@ export default function TherapistDashboard() {
                       {p.title || "Exercise"} · prescribed {new Date(p.prescribedAt).toLocaleDateString()}
                     </div>
                   </div>
-                  <div className={cn("text-sm font-semibold", rateColor)}>
-                    {rate === null ? "—" : `${rate}%`}
+                  <div className="flex flex-col items-end shrink-0">
+                    <div className={cn("text-sm font-semibold leading-none", scoreColor)}>
+                      {score === null ? "—" : `${score}%`}
+                    </div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">
+                      Wellness
+                    </div>
                   </div>
                   <Button size="sm" variant="outline" className="h-7 text-xs"
                     onClick={() => toast({ title: "Reminder queued", description: `Sent to ${p.patient?.fullName}` })}>
@@ -228,22 +245,52 @@ function MetricTile({ label, value, unit }: { label: string; value: string | num
   );
 }
 
-function PendingSessionCard({ appt, onApprove, onDecline }: { appt: DoctorAppointmentCard; onApprove: () => void; onDecline: () => void }) {
+function PendingSessionCard({
+  appt, expanded, onToggle, onApprove, onDecline,
+}: {
+  appt: DoctorAppointmentCard;
+  expanded: boolean;
+  onToggle: () => void;
+  onApprove: () => void;
+  onDecline: () => void;
+}) {
+  const tri = appt.triageSession;
   return (
-    <div className="px-5 py-3 flex items-start justify-between gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-medium text-sm">{appt.patient?.fullName || "Unknown"}</span>
-          <Badge variant="outline" className="text-[10px]">{appt.consultationMode}</Badge>
+    <div className="px-5 py-3 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="font-medium text-sm">{appt.patient?.fullName || "Unknown"}</span>
+            {tri?.urgencyLevel && urgencyBadge(tri.urgencyLevel)}
+            <Badge variant="outline" className="text-[10px]">{appt.consultationMode}</Badge>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Requested for {new Date(appt.date).toLocaleString()}
+            {tri?.suggestedSpecialty && ` · suggests ${tri.suggestedSpecialty}`}
+          </div>
         </div>
-        <div className="text-xs text-muted-foreground">
-          Requested for {new Date(appt.date).toLocaleString()}
+        <div className="flex items-center gap-1">
+          <Button size="sm" onClick={onApprove} className="h-8 text-xs">Approve</Button>
+          <Button size="sm" variant="outline" onClick={onDecline} className="h-8 text-xs">Decline</Button>
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        <Button size="sm" onClick={onApprove} className="h-8 text-xs">Approve</Button>
-        <Button size="sm" variant="outline" onClick={onDecline} className="h-8 text-xs">Decline</Button>
-      </div>
+      {tri && (
+        <button className="text-xs text-primary hover:underline flex items-center gap-1" onClick={onToggle}>
+          {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />} Triage details
+        </button>
+      )}
+      {expanded && tri && (
+        <div className="rounded bg-muted/40 p-3 text-xs space-y-1">
+          <div>Urgency: <span className="font-medium">{tri.urgencyLevel || "—"}</span></div>
+          <div>Composite score: {tri.compositeScore?.toFixed(2) || "—"}</div>
+          {!!tri.redFlagsMatched?.length && (
+            <div className="text-red-600 font-medium">
+              Red flags: {tri.redFlagsMatched.join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+      {expanded && <SelfExamBundlePanel appointmentId={appt.id} />}
     </div>
   );
 }
@@ -252,26 +299,40 @@ function TodaySessionCard({ appt }: { appt: DoctorAppointmentCard }) {
   const t = new Date(appt.date);
   const diffMin = (t.getTime() - Date.now()) / 60_000;
   const canJoin = appt.consultationMode === "ONLINE" && diffMin >= -15 && diffMin <= 15;
+  const tri = appt.triageSession;
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div className="px-5 py-3 flex items-start justify-between gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-medium text-sm">{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-          <span className="text-sm">{appt.patient?.fullName || "Unknown"}</span>
-          <Badge variant="outline" className="text-[10px]">{appt.consultationMode}</Badge>
-          <Badge className="text-[10px]">{appt.status}</Badge>
+    <div className="px-5 py-3 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="font-medium text-sm">{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            <span className="text-sm">{appt.patient?.fullName || "Unknown"}</span>
+            {tri?.urgencyLevel && urgencyBadge(tri.urgencyLevel)}
+            <Badge variant="outline" className="text-[10px]">{appt.consultationMode}</Badge>
+            <Badge className="text-[10px]">{appt.status}</Badge>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          {canJoin && appt.meetingLink && (
+            <a href={appt.meetingLink} target="_blank" rel="noopener noreferrer">
+              <Button size="sm" className="h-8 text-xs"><Video className="w-3 h-3 mr-1" /> Join</Button>
+            </a>
+          )}
+          <Link to={`/appointments/${appt.id}`}>
+            <Button size="sm" variant="outline" className="h-8 text-xs">Start</Button>
+          </Link>
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        {canJoin && appt.meetingLink && (
-          <a href={appt.meetingLink} target="_blank" rel="noopener noreferrer">
-            <Button size="sm" className="h-8 text-xs"><Video className="w-3 h-3 mr-1" /> Join</Button>
-          </a>
-        )}
-        <Link to={`/appointments/${appt.id}`}>
-          <Button size="sm" variant="outline" className="h-8 text-xs">Start</Button>
-        </Link>
-      </div>
+      <button
+        className="text-xs text-primary hover:underline flex items-center gap-1"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        Pre-consultation kit
+      </button>
+      {expanded && <SelfExamBundlePanel appointmentId={appt.id} />}
     </div>
   );
 }

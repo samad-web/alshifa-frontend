@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { AlertsPopup, AlertRow } from "@/components/common/AlertsPopup";
 
 export default function PharmacyDashboard() {
     const { branchIdParam } = useBranchScope();
@@ -75,10 +76,35 @@ export default function PharmacyDashboard() {
     return (
         <AppLayout>
             <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
-                <PageHeader
-                    title="Pharmacy Dashboard"
-                    subtitle="Manage inventory, dispensing, and sales"
-                />
+                <header className="flex items-start justify-between flex-wrap gap-3">
+                    <PageHeader
+                        title="Pharmacy Dashboard"
+                        subtitle="Manage inventory, dispensing, and sales"
+                    />
+                    <AlertsPopup
+                        title="Critical Stock Alerts"
+                        alertLabel="Stock Alerts"
+                        emptyLabel="Stock Alerts"
+                        count={stats.lowStock > 0 ? 1 : 0}
+                        emptyState={
+                            <div className="p-8 text-center text-sm text-muted-foreground">
+                                All medicines are above the minimum threshold.
+                            </div>
+                        }
+                    >
+                        <AlertRow
+                            icon={<AlertTriangle className="w-4 h-4 text-risk" />}
+                            title={`${stats.lowStock} item${stats.lowStock === 1 ? "" : "s"} below minimum threshold`}
+                            detail="Restock to avoid dispense failures."
+                            action={
+                                <Button asChild variant="outline" size="sm" className="h-7 text-xs">
+                                    <Link to="/pharmacy/inventory">View Inventory</Link>
+                                </Button>
+                            }
+                            visible={stats.lowStock > 0}
+                        />
+                    </AlertsPopup>
+                </header>
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -153,20 +179,7 @@ export default function PharmacyDashboard() {
                     </div>
                 </Panel>
 
-                {/* Low Stock Alert Table */}
-                {stats.lowStock > 0 && (
-                    <Panel title="Critical Stock Alerts" subtitle="Medicines that are below the minimum threshold">
-                        <div className="text-sm text-risk font-medium mb-4 flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4" />
-                            Attention! {stats.lowStock} items require immediate restocked.
-                        </div>
-                        <div className="flex justify-end">
-                            <Button asChild variant="outline" size="sm">
-                                <Link to="/pharmacy/inventory">View Inventory</Link>
-                            </Button>
-                        </div>
-                    </Panel>
-                )}
+                {/* Critical Stock Alerts moved to popup in header. */}
             </div>
         </AppLayout>
     );

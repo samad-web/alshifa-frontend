@@ -44,9 +44,14 @@ export default function SeasonalChallenges() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    title: string; description: string; metric: string; target: string;
+    startDate: string; endDate: string; scope: string;
+    targetRoles: ("DOCTOR" | "THERAPIST")[];
+    rewardXP: string; rewardPoints: string; icon: string;
+  }>({
     title: "", description: "", metric: "", target: "",
-    startDate: "", endDate: "", scope: "", targetRoles: "",
+    startDate: "", endDate: "", scope: "", targetRoles: [],
     rewardXP: "", rewardPoints: "", icon: "",
   });
 
@@ -78,26 +83,33 @@ export default function SeasonalChallenges() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
     setSubmitting(true);
     try {
+      // <Input type="date"> returns "YYYY-MM-DD" but the backend's zod
+      // schema requires full ISO 8601 datetime — promote each to UTC midnight.
+      const startIso = new Date(`${form.startDate}T00:00:00.000Z`).toISOString();
+      const endIso   = new Date(`${form.endDate}T23:59:59.999Z`).toISOString();
+
       const created = await clinicianGamificationApi.createSeasonalChallenge({
         title: form.title,
         description: form.description,
         metric: form.metric,
         target: Number(form.target),
-        startDate: form.startDate,
-        endDate: form.endDate,
+        startDate: startIso,
+        endDate: endIso,
         scope: form.scope || undefined,
-        targetRoles: form.targetRoles ? form.targetRoles.split(",").map((r) => r.trim()) : undefined,
+        targetRoles: form.targetRoles.length > 0 ? form.targetRoles : undefined,
         rewardXP: Number(form.rewardXP) || undefined,
         rewardPoints: Number(form.rewardPoints) || undefined,
         icon: form.icon || undefined,
       });
       setChallenges((prev) => [created, ...prev]);
       setShowForm(false);
-      setForm({ title: "", description: "", metric: "", target: "", startDate: "", endDate: "", scope: "", targetRoles: "", rewardXP: "", rewardPoints: "", icon: "" });
-    } catch {
-      setError("Failed to create challenge");
+      setForm({ title: "", description: "", metric: "", target: "", startDate: "", endDate: "", scope: "", targetRoles: [], rewardXP: "", rewardPoints: "", icon: "" });
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : "Failed to create challenge";
+      setError(message);
     } finally {
       setSubmitting(false);
     }
@@ -145,6 +157,12 @@ export default function SeasonalChallenges() {
               <CardTitle>Create New Challenge</CardTitle>
             </CardHeader>
             <CardContent>
+              {error && (
+                <div className="mb-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
               <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input placeholder="Title" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
                 <Input placeholder="Metric (e.g. consultations_completed)" required value={form.metric} onChange={(e) => setForm({ ...form, metric: e.target.value })} />
@@ -154,7 +172,24 @@ export default function SeasonalChallenges() {
                 <Input type="date" placeholder="Start Date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
                 <Input type="date" placeholder="End Date" required value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
                 <Input placeholder="Scope (optional)" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} />
-                <Input placeholder="Target Roles (comma-separated)" value={form.targetRoles} onChange={(e) => setForm({ ...form, targetRoles: e.target.value })} />
+                <div className="flex items-center gap-4 px-1">
+                  <span className="text-sm text-muted-foreground">Target Roles:</span>
+                  {(["DOCTOR", "THERAPIST"] as const).map((r) => (
+                    <label key={r} className="flex items-center gap-1.5 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={form.targetRoles.includes(r)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...form.targetRoles, r]
+                            : form.targetRoles.filter((x) => x !== r);
+                          setForm({ ...form, targetRoles: next });
+                        }}
+                      />
+                      {r}
+                    </label>
+                  ))}
+                </div>
                 <Input type="number" placeholder="Reward XP" value={form.rewardXP} onChange={(e) => setForm({ ...form, rewardXP: e.target.value })} />
                 <Input type="number" placeholder="Reward Points" value={form.rewardPoints} onChange={(e) => setForm({ ...form, rewardPoints: e.target.value })} />
                 <div className="md:col-span-2 flex justify-end">
@@ -209,16 +244,19 @@ export default function SeasonalChallenges() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {/* Progress */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Progress</span>
-                        <span className="font-medium">
-                          {current} / {ch.target}
-                        </span>
+                    {/* Progress — participants only. Admins curate the
+                        catalogue and don't have personal progress here. */}
+                    {!isAdmin && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Progress</span>
+                          <span className="font-medium">
+                            {current} / {ch.target}
+                          </span>
+                        </div>
+                        <Progress value={pct} className="h-2" />
                       </div>
-                      <Progress value={pct} className="h-2" />
-                    </div>
+                    )}
 
                     {/* Meta */}
                     <div className="flex items-center justify-between text-xs">

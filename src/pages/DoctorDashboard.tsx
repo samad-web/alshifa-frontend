@@ -7,11 +7,12 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Calendar, Clock, AlertTriangle, Pill, Trophy, CheckCircle2, Users, Users2, Video,
   ChevronRight, ChevronDown, Stethoscope, Activity, Sparkles, MapPin, Loader2,
+  UserCheck, PlayCircle, UserX, ListOrdered,
 } from "lucide-react";
 import { DashboardSkeleton } from "@/components/ui/page-skeletons";
 import { PageTransition } from "@/components/ui/page-transition";
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -21,14 +22,64 @@ import {
   GroupSessionTask,
 } from "@/services/dashboardSummary.service";
 import { appointmentsApi } from "@/services/appointments.service";
+import { queueApi, type QueueEntry, type ArrivalStatus } from "@/services/queue.service";
+import { useQueueSocket } from "@/hooks/useQueueSocket";
 import TodoPanel from "@/components/todo/TodoPanel";
-import { selfExamService, type SelfExamBundle } from "@/services/selfExam.service";
-import { BundleView } from "@/components/selfexam/BundleView";
-import { ClipboardList } from "lucide-react";
+import { SelfExamBundlePanel, urgencyBadge } from "@/components/dashboard/SelfExamBundlePanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api-client";
+import { AlertsPopup } from "@/components/common/AlertsPopup";
+
+// ── Queue helpers ────────────────────────────────────────────────────────
+
+const ARRIVAL_BADGE_STYLES: Record<ArrivalStatus, string> = {
+  NOT_ARRIVED: "bg-slate-100 text-slate-600 border-slate-200",
+  ARRIVED: "bg-amber-100 text-amber-800 border-amber-300",
+  IN_CONSULTATION: "bg-teal-100 text-teal-800 border-teal-300",
+  COMPLETED: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  ABSENT: "bg-red-100 text-red-700 border-red-300",
+  CONTACTED: "bg-blue-100 text-blue-700 border-blue-300",
+};
+
+const ARRIVAL_LABELS: Record<ArrivalStatus, string> = {
+  NOT_ARRIVED: "Waiting",
+  ARRIVED: "Arrived",
+  IN_CONSULTATION: "In consultation",
+  COMPLETED: "Completed",
+  ABSENT: "Absent",
+  CONTACTED: "Contacted",
+};
+
+function ArrivalBadge({ status }: { status: ArrivalStatus }) {
+  return (
+    <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", ARRIVAL_BADGE_STYLES[status])}>
+      {ARRIVAL_LABELS[status]}
+    </Badge>
+  );
+}
+
+/** Live ticking elapsed-time string. minute-resolution string update; the
+ *  hook re-renders every 30s so "5m" → "6m" without busy work. */
+function useTickingMinutes(): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(i);
+  }, []);
+  return tick;
+}
+function formatElapsed(fromIso: string | null): string {
+  if (!fromIso) return "—";
+  const ms = Date.now() - new Date(fromIso).getTime();
+  if (ms < 60_000) return "just now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem ? `${hrs}h ${rem}m` : `${hrs}h`;
+}
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -37,35 +88,25 @@ function greetingPrefix(d = new Date()) {
   return "Good evening";
 }
 
-function urgencyBadge(level?: string | null) {
-  if (!level) return null;
-  const map: Record<string, string> = {
-    CRITICAL: "bg-red-600 text-white",
-    URGENT: "bg-red-500 text-white",
-    HIGH: "bg-orange-500 text-white",
-    MODERATE: "bg-yellow-500 text-white",
-    LOW: "bg-emerald-500 text-white",
-  };
-  return <Badge className={cn("text-[10px]", map[level] ?? "bg-slate-400 text-white")}>{level}</Badge>;
-}
-
 export default function DoctorDashboard() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const { branchIdParam } = useBranchScope();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<DoctorDashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingTab, setPendingTab] = useState<"pending" | "today">("pending");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [careGapsOpen, setCareGapsOpen] = useState(false);
+  // Live queue state — entries indexed by appointmentId so the appointment
+  // card can render arrival buttons synchronously, and a flat array for
+  // the Today's Queue panel listing.
+  const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([]);
 
   async function refresh() {
     setLoading(true);
     try {
       const data = await dashboardSummaryApi.doctor(branchIdParam);
       setSummary(data);
-      const hasHigh = (data.careGaps || []).some(g => g.severity === "URGENT" || g.severity === "CRITICAL" || g.severity === "HIGH");
-      setCareGapsOpen(hasHigh);
     } catch (err) {
       toast({
         title: "Failed to load dashboard",
@@ -77,7 +118,70 @@ export default function DoctorDashboard() {
     }
   }
 
+  const refreshQueue = useCallback(async () => {
+    try {
+      const res = await queueApi.getToday(branchIdParam ? { branchId: branchIdParam } : {});
+      setQueueEntries(res.data || []);
+    } catch {
+      // Silent — the queue panel just renders an empty/error state.
+    }
+  }, [branchIdParam]);
+
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [branchIdParam]);
+  useEffect(() => { refreshQueue(); }, [refreshQueue]);
+
+  // The doctor's queue room id = the doctorId carried on any of today's
+  // queue entries. Pulled off the first entry once it's loaded.
+  const myDoctorId = queueEntries[0]?.doctorId ?? null;
+  const handleQueueEvent = useCallback(() => { refreshQueue(); refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [refreshQueue]);
+  useQueueSocket({ doctorId: myDoctorId, onEvent: handleQueueEvent });
+
+  const queueByApptId = useMemo(() => {
+    const map: Record<string, QueueEntry> = {};
+    for (const e of queueEntries) map[e.appointmentId] = e;
+    return map;
+  }, [queueEntries]);
+
+  const onMarkArrived = useCallback(async (appointmentId: string) => {
+    try {
+      await queueApi.markArrived(appointmentId);
+      toast({ title: "Patient marked as arrived" });
+      await refreshQueue();
+    } catch (err) {
+      toast({
+        title: "Failed to mark arrived",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    }
+  }, [refreshQueue, toast]);
+
+  const onStartConsultation = useCallback(async (appointmentId: string) => {
+    try {
+      await queueApi.startConsultation(appointmentId);
+      navigate(`/consultation/${appointmentId}`);
+    } catch (err) {
+      toast({
+        title: "Failed to start consultation",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    }
+  }, [navigate, toast]);
+
+  const onMarkAbsent = useCallback(async (appointmentId: string) => {
+    try {
+      await queueApi.markAbsent(appointmentId);
+      toast({ title: "Patient marked as absent" });
+      await refreshQueue();
+    } catch (err) {
+      toast({
+        title: "Failed to mark absent",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    }
+  }, [refreshQueue, toast]);
 
   async function approveAppointment(id: string, approve: boolean) {
     try {
@@ -120,6 +224,37 @@ export default function DoctorDashboard() {
             />
           </div>
           <div className="flex items-center gap-2">
+            <AlertsPopup
+              title="Care Gap Alerts"
+              alertLabel="Care Gap Alerts"
+              emptyLabel="Care Gap Alerts"
+              count={summary.careGaps.length}
+              emptyState={
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  No active care gap alerts.
+                </div>
+              }
+            >
+              {summary.careGaps.map((gap) => (
+                <div key={gap.id} className="px-5 py-3 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      {urgencyBadge(gap.severity)}
+                      <span className="text-sm font-medium truncate">{gap.patient?.fullName}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {gap.type.replace(/_/g, " ")} · {gap.daysSince} days since trigger
+                      {gap.suggestedSpecialty && ` · suggests ${gap.suggestedSpecialty}`}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Link to={`/patients/${gap.patient?.id}`}>
+                      <Button size="sm" variant="outline" className="h-7 text-xs">View</Button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </AlertsPopup>
             <Link to="/staff-schedule?tab=availability"><Button variant="outline" size="sm">Availability</Button></Link>
           </div>
         </header>
@@ -169,49 +304,32 @@ export default function DoctorDashboard() {
             ) : (
               summary.appointments.today.length === 0 ? (
                 <EmptyState text="No appointments today." />
-              ) : summary.appointments.today.map(a => <TodayAppointmentCard key={a.id} appt={a} />)
+              ) : summary.appointments.today.map(a => (
+                <TodayAppointmentCard
+                  key={a.id}
+                  appt={a}
+                  queueEntry={queueByApptId[a.id] ?? null}
+                  onMarkArrived={() => onMarkArrived(a.id)}
+                  onStartConsultation={() => onStartConsultation(a.id)}
+                  onMarkAbsent={() => onMarkAbsent(a.id)}
+                />
+              ))
             )}
           </div>
         </section>
 
-        {/* SECTION D — Care Gap Alerts */}
-        <section className="rounded-xl border bg-card shadow-card overflow-hidden">
-          <button
-            onClick={() => setCareGapsOpen(o => !o)}
-            className="w-full flex items-center justify-between px-5 py-3 border-b hover:bg-muted/30"
-          >
-            <h2 className="font-semibold flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" /> Care Gap Alerts
-              <Badge variant="outline" className="ml-2">{summary.careGaps.length}</Badge>
-            </h2>
-            {careGapsOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
-          {careGapsOpen && (
-            <div className="divide-y">
-              {summary.careGaps.length === 0 ? (
-                <EmptyState text="No active care gap alerts." />
-              ) : summary.careGaps.map(gap => (
-                <div key={gap.id} className="px-5 py-3 flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      {urgencyBadge(gap.severity)}
-                      <span className="text-sm font-medium">{gap.patient?.fullName}</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {gap.type.replace(/_/g, " ")} · {gap.daysSince} days since trigger
-                      {gap.suggestedSpecialty && ` · suggests ${gap.suggestedSpecialty}`}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Link to={`/patients/${gap.patient?.id}`}>
-                      <Button size="sm" variant="outline" className="h-7 text-xs">View</Button>
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        {/* SECTION C2 — Today's Queue (live) ─────────────────────────────
+            Compact ordered list mirroring what's in the QueueEntry table
+            for this doctor today. Updates in real time via Socket.IO
+            (useQueueSocket above re-fetches on every transition event). */}
+        <TodayQueuePanel
+          entries={queueEntries}
+          onMarkArrived={onMarkArrived}
+          onStartConsultation={onStartConsultation}
+          onMarkAbsent={onMarkAbsent}
+        />
+
+        {/* SECTION D — Care Gap Alerts moved to popup in header. */}
 
         {/* SECTION E — Patient Roster */}
         <section className="rounded-xl border bg-card shadow-card overflow-hidden">
@@ -338,11 +456,32 @@ function PendingApprovalCard({
   );
 }
 
-function TodayAppointmentCard({ appt }: { appt: DoctorAppointmentCard }) {
+interface TodayAppointmentCardProps {
+  appt: DoctorAppointmentCard;
+  queueEntry: QueueEntry | null;
+  onMarkArrived: () => void;
+  onStartConsultation: () => void;
+  onMarkAbsent: () => void;
+}
+
+function TodayAppointmentCard({
+  appt, queueEntry, onMarkArrived, onStartConsultation, onMarkAbsent,
+}: TodayAppointmentCardProps) {
   const time = new Date(appt.date);
   const diffMin = (time.getTime() - Date.now()) / 60_000;
   const canJoin = appt.consultationMode === "ONLINE" && diffMin >= -15 && diffMin <= 15;
   const [expanded, setExpanded] = useState(false);
+
+  // Live wait-time tick for ARRIVED patients.
+  useTickingMinutes();
+
+  // Queue-driven button matrix: NOT_ARRIVED → Mark Arrived; ARRIVED →
+  // Start Consultation (+ allow re-marking absent if patient gave up);
+  // IN_CONSULTATION → "Open consultation" deep-link; COMPLETED / ABSENT
+  // / CONTACTED → no action, just status badge.
+  const arrivalStatus: ArrivalStatus = queueEntry?.arrivalStatus ?? "NOT_ARRIVED";
+  const isPast = diffMin < -10; // appointment time has slipped 10+ minutes
+
   return (
     <div className="px-5 py-3 space-y-2">
       <div className="flex items-start justify-between gap-3">
@@ -351,18 +490,54 @@ function TodayAppointmentCard({ appt }: { appt: DoctorAppointmentCard }) {
             <span className="font-medium text-sm">{time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
             <span className="text-sm">{appt.patient?.fullName || "Unknown"}</span>
             <Badge variant="outline" className="text-[10px]">{appt.consultationMode}</Badge>
-            <Badge className="text-[10px]">{appt.status}</Badge>
+            <ArrivalBadge status={arrivalStatus} />
+            {arrivalStatus === "ARRIVED" && queueEntry?.arrivedAt && (
+              <span className="text-[10px] text-muted-foreground">
+                <Clock className="inline w-3 h-3 mr-0.5" />
+                Waiting {formatElapsed(queueEntry.arrivedAt)}
+              </span>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           {canJoin && appt.meetingLink && (
             <a href={appt.meetingLink} target="_blank" rel="noopener noreferrer">
               <Button size="sm" className="h-8 text-xs"><Video className="w-3 h-3 mr-1" /> Join</Button>
             </a>
           )}
-          <Link to={`/appointments/${appt.id}`}>
-            <Button size="sm" variant="outline" className="h-8 text-xs">Start</Button>
-          </Link>
+
+          {arrivalStatus === "NOT_ARRIVED" && (
+            <>
+              <Button size="sm" className="h-8 text-xs" onClick={onMarkArrived}>
+                <UserCheck className="w-3 h-3 mr-1" /> Mark Arrived
+              </Button>
+              {isPast && (
+                <Button size="sm" variant="outline" className="h-8 text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={onMarkAbsent}>
+                  <UserX className="w-3 h-3 mr-1" /> Absent
+                </Button>
+              )}
+            </>
+          )}
+
+          {arrivalStatus === "ARRIVED" && (
+            <Button size="sm" className="h-8 text-xs bg-teal-600 hover:bg-teal-700" onClick={onStartConsultation}>
+              <PlayCircle className="w-3 h-3 mr-1" /> Start Consultation
+            </Button>
+          )}
+
+          {arrivalStatus === "IN_CONSULTATION" && (
+            <Link to={`/consultation/${appt.id}`}>
+              <Button size="sm" className="h-8 text-xs bg-teal-600 hover:bg-teal-700">
+                <Stethoscope className="w-3 h-3 mr-1" /> Open consultation
+              </Button>
+            </Link>
+          )}
+
+          {arrivalStatus === "CONTACTED" && (
+            <Button size="sm" className="h-8 text-xs" onClick={onMarkArrived}>
+              <UserCheck className="w-3 h-3 mr-1" /> They've Arrived
+            </Button>
+          )}
         </div>
       </div>
       <button
@@ -374,6 +549,90 @@ function TodayAppointmentCard({ appt }: { appt: DoctorAppointmentCard }) {
       </button>
       {expanded && <SelfExamBundlePanel appointmentId={appt.id} />}
     </div>
+  );
+}
+
+// ── Today's Queue Panel ──────────────────────────────────────────────────
+// Compact ordered list of the doctor's queue for the day. Mirrors the
+// data the admin Live Queue Board sees, but scoped to this doctor only.
+function TodayQueuePanel({
+  entries,
+  onMarkArrived,
+  onStartConsultation,
+  onMarkAbsent,
+}: {
+  entries: QueueEntry[];
+  onMarkArrived: (id: string) => void;
+  onStartConsultation: (id: string) => void;
+  onMarkAbsent: (id: string) => void;
+}) {
+  useTickingMinutes(); // re-render every 30s for live elapsed text
+
+  return (
+    <section className="rounded-xl border bg-card shadow-card overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b">
+        <h2 className="font-semibold flex items-center gap-2">
+          <ListOrdered className="w-5 h-5 text-primary" /> Today's Queue
+        </h2>
+        <Badge variant="outline" className="text-[10px]">{entries.length} total</Badge>
+      </div>
+      {entries.length === 0 ? (
+        <EmptyState text="No queue entries yet today." />
+      ) : (
+        <div className="divide-y max-h-[360px] overflow-y-auto">
+          {entries.map((e) => {
+            const time = new Date(e.appointment.date);
+            const elapsedFrom = e.arrivalStatus === "ARRIVED" ? e.arrivedAt
+              : e.arrivalStatus === "IN_CONSULTATION" ? e.consultationStartedAt
+                : null;
+            return (
+              <div key={e.id} className="px-5 py-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                    {e.queuePosition}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium truncate">{e.appointment.patient?.fullName || "Unknown"}</span>
+                      <ArrivalBadge status={e.arrivalStatus} />
+                    </div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2">
+                      <Clock className="w-3 h-3" />
+                      {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {elapsedFrom && (
+                        <>
+                          <span>·</span>
+                          <span>
+                            {e.arrivalStatus === "IN_CONSULTATION" ? "In session" : "Waiting"} {formatElapsed(elapsedFrom)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {e.arrivalStatus === "NOT_ARRIVED" && (
+                    <>
+                      <Button size="sm" className="h-7 text-[11px]" onClick={() => onMarkArrived(e.appointmentId)}>
+                        <UserCheck className="w-3 h-3 mr-1" /> Arrived
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => onMarkAbsent(e.appointmentId)}>
+                        <UserX className="w-3 h-3" />
+                      </Button>
+                    </>
+                  )}
+                  {e.arrivalStatus === "ARRIVED" && (
+                    <Button size="sm" className="h-7 text-[11px] bg-teal-600 hover:bg-teal-700" onClick={() => onStartConsultation(e.appointmentId)}>
+                      <PlayCircle className="w-3 h-3 mr-1" /> Start
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -639,56 +898,6 @@ function GroupSessionRosterDialog({
   );
 }
 
-// ── Self-Exam Bundle Panel ───────────────────────────────────────────
-// Renders the patient's pre-consultation bundle inline on the expanded
-// appointment card. Silently hides on 404 (no bundle for this appointment).
-function SelfExamBundlePanel({ appointmentId }: { appointmentId: string }) {
-  const [bundle, setBundle] = useState<SelfExamBundle | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "none" | "error">("loading");
-
-  useEffect(() => {
-    let cancelled = false;
-    selfExamService
-      .getByAppointment(appointmentId)
-      .then((b) => {
-        if (cancelled) return;
-        setBundle(b);
-        setState("ready");
-      })
-      .catch((err: { status?: number }) => {
-        if (cancelled) return;
-        if (err?.status === 404) setState("none");
-        else setState("error");
-      });
-    return () => { cancelled = true; };
-  }, [appointmentId]);
-
-  if (state === "loading") {
-    return (
-      <div className="rounded bg-muted/40 p-3 text-xs text-muted-foreground">
-        Loading self-exam bundle…
-      </div>
-    );
-  }
-  if (state === "none" || state === "error" || !bundle) return null;
-
-  const { submission, completion } = bundle;
-  const pct = completion.totalCount === 0
-    ? 0
-    : Math.round((completion.completedCount / completion.totalCount) * 100);
-  return (
-    <div className="rounded border bg-background p-3 space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <ClipboardList className="w-4 h-4 text-primary" />
-        <span className="text-sm font-semibold">Self-Exam Bundle</span>
-        <Badge variant={submission.status === "SUBMITTED" ? "default" : "secondary"}>
-          {submission.status}
-        </Badge>
-        <span className="text-xs text-muted-foreground">
-          {completion.completedCount}/{completion.totalCount} ({pct}%)
-        </span>
-      </div>
-      <BundleView bundle={bundle} />
-    </div>
-  );
-}
+// SelfExamBundlePanel + urgencyBadge are now shared from
+// @/components/dashboard/SelfExamBundlePanel so DoctorDashboard and
+// TherapistDashboard render identical pre-consultation kits.

@@ -131,7 +131,10 @@ export interface TherapistDashboardSummary {
     patient: { id: string; fullName: string } | null;
     title?: string;
     prescribedAt: string;
-    completionRate: number | null;
+    /** 0-100 patient-progress percentage sourced from the patient's active
+     *  TreatmentJourney wellnessScore. `null` when the patient has no active
+     *  journey — UI renders as "—". */
+    wellnessScore: number | null;
   }[];
   todos: TodoSummary;
   performance: {

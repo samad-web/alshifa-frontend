@@ -8,7 +8,7 @@ export type MessageTemplateCategory =
   | "APPOINTMENT_REMINDER"
   | "CUSTOM";
 
-export type DeliveryChannel = "WHATSAPP" | "SMS" | "EMAIL" | "IN_APP";
+export type DeliveryChannel = "WHATSAPP" | "IN_APP";
 
 export interface MessageTemplate {
   id: string;

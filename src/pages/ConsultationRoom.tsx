@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { ChatWrapper } from "@/components/chat/ChatWrapper";
 import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
 import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
+import { PatientHistoryPanel } from "@/components/consultation/PatientHistoryPanel";
 import type { FollowUpPayload } from "@/services/followUp.service";
 import { iwisApi, type DietPackage } from "@/services/iwis.service";
 
@@ -239,8 +240,11 @@ export default function ConsultationRoom() {
                     </div>
                 </div>
 
-                {/* Main Split View */}
+                {/* Main Split View — patient history rail | consultation | docs */}
                 <div className="flex-1 flex overflow-hidden">
+                    {/* Far Left: Patient History Panel (collapsible) */}
+                    <PatientHistoryPanel patientId={appointment.patient?.id || null} />
+
                     {/* Left: Consultation Area */}
                     <div className="flex-1 bg-secondary/20 p-6 overflow-y-auto">
                         {appointment.consultationMode === "ONLINE" ? (

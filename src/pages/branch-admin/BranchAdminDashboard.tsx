@@ -1,16 +1,169 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { apiClient } from "@/lib/api-client";
+import { operationsApi } from "@/services/operations.service";
+import type { AttendanceStatus, StaffAttendanceEntry } from "@/types";
 import {
   Users, Building2, ClipboardCheck, Trophy, Shield, CalendarDays, UserPlus,
+  Stethoscope, Heart, LogIn, LogOut, Loader2, Mail,
 } from "lucide-react";
+import { toast } from "sonner";
+
+interface EmployeeRow {
+  userId: string;
+  fullName: string;
+  email: string;
+  role: "DOCTOR" | "THERAPIST";
+  profilePhoto: string | null;
+  specialization: string | null;
+  attendance: StaffAttendanceEntry | null;
+}
+
+const statusBadgeStyles: Record<AttendanceStatus, string> = {
+  PRESENT:  "bg-green-100 text-green-800 border-green-300",
+  LATE:     "bg-yellow-100 text-yellow-800 border-yellow-300",
+  ABSENT:   "bg-red-100 text-red-800 border-red-300",
+  HALF_DAY: "bg-blue-100 text-blue-800 border-blue-300",
+  LEAVE:    "bg-purple-100 text-purple-800 border-purple-300",
+  WFH:      "bg-sky-100 text-sky-800 border-sky-300",
+};
+
+function initials(name: string | null | undefined) {
+  if (!name) return "??";
+  return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
+}
+
+function formatTime(iso?: string | null) {
+  if (!iso) return "--:--";
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// Current system time as HH:mm — what the backend's setAttendance expects.
+function nowHHmm() {
+  return new Date().toTimeString().slice(0, 5);
+}
+
+// Convert a stored ISO clock-in back into HH:mm so we can pass it through
+// when only the clock-out is being changed (the upsert overwrites both).
+function isoToHHmm(iso?: string | null) {
+  if (!iso) return undefined;
+  return new Date(iso).toTimeString().slice(0, 5);
+}
 
 export default function BranchAdminDashboard() {
   const { profile } = useAuth();
+  const branchId = profile?.branchId ?? null;
   const branchName = profile?.branch?.name || "your branch";
+
+  const [employees, setEmployees] = useState<EmployeeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [search, setSearch] = useState("");
+
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  useEffect(() => {
+    if (!branchId) { setLoading(false); return; }
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const [docsRes, thersRes, attendance] = await Promise.all([
+          apiClient.get<any[]>("/api/user/list-doctors",    { branchId }),
+          apiClient.get<any[]>("/api/user/list-therapists", { branchId }),
+          operationsApi.getBranchAttendance(branchId!, { date: today }).catch(() => [] as StaffAttendanceEntry[]),
+        ]);
+        if (cancelled) return;
+
+        const attendanceByUser = new Map<string, StaffAttendanceEntry>();
+        for (const a of attendance || []) attendanceByUser.set(a.userId, a);
+
+        const docRows: EmployeeRow[] = (docsRes.data || []).map((d: any) => ({
+          userId: d.userId ?? d.user?.id ?? "",
+          fullName: d.fullName ?? d.user?.email ?? "Doctor",
+          email: d.email ?? d.user?.email ?? "",
+          role: "DOCTOR",
+          profilePhoto: d.profilePhoto ?? null,
+          specialization: d.specialization ?? null,
+          attendance: attendanceByUser.get(d.userId ?? d.user?.id ?? "") ?? null,
+        }));
+        const therRows: EmployeeRow[] = (thersRes.data || []).map((t: any) => ({
+          userId: t.userId ?? t.user?.id ?? "",
+          fullName: t.fullName ?? t.user?.email ?? "Therapist",
+          email: t.email ?? t.user?.email ?? "",
+          role: "THERAPIST",
+          profilePhoto: t.profilePhoto ?? null,
+          specialization: t.specialization ?? null,
+          attendance: attendanceByUser.get(t.userId ?? t.user?.id ?? "") ?? null,
+        }));
+        setEmployees([...docRows, ...therRows].filter((r) => r.userId));
+      } catch {
+        toast.error("Failed to load employees");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [branchId, today, refreshKey]);
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return employees;
+    return employees.filter((e) =>
+      e.fullName.toLowerCase().includes(term)
+      || e.email.toLowerCase().includes(term)
+      || (e.specialization || "").toLowerCase().includes(term),
+    );
+  }, [employees, search]);
+
+  // System time clock-in via the admin-override endpoint. Safer than the
+  // self-service /clock-in route since the BRANCH_ADMIN isn't the staff
+  // member — we're recording attendance on their behalf at "now".
+  const handleMarkIn = async (row: EmployeeRow) => {
+    setBusyUserId(row.userId);
+    try {
+      await operationsApi.setAttendance(row.userId, {
+        date: today,
+        clockIn: nowHHmm(),
+      });
+      toast.success(`Marked in: ${row.fullName}`);
+      setRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || "Failed to mark in");
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  const handleMarkOut = async (row: EmployeeRow) => {
+    if (!row.attendance?.clockIn) return;
+    setBusyUserId(row.userId);
+    try {
+      // setAttendance treats missing clockIn as a clear, so we must echo the
+      // existing clock-in HH:mm back when only stamping the clock-out.
+      await operationsApi.setAttendance(row.userId, {
+        date: today,
+        clockIn: isoToHHmm(row.attendance.clockIn),
+        clockOut: nowHHmm(),
+      });
+      toast.success(`Marked out: ${row.fullName}`);
+      setRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || "Failed to mark out");
+    } finally {
+      setBusyUserId(null);
+    }
+  };
 
   const tiles: Array<{ to: string; label: string; description: string; icon: typeof Users }> = [
     { to: "/branch-admin/staff",       label: "Staff Directory",   description: "Doctors and therapists assigned to your branch", icon: Users },
@@ -20,6 +173,17 @@ export default function BranchAdminDashboard() {
     { to: "/branch-admin/skill-matrix",label: "Skill Matrix",      description: "Therapist Ayurvedic skills (read-only)",         icon: Shield },
     { to: "/staff-schedule",           label: "Schedule",          description: "Weekly availability across the branch",          icon: CalendarDays },
   ];
+
+  // Headline counts for the employee section.
+  const stats = useMemo(() => {
+    let inToday = 0, outToday = 0, pending = 0;
+    for (const e of employees) {
+      if (e.attendance?.clockIn && e.attendance?.clockOut) outToday++;
+      else if (e.attendance?.clockIn) inToday++;
+      else pending++;
+    }
+    return { inToday, outToday, pending };
+  }, [employees]);
 
   return (
     <AppLayout>
@@ -43,6 +207,135 @@ export default function BranchAdminDashboard() {
               You cannot create or deactivate staff accounts, edit clinician availability, or
               modify therapist skills.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Inline employee list — shown directly on the dashboard so the branch
+            admin can see who's in the branch and mark attendance with one
+            click. Clock-in/out time is the current system time. */}
+        <Card className="border-none shadow-sm">
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users className="w-4 h-4 text-primary" />
+                Employees in {branchName}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                </span>
+              </CardTitle>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                  In: {stats.inToday}
+                </Badge>
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300">
+                  Out: {stats.outToday}
+                </Badge>
+                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">
+                  Pending: {stats.pending}
+                </Badge>
+              </div>
+            </div>
+            <div className="pt-3">
+              <Input
+                placeholder="Search employee by name, email, or specialisation"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="max-w-sm"
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="py-12 flex justify-center">
+                <Loader2 className="w-6 h-6 text-muted-foreground animate-spin" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <p className="py-8 text-sm text-center text-muted-foreground">
+                {employees.length === 0 ? "No clinicians assigned to this branch yet." : "No employees match your search."}
+              </p>
+            ) : (
+              <ul className="divide-y">
+                {filtered.map((row) => {
+                  const Icon = row.role === "DOCTOR" ? Stethoscope : Heart;
+                  const att = row.attendance;
+                  const isClockedIn = !!att?.clockIn && !att?.clockOut;
+                  const isClockedOut = !!att?.clockIn && !!att?.clockOut;
+                  const isBusy = busyUserId === row.userId;
+
+                  return (
+                    <li key={row.userId} className="py-3 flex flex-wrap items-center gap-3">
+                      <Avatar className="h-10 w-10 shrink-0">
+                        {row.profilePhoto && <AvatarImage src={row.profilePhoto} alt={row.fullName} />}
+                        <AvatarFallback>{initials(row.fullName)}</AvatarFallback>
+                      </Avatar>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm truncate">{row.fullName}</span>
+                          <Badge variant="outline" className="gap-1 text-[10px]">
+                            <Icon className="w-3 h-3" />
+                            {row.role === "DOCTOR" ? "Doctor" : "Therapist"}
+                          </Badge>
+                          {att?.status && (
+                            <Badge variant="outline" className={statusBadgeStyles[att.status]}>
+                              {att.status.replace("_", " ")}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
+                          {row.email && (
+                            <span className="flex items-center gap-1 truncate">
+                              <Mail className="w-3 h-3" /> {row.email}
+                            </span>
+                          )}
+                          {row.specialization && <span>· {row.specialization}</span>}
+                          <span>
+                            In {formatTime(att?.clockIn)} · Out {formatTime(att?.clockOut)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant={isClockedIn || isClockedOut ? "outline" : "default"}
+                          disabled={isBusy || isClockedIn || isClockedOut}
+                          onClick={() => handleMarkIn(row)}
+                          className="gap-1"
+                          title={
+                            isClockedOut ? "Already clocked out today"
+                            : isClockedIn ? "Already clocked in today"
+                            : "Stamp clock-in at current system time"
+                          }
+                        >
+                          {isBusy && !isClockedIn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+                          Mark In
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isBusy || !isClockedIn}
+                          onClick={() => handleMarkOut(row)}
+                          className="gap-1"
+                          title={!isClockedIn ? "Clock in first" : "Stamp clock-out at current system time"}
+                        >
+                          {isBusy && isClockedIn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+                          Mark Out
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="pt-4 flex justify-end">
+              <Link to="/attendance">
+                <Button variant="ghost" size="sm" className="gap-1.5">
+                  <ClipboardCheck className="w-4 h-4" />
+                  Open full attendance view
+                </Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
 

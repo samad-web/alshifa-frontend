@@ -28,7 +28,7 @@ const CATEGORIES: { key: MessageTemplateCategory; label: string }[] = [
   { key: "CUSTOM", label: "Custom" },
 ];
 
-const CHANNELS: DeliveryChannel[] = ["WHATSAPP", "SMS", "EMAIL", "IN_APP"];
+const CHANNELS: DeliveryChannel[] = ["WHATSAPP", "IN_APP"];
 
 const emptyTemplate = {
   name: "",
@@ -207,12 +207,12 @@ export default function MessageTemplates() {
       </Tabs>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
             <DialogTitle>{editing ? "Edit template" : "New template"}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 px-6 py-4 overflow-y-auto flex-1 min-h-0">
             <div className="col-span-2">
               <Label>Name</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. OFFLINE appointment confirmation" />
@@ -284,7 +284,7 @@ export default function MessageTemplates() {
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="px-6 py-4 border-t shrink-0">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button disabled={saving} onClick={save}>{saving ? "Saving…" : editing ? "Save changes" : "Create"}</Button>
           </DialogFooter>
