@@ -23,6 +23,7 @@ import {
   type ProtocolOverviewRow,
   type ZoneProtocolConfig,
 } from "@/services/selfExam.service";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 // ─── Display labels ────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export default function SelfExamProtocols() {
   // In-memory edits: zone → draft config. Only persisted on Save.
   const [drafts, setDrafts] = useState<Record<string, ZoneProtocolConfig>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,7 +127,13 @@ export default function SelfExamProtocols() {
   };
 
   const reset = async (zone: PainZone) => {
-    if (!confirm(`Reset ${ZONE_LABELS[zone]} to platform defaults?`)) return;
+    const ok = await confirm({
+      title: `Reset ${ZONE_LABELS[zone]} to defaults?`,
+      description: "Hospital-specific overrides for this zone will be discarded and replaced with the platform defaults.",
+      confirmLabel: "Reset",
+      tone: "danger",
+    });
+    if (!ok) return;
     setSaving((s) => ({ ...s, [zone]: true }));
     try {
       await selfExamService.resetProtocol(zone);
@@ -177,6 +185,7 @@ export default function SelfExamProtocols() {
             />
           ))}
         </Accordion>
+        {confirmDialog}
       </div>
     </AppLayout>
   );

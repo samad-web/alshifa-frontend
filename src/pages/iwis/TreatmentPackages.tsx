@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
@@ -15,11 +16,28 @@ import { Plus, Package, Loader2, Building2, Users, Calendar, IndianRupee, Edit2,
 import { iwisApi, type TreatmentPackage, type PackageEnrolment } from "@/services/iwis.service";
 import { branchesApi } from "@/services/branches.service";
 import { apiClient } from "@/lib/api-client";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { useConfirm } from "@/components/common/ConfirmDialog";
+import { useAuth } from "@/hooks/useAuth";
 
 type ComponentRow = { type: string; description: string; quantity: number };
 
+// GST slabs the form exposes — matches the standard Indian GST rates so admins
+// don't fat-finger an arbitrary number into a tax field.
+const GST_SLABS = [0, 5, 12, 18, 28] as const;
+
 export default function TreatmentPackagesPage() {
     const { toast } = useToast();
+    const { confirm, dialog: confirmDialog } = useConfirm();
+    const { role } = useAuth();
+    // Package authoring is admin-only. DOCTOR can view + enrol patients but
+    // not create / edit / deactivate templates. Backend enforces the same;
+    // hiding the UI prevents the visible-but-403 footgun.
+    const canManagePackages = role === "ADMIN" || role === "ADMIN_DOCTOR";
+    // Branch is sourced from the global navbar selector. When the admin has
+    // "All branches" picked we fall back to the first branch in their list so
+    // package creation always has a concrete branchId to attach to.
+    const { branchIdParam } = useBranchScope();
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
     const [branchId, setBranchId] = useState("");
     const [packages, setPackages] = useState<TreatmentPackage[]>([]);
@@ -39,10 +57,24 @@ export default function TreatmentPackagesPage() {
     const [enrol, setEnrol] = useState({ patientId: "", sessionsTotal: "21", startDate: new Date().toISOString().slice(0, 10), notes: "" });
 
     useEffect(() => {
-        branchesApi.list().then((b) => { setBranches(b); if (b[0]) setBranchId(b[0].id); });
-        apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-patients")
-            .then(({ data }) => setPatients(data)).catch(() => {});
+        branchesApi.list().then(setBranches).catch(() => setBranches([]));
     }, []);
+
+    // React to the global branch selector. Default to the first branch when
+    // "All branches" is active so we always have a concrete branchId for
+    // package CRUD calls (which require one).
+    useEffect(() => {
+        if (branchIdParam) { setBranchId(branchIdParam); return; }
+        if (branches[0] && !branchId) setBranchId(branches[0].id);
+    }, [branchIdParam, branches, branchId]);
+
+    // Patient list is scoped to the active branch so the enrol dropdown only
+    // shows patients that belong to the package's branch.
+    useEffect(() => {
+        const params = branchId ? { branchId } : undefined;
+        apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-patients", params)
+            .then(({ data }) => setPatients(data)).catch(() => setPatients([]));
+    }, [branchId]);
 
     const reload = useCallback(async () => {
         if (!branchId) return;
@@ -109,15 +141,17 @@ export default function TreatmentPackagesPage() {
         <AppLayout>
             <div className="container max-w-7xl mx-auto px-4 py-8 space-y-8">
                 <PageHeader title="Treatment Packages" subtitle="Bundle appointments, medicines, meals and rooms into fixed-price programmes">
-                    <Button onClick={() => open()}><Plus className="w-4 h-4 mr-2" /> Create Package</Button>
+                    {canManagePackages && (
+                        <Button onClick={() => open()}><Plus className="w-4 h-4 mr-2" /> Create Package</Button>
+                    )}
                 </PageHeader>
 
-                <div className="flex items-center gap-3">
-                    <Building2 className="w-4 h-4 text-muted-foreground" />
-                    <Select value={branchId} onValueChange={setBranchId}>
-                        <SelectTrigger className="w-[280px]"><SelectValue placeholder="Branch" /></SelectTrigger>
-                        <SelectContent>{branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-                    </Select>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Building2 className="w-4 h-4" />
+                    Branch: <span className="font-semibold text-foreground">
+                        {branches.find((b) => b.id === branchId)?.name || "—"}
+                    </span>
+                    <span className="text-xs">(switch via navbar)</span>
                 </div>
 
                 {loading ? (
@@ -126,7 +160,9 @@ export default function TreatmentPackagesPage() {
                     <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-border/50 rounded-[32px] bg-secondary/5">
                         <Package className="w-12 h-12 text-muted-foreground/50 mb-4" />
                         <p className="text-muted-foreground mb-4">No treatment packages defined yet.</p>
-                        <Button onClick={() => open()}><Plus className="w-4 h-4 mr-2" /> Create first package</Button>
+                        {canManagePackages && (
+                            <Button onClick={() => open()}><Plus className="w-4 h-4 mr-2" /> Create first package</Button>
+                        )}
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -151,11 +187,25 @@ export default function TreatmentPackagesPage() {
                                     )}
                                     <div className="flex justify-end gap-2 pt-2">
                                         <Button variant="outline" size="sm" onClick={() => setEnrolOpen(pkg.id)}><ClipboardList className="w-3.5 h-3.5 mr-2" /> Enrol</Button>
-                                        <Button variant="secondary" size="sm" onClick={() => open(pkg)}><Edit2 className="w-3.5 h-3.5 mr-2" /> Edit</Button>
-                                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                onClick={async () => { if (confirm('Deactivate package?')) { await iwisApi.deactivatePackage(pkg.id); reload(); } }}>
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </Button>
+                                        {canManagePackages && (
+                                            <>
+                                                <Button variant="secondary" size="sm" onClick={() => open(pkg)}><Edit2 className="w-3.5 h-3.5 mr-2" /> Edit</Button>
+                                                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                        onClick={async () => {
+                                                            const ok = await confirm({
+                                                                title: "Deactivate package?",
+                                                                description: `"${pkg.name}" will no longer be available for new enrolments. Existing enrolments are unaffected.`,
+                                                                confirmLabel: "Deactivate",
+                                                                tone: "danger",
+                                                            });
+                                                            if (!ok) return;
+                                                            await iwisApi.deactivatePackage(pkg.id);
+                                                            reload();
+                                                        }}>
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </Panel>
@@ -179,7 +229,7 @@ export default function TreatmentPackagesPage() {
                                 <Label>Description</Label>
                                 <Textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                             </div>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Duration (days)</Label>
                                     <Input type="number" min={1} value={form.durationDays} onChange={(e) => setForm({ ...form, durationDays: e.target.value })} />
@@ -188,10 +238,33 @@ export default function TreatmentPackagesPage() {
                                     <Label>Price (₹)</Label>
                                     <Input type="number" min={0} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Tax %</Label>
-                                    <Input type="number" min={0} max={100} value={form.taxPercent} onChange={(e) => setForm({ ...form, taxPercent: e.target.value })} />
-                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>GST slab</Label>
+                                <RadioGroup
+                                    value={form.taxPercent}
+                                    onValueChange={(v) => setForm({ ...form, taxPercent: v })}
+                                    className="flex flex-wrap gap-2"
+                                >
+                                    {GST_SLABS.map((slab) => {
+                                        const v = String(slab);
+                                        const checked = form.taxPercent === v;
+                                        return (
+                                            <Label
+                                                key={slab}
+                                                htmlFor={`gst-${slab}`}
+                                                className={`flex items-center gap-2 cursor-pointer rounded-full border px-4 py-2 text-sm transition-all ${
+                                                    checked
+                                                        ? "border-primary bg-primary/10 text-primary font-semibold"
+                                                        : "border-border/60 hover:border-border bg-background"
+                                                }`}
+                                            >
+                                                <RadioGroupItem value={v} id={`gst-${slab}`} className="sr-only" />
+                                                {slab}% GST
+                                            </Label>
+                                        );
+                                    })}
+                                </RadioGroup>
                             </div>
 
                             <div className="space-y-3 pt-2 border-t border-border/40">
@@ -268,6 +341,8 @@ export default function TreatmentPackagesPage() {
                         </form>
                     </DialogContent>
                 </Dialog>
+
+                {confirmDialog}
             </div>
         </AppLayout>
     );

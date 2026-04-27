@@ -22,10 +22,6 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { fmtDate, fmtShortDate } from "@/lib/format-date";
 import { useBranchScope } from "@/hooks/useBranchScope";
 
-function patientBranchId(p: any): string | null {
-    return p?.branchId ?? p?.user?.branchId ?? null;
-}
-
 const MEAL_TIMES: MealTime[] = ["MORNING_EMPTY", "BREAKFAST", "MID_MORNING", "LUNCH", "EVENING", "DINNER", "BEDTIME"];
 const MEAL_LABEL: Record<MealTime, string> = {
     MORNING_EMPTY: "Morning (empty stomach)",
@@ -39,7 +35,19 @@ const MEAL_LABEL: Record<MealTime, string> = {
 const DOSHAS: DoshaType[] = ["VATA", "PITTA", "KAPHA", "TRIDOSHA"];
 const CATEGORIES: DietCategory[] = ["SATTVIC", "RAJASIC", "TAMASIC"];
 
-type MealRow = { mealTime: MealTime; foods: string; avoidFoods: string; instructions: string };
+import { composeInstructions } from "@/lib/dietFrequency";
+
+type MealRow = {
+    mealTime: MealTime;
+    foods: string;
+    avoidFoods: string;
+    instructions: string;
+    // Number of times per day this meal should be repeated. Bound to a
+    // numeric input (1-50). Persisted by encoding into the meal `instructions`
+    // string via the shared `composeInstructions` helper — DietMeal has no
+    // first-class column for this and we don't want a schema migration.
+    frequency: number;
+};
 
 const parseFoods = (s: string) =>
     s.split(/[,\n]/).map((f) => f.trim()).filter(Boolean).map((name) => ({ name }));
@@ -61,13 +69,15 @@ export default function DietPrescriptionsPage() {
         startDate: new Date().toISOString().slice(0, 10), endDate: "", notes: "",
     });
     const [meals, setMeals] = useState<MealRow[]>([
-        { mealTime: "BREAKFAST", foods: "", avoidFoods: "", instructions: "" },
+        { mealTime: "BREAKFAST", foods: "", avoidFoods: "", instructions: "", frequency: 1 },
     ]);
 
     // Approved packages available as templates
     const [approvedPackages, setApprovedPackages] = useState<DietPackage[]>([]);
     const [assignPkg, setAssignPkg] = useState<DietPackage | null>(null);
-    const [assignDuration, setAssignDuration] = useState(14);
+    // Default duration is the package's own value once selected; before that
+    // we surface a sensible 7-day window so the form is never blank/zero.
+    const [assignDuration, setAssignDuration] = useState(7);
     const [assignStartDate, setAssignStartDate] = useState(new Date().toISOString().slice(0, 10));
     const [assignNotes, setAssignNotes] = useState("");
     const [assigning, setAssigning] = useState(false);
@@ -77,16 +87,26 @@ export default function DietPrescriptionsPage() {
     const [conflicts, setConflicts] = useState<Array<{ id: string; title: string; startDate: string; endDate: string | null }> | null>(null);
 
     useEffect(() => {
+        // Backend already filters status=APPROVED + isActive=true for the
+        // assignment selector, but we re-filter on the client as a defensive
+        // belt-and-braces — older API builds returned archived rows here and
+        // they would silently leak into the patient assignment dropdown.
         iwisApi.listDietPackages({ status: "APPROVED" })
-            .then((list) => setApprovedPackages(list.filter((p) => p.isActive)))
-            .catch(() => {});
+            .then((list) => setApprovedPackages(list.filter((p) => p.isActive && p.status === "APPROVED")))
+            .catch((err) => {
+                console.error("[DietPrescriptions] failed to load approved packages", err);
+            });
     }, []);
 
+    // Patient roster — only patients assigned to the calling doctor/therapist.
+    // ADMIN_DOCTOR/ADMIN bypass the filter on the backend and see everyone.
     useEffect(() => {
-        apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-patients")
-            .then(({ data }) => setPatients(data))
-            .catch(() => {});
-    }, []);
+        const params: Record<string, string> = { assignedToMe: "true" };
+        if (branchIdParam) params.branchId = branchIdParam;
+        apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-patients", params)
+            .then(({ data }) => setPatients(Array.isArray(data) ? data : []))
+            .catch(() => setPatients([]));
+    }, [branchIdParam]);
 
     useEffect(() => {
         if (!patientId) return;
@@ -96,7 +116,7 @@ export default function DietPrescriptionsPage() {
             .finally(() => setLoading(false));
     }, [patientId]);
 
-    const addMeal = () => setMeals([...meals, { mealTime: "LUNCH", foods: "", avoidFoods: "", instructions: "" }]);
+    const addMeal = () => setMeals([...meals, { mealTime: "LUNCH", foods: "", avoidFoods: "", instructions: "", frequency: 1 }]);
     const removeMeal = (i: number) => setMeals(meals.filter((_, idx) => idx !== i));
 
     const openAssignFromPackage = (pkg: DietPackage) => {
@@ -169,18 +189,41 @@ export default function DietPrescriptionsPage() {
         e.preventDefault();
         if (!patientId) return toast({ title: "Select a patient", variant: "destructive" });
         try {
-            const me = await apiClient.get<{ doctor?: { id: string } | null }>("/api/user/me").then(r => r.data).catch(() => null);
-            const doctorId = me?.doctor?.id || user?.id || "";
+            // Resolve the caller's Doctor.id explicitly. The backend expects a
+            // Doctor primary key (NOT User.id) — falling back to user.id was
+            // the root cause of the silent persistence failure: the FK
+            // constraint rejected the row but the error toast was lost in
+            // the previous catch-all. Refuse to submit when we can't resolve
+            // a Doctor profile and surface the reason to the doctor.
+            const me = await apiClient.get<{ doctor?: { id: string } | null; role?: string }>("/api/user/me")
+                .then(r => r.data)
+                .catch(() => null);
+            const doctorId = me?.doctor?.id || "";
+            if (!doctorId) {
+                toast({
+                    title: "Cannot save diet plan",
+                    description: "Your account has no clinician profile linked. Ask an admin to link a Doctor record before creating diet prescriptions.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
             const payload = {
-                patientId, doctorId, title: form.title,
-                doshaTarget: form.doshaTarget, category: form.category,
-                startDate: form.startDate, endDate: form.endDate || undefined,
+                patientId,
+                doctorId,
+                title: form.title,
+                doshaTarget: form.doshaTarget,
+                category: form.category,
+                startDate: form.startDate,
+                endDate: form.endDate || undefined,
                 notes: form.notes || undefined,
                 meals: meals.map((m): DietMealPlan => ({
                     mealTime: m.mealTime,
                     foods: parseFoods(m.foods),
                     avoidFoods: parseFoods(m.avoidFoods),
-                    instructions: m.instructions || undefined,
+                    // Persist frequency as a structured prefix on instructions
+                    // so the value round-trips without a schema change.
+                    instructions: composeInstructions(m.frequency, m.instructions),
                 })),
             };
             await iwisApi.createDiet(payload);
@@ -208,9 +251,7 @@ export default function DietPrescriptionsPage() {
                         <PatientPicker
                             value={patientId}
                             onChange={setPatientId}
-                            patients={branchIdParam
-                                ? patients.filter((p) => patientBranchId(p) === branchIdParam)
-                                : patients}
+                            patients={patients}
                             placeholder="Search patients…"
                         />
                     </div>
@@ -337,11 +378,31 @@ export default function DietPrescriptionsPage() {
                                 </div>
                                 {meals.map((m, i) => (
                                     <div key={i} className="p-4 rounded-lg border border-border/60 space-y-3">
-                                        <div className="flex items-center justify-between">
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
                                             <Select value={m.mealTime} onValueChange={(v) => { const c = [...meals]; c[i].mealTime = v as MealTime; setMeals(c); }}>
-                                                <SelectTrigger className="w-[240px]"><SelectValue /></SelectTrigger>
+                                                <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
                                                 <SelectContent>{MEAL_TIMES.map((t) => <SelectItem key={t} value={t}>{MEAL_LABEL[t]}</SelectItem>)}</SelectContent>
                                             </Select>
+                                            <div className="flex items-center gap-2">
+                                                <Label className="text-[11px] text-muted-foreground">Frequency / day</Label>
+                                                <Input
+                                                    type="number"
+                                                    min={1}
+                                                    max={50}
+                                                    className="w-20 h-9"
+                                                    value={m.frequency}
+                                                    onChange={(e) => {
+                                                        // Bind directly to numeric state. Empty string is preserved
+                                                        // mid-edit (NaN → 1 only on blur via clamp below) so the
+                                                        // input never feels "stuck" at 1 when the user is typing.
+                                                        const raw = e.target.value;
+                                                        const next = raw === "" ? 1 : Math.max(1, Math.min(50, Number(raw) || 1));
+                                                        const c = [...meals];
+                                                        c[i].frequency = next;
+                                                        setMeals(c);
+                                                    }}
+                                                />
+                                            </div>
                                             {meals.length > 1 && <Button type="button" variant="ghost" size="sm" onClick={() => removeMeal(i)}>Remove</Button>}
                                         </div>
                                         <Input placeholder="Foods to eat (comma-separated)" value={m.foods} onChange={(e) => { const c = [...meals]; c[i].foods = e.target.value; setMeals(c); }} />

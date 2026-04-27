@@ -21,6 +21,8 @@ import {
     ChevronLeft, Loader2, AlertCircle, RefreshCw
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
+import type { CheckInPainRegion, LastPainRegionsResponse } from "@/services/enhancedDashboard.service";
 
 const EVENT_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string }> = {
     APPOINTMENT:  { label: "Appointment",       icon: Calendar,   color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -38,6 +40,72 @@ interface TimelineEvent {
     subtitle?: string;
     status?: string;
     meta?: Record<string, unknown>;
+}
+
+/** Format an ISO timestamp as DD/MM/YYYY HH:MM in the doctor's local time. */
+function formatPainMapTimestamp(iso: string | null): string | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+function PainMapSnapshot({ patientId }: { patientId: string }) {
+    const [regions, setRegions] = useState<CheckInPainRegion[]>([]);
+    const [recordedAt, setRecordedAt] = useState<string | null>(null);
+    const [source, setSource] = useState<"check_in" | "triage" | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const { data } = await apiClient.get<LastPainRegionsResponse>(
+                    `/api/patients/${patientId}/pain-map`,
+                );
+                if (cancelled) return;
+                setRegions(Array.isArray(data?.painRegions) ? data.painRegions : []);
+                setRecordedAt(data?.recordedAt ?? null);
+                setSource(data?.source ?? null);
+            } catch {
+                // Silent — panel just renders the empty state.
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [patientId]);
+
+    const ts = formatPainMapTimestamp(recordedAt);
+    const sourceLabel = source === "check_in" ? "Daily check-in" : source === "triage" ? "Triage session" : null;
+
+    return (
+        <Panel>
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold">Latest pain map</h3>
+                {ts && (
+                    <span className="text-xs text-muted-foreground">
+                        Last updated {ts}{sourceLabel ? ` · ${sourceLabel}` : ""}
+                    </span>
+                )}
+            </div>
+            {loading ? (
+                <div className="flex justify-center py-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+            ) : regions.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">
+                    No pain regions logged yet.
+                </p>
+            ) : (
+                <BodyMapPainSelector initialPainRegions={regions} readOnly />
+            )}
+        </Panel>
+    );
 }
 
 export default function PatientTimeline() {
@@ -99,6 +167,11 @@ export default function PatientTimeline() {
                         description="Chronological event history across all care activities"
                     />
                 </div>
+
+                {/* Pain map snapshot — read-only body diagram showing the
+                    patient's most recent pain regions (latest check-in →
+                    triage fallback). */}
+                {patientId && <PainMapSnapshot patientId={patientId} />}
 
                 {/* Filters */}
                 <Panel>

@@ -22,8 +22,10 @@ import { apiClient } from "@/lib/api-client";
 import type { ResourceSharingEntry, SharingStatus } from "@/types";
 import {
   Loader2, ArrowRightLeft, Plus, CheckCircle, XCircle, Users, Clock, AlertTriangle,
+  Pencil, Trash2,
 } from "lucide-react";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { toast } from "sonner";
 
 function sharingFromBranchId(r: any): string | null {
   return r?.fromBranchId ?? r?.fromBranch?.id ?? null;
@@ -41,16 +43,20 @@ const statusBadge: Record<SharingStatus, { className: string; label: string }> =
 };
 
 export default function ResourceSharing() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { branches } = useBranches();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
   const { isAll, branchIdParam } = useBranchScope();
+  const userId = user?.id || "";
+  const userBranchId = (user as any)?.branchId || null;
 
   const [requests, setRequests] = useState<ResourceSharingEntry[]>([]);
   const [todayShared, setTodayShared] = useState<ResourceSharingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // When set, the dialog edits an existing request instead of creating a new one.
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
 
   // Staff roster populated once for the Staff dropdown.
   type StaffOption = { userId: string; name: string; role: string; branchId: string | null };
@@ -61,6 +67,7 @@ export default function ResourceSharing() {
   const [formFromBranch, setFormFromBranch] = useState("");
   const [formToBranch, setFormToBranch] = useState("");
   const [formDate, setFormDate] = useState(new Date().toISOString().split("T")[0]);
+  const [formEndDate, setFormEndDate] = useState("");
   const [formStartTime, setFormStartTime] = useState("09:00");
   const [formEndTime, setFormEndTime] = useState("17:00");
   const [formReason, setFormReason] = useState("");
@@ -149,39 +156,78 @@ export default function ResourceSharing() {
 
   const handleCreate = async () => {
     if (!formUserId || !formFromBranch || !formToBranch) return;
+    if (formEndDate && formEndDate < formDate) {
+      toast.error("To Date must be on or after From Date");
+      return;
+    }
     setSubmitting(true);
     try {
-      await operationsApi.createSharingRequest({
-        userId: formUserId,
-        fromBranchId: formFromBranch,
-        toBranchId: formToBranch,
-        date: formDate,
-        startTime: formStartTime,
-        endTime: formEndTime,
-        reason: formReason || undefined,
-      });
+      if (editingRequestId) {
+        // Edit existing request — only the patchable fields, not the user
+        // (changing the staff member would invalidate the availability
+        // check that ran when the request was first created).
+        await operationsApi.updateSharingRequest(editingRequestId, {
+          fromBranchId: formFromBranch,
+          toBranchId: formToBranch,
+          date: formDate,
+          endDate: formEndDate || null,
+          startTime: formStartTime,
+          endTime: formEndTime,
+          reason: formReason || null,
+        });
+        toast.success("Sharing request updated");
+      } else {
+        await operationsApi.createSharingRequest({
+          userId: formUserId,
+          fromBranchId: formFromBranch,
+          toBranchId: formToBranch,
+          date: formDate,
+          endDate: formEndDate || undefined,
+          startTime: formStartTime,
+          endTime: formEndTime,
+          reason: formReason || undefined,
+        });
+      }
       setDialogOpen(false);
       resetForm();
       await fetchData();
     } catch (err: unknown) {
       // Surface the backend reason verbatim — it carries the availability
       // rejection text (e.g. "on leave", "has a blocked slot").
-      const msg = err instanceof Error && err.message ? err.message : "Failed to create sharing request";
-      alert(msg);
+      const msg = err instanceof Error && err.message ? err.message : "Failed to save sharing request";
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
   };
 
   const resetForm = () => {
+    setEditingRequestId(null);
     setFormUserId("");
     setFormFromBranch("");
     setFormToBranch("");
     setFormDate(new Date().toISOString().split("T")[0]);
+    setFormEndDate("");
     setFormStartTime("09:00");
     setFormEndTime("17:00");
     setFormReason("");
     setAvailability(null);
+  };
+
+  // Open the dialog pre-populated to edit an existing request. The Staff
+  // dropdown is locked since the availability check is keyed on (user,
+  // date, time) — changing the user would invalidate the original gate.
+  const startEditing = (req: ResourceSharingEntry) => {
+    setEditingRequestId(req.id);
+    setFormUserId(req.userId);
+    setFormFromBranch(req.fromBranchId);
+    setFormToBranch(req.toBranchId);
+    setFormDate(new Date(req.date).toISOString().split("T")[0]);
+    setFormEndDate(req.endDate ? new Date(req.endDate).toISOString().split("T")[0] : "");
+    setFormStartTime(req.startTime);
+    setFormEndTime(req.endTime);
+    setFormReason(req.reason || "");
+    setDialogOpen(true);
   };
 
   const handleApprove = async (id: string) => {
@@ -189,7 +235,7 @@ export default function ResourceSharing() {
       await operationsApi.approveSharingRequest(id);
       await fetchData();
     } catch {
-      alert("Failed to approve request");
+      toast.error("Failed to approve request");
     }
   };
 
@@ -198,9 +244,41 @@ export default function ResourceSharing() {
       await operationsApi.rejectSharingRequest(id);
       await fetchData();
     } catch {
-      alert("Failed to reject request");
+      toast.error("Failed to reject request");
     }
   };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this pending sharing request?")) return;
+    try {
+      await operationsApi.deleteSharingRequest(id);
+      toast.success("Sharing request deleted");
+      await fetchData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to delete request";
+      toast.error(msg);
+    }
+  };
+
+  // Role gates for inline action buttons. Each button is shown to the
+  // narrowest set of actors that can perform it server-side, so the UI
+  // never offers an action the API would reject.
+  const canEdit = (req: ResourceSharingEntry) =>
+    req.status === "PENDING" && (
+      role === "ADMIN"
+      || (req.createdById && req.createdById === userId)
+      || (role === "ADMIN_DOCTOR" && (userBranchId === req.fromBranchId || userBranchId === req.toBranchId))
+    );
+  const canDelete = (req: ResourceSharingEntry) =>
+    req.status === "PENDING" && (
+      role === "ADMIN"
+      || (req.createdById && req.createdById === userId)
+      || (role === "ADMIN_DOCTOR" && (userBranchId === req.fromBranchId || userBranchId === req.toBranchId))
+    );
+  const canApprove = (req: ResourceSharingEntry) =>
+    req.status === "PENDING" && (
+      role === "ADMIN" || (role === "ADMIN_DOCTOR" && userBranchId === req.toBranchId)
+    );
 
   const getStaffName = (entry: ResourceSharingEntry) => {
     if (entry.user?.doctor) return (entry.user.doctor as any).fullName || entry.user.email;
@@ -321,7 +399,15 @@ export default function ResourceSharing() {
                             <TableCell className="font-medium">{getStaffName(req)}</TableCell>
                             <TableCell>{req.fromBranch?.name || req.fromBranchId.slice(0, 8)}</TableCell>
                             <TableCell>{req.toBranch?.name || req.toBranchId.slice(0, 8)}</TableCell>
-                            <TableCell>{new Date(req.date).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              {new Date(req.date).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                              {req.endDate && (
+                                <>
+                                  {" → "}
+                                  {new Date(req.endDate).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                </>
+                              )}
+                            </TableCell>
                             <TableCell className="text-xs">{req.startTime} - {req.endTime}</TableCell>
                             <TableCell className="max-w-[150px] truncate text-xs">{req.reason || "--"}</TableCell>
                             <TableCell>
@@ -330,23 +416,51 @@ export default function ResourceSharing() {
                             {isAdmin && (
                               <TableCell>
                                 {req.status === "PENDING" && (
-                                  <div className="flex items-center gap-1">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                      onClick={() => handleApprove(req.id)}
-                                    >
-                                      <CheckCircle className="w-4 h-4" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                      onClick={() => handleReject(req.id)}
-                                    >
-                                      <XCircle className="w-4 h-4" />
-                                    </Button>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {canApprove(req) && (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                          title="Accept"
+                                          onClick={() => handleApprove(req.id)}
+                                        >
+                                          <CheckCircle className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                          title="Reject"
+                                          onClick={() => handleReject(req.id)}
+                                        >
+                                          <XCircle className="w-4 h-4" />
+                                        </Button>
+                                      </>
+                                    )}
+                                    {canEdit(req) && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 text-primary hover:text-primary hover:bg-primary/10"
+                                        title="Edit"
+                                        onClick={() => startEditing(req)}
+                                      >
+                                        <Pencil className="w-4 h-4" />
+                                      </Button>
+                                    )}
+                                    {canDelete(req) && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        title="Delete"
+                                        onClick={() => handleDelete(req.id)}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    )}
                                   </div>
                                 )}
                               </TableCell>
@@ -398,13 +512,21 @@ export default function ResourceSharing() {
           </CardContent>
         </Card>
 
-        {/* Create Dialog */}
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        {/* Create / Edit Dialog */}
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
+          }}
+        >
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Create Sharing Request</DialogTitle>
+              <DialogTitle>{editingRequestId ? "Edit Sharing Request" : "Create Sharing Request"}</DialogTitle>
               <DialogDescription>
-                Assign a staff member to cover another branch temporarily.
+                {editingRequestId
+                  ? "Update the date range, time, branches, or reason. The staff member can't be changed once a request exists."
+                  : "Assign a staff member to cover another branch temporarily."}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -413,6 +535,7 @@ export default function ResourceSharing() {
                 <SearchableSelect
                   value={formUserId}
                   onChange={handleSelectStaff}
+                  disabled={!!editingRequestId}
                   placeholder={staff.length === 0 ? "Loading staff…" : "Select a doctor or therapist"}
                   searchPlaceholder="Search staff…"
                   loading={staff.length === 0}
@@ -423,7 +546,9 @@ export default function ResourceSharing() {
                   }))}
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Their home branch auto-fills as "From Branch" — you can still change it.
+                  {editingRequestId
+                    ? "Staff is locked while editing — delete and recreate to assign someone else."
+                    : "Their home branch auto-fills as \"From Branch\" — you can still change it."}
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -448,10 +573,27 @@ export default function ResourceSharing() {
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Date</label>
-                <Input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">From Date</label>
+                  <Input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">To Date</label>
+                  <Input
+                    type="date"
+                    value={formEndDate}
+                    onChange={e => setFormEndDate(e.target.value)}
+                    min={formDate || undefined}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Leave blank for a single-day arrangement.
+                  </p>
+                </div>
               </div>
+              {formEndDate && formEndDate < formDate && (
+                <p className="text-xs text-destructive">To Date must be on or after From Date.</p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Start Time</label>
@@ -498,13 +640,18 @@ export default function ResourceSharing() {
               )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>Cancel</Button>
               <Button
                 onClick={handleCreate}
-                disabled={submitting || checkingAvailability || availability?.available === false}
+                disabled={
+                  submitting
+                  || checkingAvailability
+                  || availability?.available === false
+                  || (!!formEndDate && formEndDate < formDate)
+                }
               >
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                Create Request
+                {editingRequestId ? "Save Changes" : "Create Request"}
               </Button>
             </DialogFooter>
           </DialogContent>

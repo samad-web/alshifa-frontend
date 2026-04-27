@@ -1,13 +1,12 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, GripVertical, Trash2, Pill, Dumbbell, Salad, Heart, Leaf, Award, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, GripVertical, Trash2, Award, ChevronDown, ChevronUp, UserCheck } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { AppLayout } from '@/components/layout/app-layout';
@@ -52,14 +51,51 @@ interface MilestoneDraft {
 export default function JourneyBuilder() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [patientId, setPatientId] = useState('');
-  const [branchId, setBranchId] = useState('');
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  // Pull pre-fill values from either route state (preferred — typed) or URL
+  // query params (so deep-links from emails / external systems also work).
+  // Recognised query keys: patientId, patientName, branchId.
+  const stateNav = (location.state || {}) as { patientId?: string; patientName?: string; branchId?: string };
+  const queryPatientId   = searchParams.get('patientId')   || '';
+  const queryPatientName = searchParams.get('patientName') || '';
+  const queryBranchId    = searchParams.get('branchId')    || '';
+  const initialPatientId   = stateNav.patientId   || queryPatientId   || '';
+  const initialPatientName = stateNav.patientName || queryPatientName || '';
+  const initialBranchId    = stateNav.branchId    || queryBranchId    || '';
+
+  const [patientId, setPatientId] = useState(initialPatientId);
+  // Patient name is display-only — surfaced in the form so the doctor can
+  // visually verify the journey is being built for the correct patient.
+  const [patientName, setPatientName] = useState(initialPatientName);
+  const [patientLookupLoading, setPatientLookupLoading] = useState(false);
+  const [branchId, setBranchId] = useState(initialBranchId);
   const [title, setTitle] = useState('');
   const [condition, setCondition] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [phases, setPhases] = useState<PhaseDraft[]>([]);
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // If we have an ID but no name (e.g. URL params only carried the ID),
+  // resolve the patient's display name + branch from the API so the form
+  // renders a "Building journey for X" badge and auto-fills branchId.
+  useEffect(() => {
+    if (!patientId || patientName) return;
+    let cancelled = false;
+    setPatientLookupLoading(true);
+    apiClient.get<{ fullName?: string; branchId?: string }>(`/api/user/patient/${patientId}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data?.fullName) setPatientName(data.fullName);
+        if (data?.branchId && !branchId) setBranchId(data.branchId);
+      })
+      .catch(() => { /* leave fields editable for manual entry */ })
+      .finally(() => { if (!cancelled) setPatientLookupLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId]);
 
   function addPhase() {
     setPhases(prev => [...prev, {
@@ -115,6 +151,21 @@ export default function JourneyBuilder() {
       return;
     }
 
+    // Phase-level validation. Without this, the backend silently created a
+    // journey with empty phases (durationDays defaults to 1 if NaN), which
+    // is what the "treatment phase section" bug was masking.
+    for (let i = 0; i < phases.length; i++) {
+      const p = phases[i];
+      if (!p.name.trim()) {
+        toast({ title: `Phase ${i + 1} is missing a name`, variant: 'destructive' });
+        return;
+      }
+      if (!Number.isFinite(p.durationDays) || p.durationDays < 1) {
+        toast({ title: `Phase ${i + 1} needs a duration of at least 1 day`, variant: 'destructive' });
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -123,30 +174,41 @@ export default function JourneyBuilder() {
         title,
         condition,
         targetDate: targetDate || undefined,
+        // Force `order` to match the array index so the backend phase
+        // sequence always reflects what the user sees, regardless of how
+        // many times they reordered phases on the client.
         phases: phases.map((p, i) => ({
-          name: p.name || `Phase ${i + 1}`,
+          name: p.name.trim() || `Phase ${i + 1}`,
           order: i,
           durationDays: p.durationDays,
-          tasks: p.tasks.filter(t => t.title).map(t => ({
-            type: t.type,
-            title: t.title,
-            description: t.description || undefined,
-            frequency: t.frequency,
+          tasks: p.tasks
+            .filter(t => t.title.trim())
+            .map(t => ({
+              type: t.type,
+              title: t.title.trim(),
+              description: t.description?.trim() || undefined,
+              frequency: t.frequency || 'Daily',
+            })),
+        })),
+        milestones: milestones
+          .filter(m => m.title.trim())
+          .map(m => ({
+            title: m.title.trim(),
+            description: m.description?.trim() || undefined,
+            targetDate: m.targetDate || undefined,
+            badgeIcon: m.badgeIcon || undefined,
           })),
-        })),
-        milestones: milestones.filter(m => m.title).map(m => ({
-          title: m.title,
-          description: m.description || undefined,
-          targetDate: m.targetDate || undefined,
-          badgeIcon: m.badgeIcon || undefined,
-        })),
       };
 
       await apiClient.post('/api/journeys', payload);
       toast({ title: 'Journey created', description: `Treatment journey "${title}" has been created.` });
       navigate(-1);
     } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: err?.message || 'Failed to create journey',
+        variant: 'destructive',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -154,21 +216,58 @@ export default function JourneyBuilder() {
 
   return (
     <AppLayout>
-    <div className="max-w-3xl mx-auto p-4 space-y-6">
+    {/* Builder canvas. cursor:default resets the grab/pointer style that was
+        bleeding into static labels and inputs; the only handle that should
+        still show grab is the GripVertical inside each phase row, which
+        opts back in via cursor-grab below. */}
+    <div className="max-w-3xl mx-auto p-4 space-y-6 cursor-default">
       <h1 className="text-2xl font-bold">Create Treatment Journey</h1>
 
       {/* Basic Info */}
       <Card>
         <CardHeader><CardTitle className="text-lg">Journey Details</CardTitle></CardHeader>
         <CardContent className="space-y-4">
+          {/* Patient context banner — visible when the page was opened from
+              a patient profile or appointment. Confirms whom the journey is
+              being built for so the doctor doesn't have to re-search the
+              patient. Auto-resolved name takes priority over the bare ID. */}
+          {patientId && (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 flex items-center gap-2 text-sm">
+              <UserCheck className="w-4 h-4 text-primary shrink-0" />
+              <span className="text-primary/90">
+                Building journey for{' '}
+                <strong className="text-primary">
+                  {patientName || (patientLookupLoading ? 'Loading patient…' : 'patient')}
+                </strong>
+                <span className="ml-2 font-mono text-[11px] text-primary/70">#{patientId}</span>
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Patient ID *</Label>
-              <Input value={patientId} onChange={e => setPatientId(e.target.value)} placeholder="User ID" />
+              <Input
+                value={patientId}
+                onChange={e => { setPatientId(e.target.value); setPatientName(''); }}
+                placeholder="Patient ID"
+                // When the page receives a patientId via URL/state we still
+                // allow override but mark it as auto-loaded so the doctor
+                // sees they don't need to type it.
+                className={initialPatientId ? 'bg-muted/40' : ''}
+              />
+              {patientName && (
+                <p className="text-xs text-muted-foreground italic">{patientName}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Branch ID *</Label>
-              <Input value={branchId} onChange={e => setBranchId(e.target.value)} placeholder="Branch ID" />
+              <Input
+                value={branchId}
+                onChange={e => setBranchId(e.target.value)}
+                placeholder="Branch ID"
+                className={initialBranchId ? 'bg-muted/40' : ''}
+              />
             </div>
           </div>
           <div className="space-y-2">
@@ -201,7 +300,10 @@ export default function JourneyBuilder() {
           {phases.map((phase, pi) => (
             <div key={pi} className="border rounded-lg overflow-hidden">
               <div className="flex items-center gap-2 p-3 bg-muted/50">
-                <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab" />
+                {/* Decorative phase-row glyph. Reordering happens via the
+                    chevron buttons on the right — there is no drag-and-drop
+                    here yet, so the grab cursor would lie about affordance. */}
+                <GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 <Badge className={PHASE_COLORS[phase.colorTag] || 'bg-gray-100'}>{phase.colorTag}</Badge>
                 <Input
                   className="flex-1 h-8 text-sm"

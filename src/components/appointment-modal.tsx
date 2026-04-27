@@ -5,17 +5,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarIcon, Loader2, User } from "lucide-react";
-import { format } from "date-fns";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { TriageQuestionnaire } from "./triage/TriageQuestionnaire";
 import { apiClient } from "@/lib/api-client";
 import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
 import type { FollowUpPayload } from "@/services/followUp.service";
+import { sanitizePhone, isValidPhone, isValidEmail, stripEdgeSpaces } from "@/lib/input-validators";
 
 interface AppointmentModalProps {
     isOpen: boolean;
@@ -24,6 +22,19 @@ interface AppointmentModalProps {
     patientId?: string; // For admin creating appointments
     appointment?: any; // For editing existing appointment
 }
+
+// Bridge between the legacy Date-based state and the unified DatePicker,
+// which speaks the native input contract (yyyy-MM-dd ISO strings).
+const dateToIso = (d: Date | undefined): string => {
+    if (!d) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const isoToDate = (iso: string): Date | undefined => {
+    if (!iso) return undefined;
+    const [y, m, day] = iso.split("-").map(Number);
+    if (!y || !m || !day) return undefined;
+    return new Date(y, m - 1, day);
+};
 
 export function AppointmentModal({
     isOpen,
@@ -39,9 +50,11 @@ export function AppointmentModal({
     const [selectedDate, setSelectedDate] = useState<Date | undefined>();
     const [selectedHour, setSelectedHour] = useState<string>("09");
     const [selectedMinute, setSelectedMinute] = useState<string>("00");
+    const [selectedMeridiem, setSelectedMeridiem] = useState<"AM" | "PM">("AM");
     const [therapistDate, setTherapistDate] = useState<Date | undefined>();
     const [therapistHour, setTherapistHour] = useState<string>("09");
     const [therapistMinute, setTherapistMinute] = useState<string>("00");
+    const [therapistMeridiem, setTherapistMeridiem] = useState<"AM" | "PM">("AM");
     const [formData, setFormData] = useState({
         patientId: patientId || appointment?.patientId || "",
         doctorId: appointment?.doctorId || "",
@@ -109,27 +122,40 @@ export function AppointmentModal({
         setTriageSessionId(appointment?.triageSessionId || null);
         setTriageResult(null); // Fresh start for results
 
-        // 3. Reset/Initialize Dates and Times
+        // 3. Reset/Initialize Dates and Times — converted to 12-hour wall clock
+        //    so the form mirrors the AM/PM selector users expect.
+        const toTwelveHour = (h24: number) => {
+            const meridiem: "AM" | "PM" = h24 >= 12 ? "PM" : "AM";
+            const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+            return { hour: String(h12).padStart(2, "0"), meridiem };
+        };
+
         if (isEditing && appointment?.date) {
             const aptDate = new Date(appointment.date);
+            const { hour, meridiem } = toTwelveHour(aptDate.getHours());
             setSelectedDate(aptDate);
-            setSelectedHour(String(aptDate.getHours()).padStart(2, "0"));
+            setSelectedHour(hour);
             setSelectedMinute(String(aptDate.getMinutes()).padStart(2, "0"));
+            setSelectedMeridiem(meridiem);
         } else {
             setSelectedDate(undefined);
             setSelectedHour("09");
             setSelectedMinute("00");
+            setSelectedMeridiem("AM");
         }
 
         if (isEditing && appointment?.therapistDate) {
             const tAptDate = new Date(appointment.therapistDate);
+            const { hour, meridiem } = toTwelveHour(tAptDate.getHours());
             setTherapistDate(tAptDate);
-            setTherapistHour(String(tAptDate.getHours()).padStart(2, "0"));
+            setTherapistHour(hour);
             setTherapistMinute(String(tAptDate.getMinutes()).padStart(2, "0"));
+            setTherapistMeridiem(meridiem);
         } else {
             setTherapistDate(undefined);
             setTherapistHour("09");
             setTherapistMinute("00");
+            setTherapistMeridiem("AM");
         }
 
         // 4. Triage flow logic
@@ -246,22 +272,21 @@ Medications: ${resp.medications || 'None'}`;
         e.preventDefault();
         setLoading(true);
 
-        // Validate contact details
+        // Validate contact details — phone/email rules pulled from the
+        // shared validator library so every form in the app stays in sync.
         if (!contactDetails.fullName || contactDetails.fullName.trim().length < 2) {
             toast.error("Please enter a valid full name (minimum 2 characters)");
             setLoading(false);
             return;
         }
 
-        const phoneRegex = /^[\+]?[0-9]{10,15}$/;
-        if (!contactDetails.phoneNumber || !phoneRegex.test(contactDetails.phoneNumber.replace(/[\s\-]/g, ""))) {
-            toast.error("Please enter a valid phone number (10-15 digits)");
+        if (!contactDetails.phoneNumber || !isValidPhone(contactDetails.phoneNumber)) {
+            toast.error("Phone must be 7-15 digits (optionally starting with +)");
             setLoading(false);
             return;
         }
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!contactDetails.email || !emailRegex.test(contactDetails.email)) {
+        if (!contactDetails.email || !isValidEmail(contactDetails.email)) {
             toast.error("Please enter a valid email address");
             setLoading(false);
             return;
@@ -286,21 +311,28 @@ Medications: ${resp.medications || 'None'}`;
         }
 
         try {
+            // Convert 12-hour wall clock back to 24-hour for the API.
+            // 12 AM → 0, 12 PM → 12; otherwise add 12 only when PM.
+            const toTwentyFour = (h12: number, meridiem: "AM" | "PM") => {
+                if (meridiem === "AM") return h12 === 12 ? 0 : h12;
+                return h12 === 12 ? 12 : h12 + 12;
+            };
+
             // Combine doctor date and time
             const combinedDateTime = new Date(selectedDate);
-            combinedDateTime.setHours(parseInt(selectedHour));
+            combinedDateTime.setHours(toTwentyFour(parseInt(selectedHour), selectedMeridiem));
             combinedDateTime.setMinutes(parseInt(selectedMinute));
 
             // Combine therapist date and time
             let combinedTherapistDateTime = null;
             if (formData.consultationType === "COMBINED" && therapistDate) {
                 combinedTherapistDateTime = new Date(therapistDate);
-                combinedTherapistDateTime.setHours(parseInt(therapistHour));
+                combinedTherapistDateTime.setHours(toTwentyFour(parseInt(therapistHour), therapistMeridiem));
                 combinedTherapistDateTime.setMinutes(parseInt(therapistMinute));
             } else if (formData.consultationType === "THERAPIST" && selectedDate) {
                 // If only therapist, use the primary date selection
                 combinedTherapistDateTime = new Date(selectedDate);
-                combinedTherapistDateTime.setHours(parseInt(selectedHour));
+                combinedTherapistDateTime.setHours(toTwentyFour(parseInt(selectedHour), selectedMeridiem));
                 combinedTherapistDateTime.setMinutes(parseInt(selectedMinute));
             }
 
@@ -356,6 +388,11 @@ Medications: ${resp.medications || 'None'}`;
             setSelectedDate(undefined);
             setSelectedHour("09");
             setSelectedMinute("00");
+            setSelectedMeridiem("AM");
+            setTherapistDate(undefined);
+            setTherapistHour("09");
+            setTherapistMinute("00");
+            setTherapistMeridiem("AM");
             onSuccess?.();
             onClose();
         } catch (error: any) {
@@ -386,8 +423,10 @@ Medications: ${resp.medications || 'None'}`;
         }, 0);
     };
 
-    const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+    // 12-hour clock: 12, 01, 02, ... 11. AM/PM lives in a separate selector.
+    const hours = Array.from({ length: 12 }, (_, i) => String(((i + 11) % 12) + 1).padStart(2, '0'));
     const minutes = ['00', '15', '30', '45'];
+    const meridiems: ("AM" | "PM")[] = ["AM", "PM"];
 
     const filteredDoctors = doctors.filter(doc => {
         if (isAdmin) return true; // Admin sees all
@@ -471,11 +510,14 @@ Medications: ${resp.medications || 'None'}`;
                                     <Input
                                         id="phoneNumber"
                                         type="tel"
+                                        inputMode="tel"
+                                        autoComplete="tel"
                                         value={contactDetails.phoneNumber}
-                                        onChange={(e) => setContactDetails({ ...contactDetails, phoneNumber: e.target.value })}
-                                        placeholder="+1234567890"
+                                        onChange={(e) => setContactDetails({ ...contactDetails, phoneNumber: sanitizePhone(e.target.value) })}
+                                        onBlur={() => setContactDetails((c) => ({ ...c, phoneNumber: stripEdgeSpaces(c.phoneNumber) }))}
+                                        placeholder="+919876543210"
                                         required
-                                        pattern="[\+]?[0-9]{10,15}"
+                                        pattern="^\+?[0-9]{7,15}$"
                                     />
                                 </div>
                             </div>
@@ -610,32 +652,15 @@ Medications: ${resp.medications || 'None'}`;
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label>Date *</Label>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    className={cn(
-                                                        "w-full justify-start text-left font-normal bg-background",
-                                                        !selectedDate && "text-muted-foreground"
-                                                    )}
-                                                >
-                                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {selectedDate ? format(selectedDate, "PPP") : "Select date"}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0" align="start">
-                                                <CalendarComponent
-                                                    mode="single"
-                                                    selected={selectedDate}
-                                                    onSelect={setSelectedDate}
-                                                    initialFocus
-                                                    disabled={(date) =>
-                                                        date < new Date(new Date().setHours(0, 0, 0, 0))
-                                                    }
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
+                                        <DatePicker
+                                            value={dateToIso(selectedDate)}
+                                            onChange={(iso) => setSelectedDate(isoToDate(iso))}
+                                            placeholder="Select date"
+                                            fromDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                                            displayFormat="PPP"
+                                            className="bg-background"
+                                            required
+                                        />
                                     </div>
 
                                     <div className="space-y-2">
@@ -666,6 +691,18 @@ Medications: ${resp.medications || 'None'}`;
                                                     ))}
                                                 </SelectContent>
                                             </Select>
+                                            <Select value={selectedMeridiem} onValueChange={(v) => setSelectedMeridiem(v as "AM" | "PM")}>
+                                                <SelectTrigger className="bg-background w-[78px]">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {meridiems.map((m) => (
+                                                        <SelectItem key={m} value={m}>
+                                                            {m}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                     </div>
                                 </div>
@@ -678,32 +715,15 @@ Medications: ${resp.medications || 'None'}`;
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                             <Label>Date *</Label>
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        className={cn(
-                                                            "w-full justify-start text-left font-normal bg-background",
-                                                            !therapistDate && "text-muted-foreground"
-                                                        )}
-                                                    >
-                                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {therapistDate ? format(therapistDate, "PPP") : "Select date"}
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0" align="start">
-                                                    <CalendarComponent
-                                                        mode="single"
-                                                        selected={therapistDate}
-                                                        onSelect={setTherapistDate}
-                                                        initialFocus
-                                                        disabled={(date) =>
-                                                            date < new Date(new Date().setHours(0, 0, 0, 0))
-                                                        }
-                                                    />
-                                                </PopoverContent>
-                                            </Popover>
+                                            <DatePicker
+                                                value={dateToIso(therapistDate)}
+                                                onChange={(iso) => setTherapistDate(isoToDate(iso))}
+                                                placeholder="Select date"
+                                                fromDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                                                displayFormat="PPP"
+                                                className="bg-background"
+                                                required
+                                            />
                                         </div>
 
                                         <div className="space-y-2">
@@ -730,6 +750,18 @@ Medications: ${resp.medications || 'None'}`;
                                                         {minutes.map((min) => (
                                                             <SelectItem key={min} value={min}>
                                                                 {min}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Select value={therapistMeridiem} onValueChange={(v) => setTherapistMeridiem(v as "AM" | "PM")}>
+                                                    <SelectTrigger className="bg-background w-[78px]">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {meridiems.map((m) => (
+                                                            <SelectItem key={m} value={m}>
+                                                                {m}
                                                             </SelectItem>
                                                         ))}
                                                     </SelectContent>

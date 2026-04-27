@@ -21,6 +21,7 @@ import {
 import { appointmentsApi } from "@/services/appointments.service";
 import TodoPanel from "@/components/todo/TodoPanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -189,6 +190,10 @@ export default function TherapistDashboard() {
 
         {/* SECTION F — Todo Panel (Section E is rolled into rehab via exercise tracker + journey progress in roster above) */}
         <TodoPanel title="My Tasks" />
+
+        {/* Public thank-you cards from completed journeys. Self-hides when
+            no PUBLIC letters exist in the lookback window. */}
+        <RecognitionPanel />
 
         {/* SECTION G — Performance Snapshot */}
         <section className="rounded-xl border bg-card shadow-card p-5">

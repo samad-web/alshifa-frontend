@@ -186,6 +186,39 @@ export const apiClient = {
       body: formData,
     });
   },
+
+  /**
+   * GET that returns the raw response Blob — used by export/download flows
+   * (CSV, PDF, etc.) where the body is binary and not JSON. Bypasses the
+   * shared request() helper because we need response.blob() rather than
+   * response.json().
+   */
+  async getBlob(
+    path: string,
+    params?: Record<string, string | number | boolean | undefined | null>,
+  ): Promise<Blob> {
+    const token = getAccessToken();
+    let url = `${API_BASE_URL}${path}`;
+    if (params) {
+      const qs = Object.entries(params)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+        .join('&');
+      if (qs) url += `?${qs}`;
+    }
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let msg = `Request failed (${res.status})`;
+      try {
+        const txt = await res.text();
+        if (txt) msg = txt;
+      } catch { /* swallow */ }
+      throw new ApiClientError({ message: msg, status: res.status });
+    }
+    return res.blob();
+  },
 };
 
 export default apiClient;

@@ -29,6 +29,7 @@ import { PatientPicker } from "@/components/clinical/PatientPicker";
 import { DatePicker } from "@/components/ui/date-picker";
 import { fmtDate, fmtShortDate } from "@/lib/format-date";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 function patientBranchId(p: any): string | null {
     return p?.branchId ?? p?.user?.branchId ?? null;
@@ -80,7 +81,10 @@ const blankMeal = (mealTime: MealTime = "BREAKFAST"): MealRow =>
 const initialForm = {
     title: "", description: "",
     doshaTarget: "VATA" as DoshaType, category: "SATTVIC" as DietCategory,
-    durationDays: 14, notes: "",
+    // Sensible default: 7 days. The form should never submit with a null or
+    // zero duration — the backend min is 1 but defaulting to 7 matches a
+    // typical short-course Pathya plan.
+    durationDays: 7, notes: "",
 };
 
 export default function DietPackagesPage() {
@@ -96,6 +100,7 @@ export default function DietPackagesPage() {
     const canAssign     = role === "DOCTOR" || role === "ADMIN_DOCTOR";
     const isAdmin       = role === "ADMIN"  || role === "ADMIN_DOCTOR";
     const { isAll, branchIdParam } = useBranchScope();
+    const { confirm, dialog: confirmDialog } = useConfirm();
 
     // Approvers land on the Pending queue by default — that's their primary action.
     const [tab, setTab] = useState<"ALL" | DietPackageStatus>(isApprover ? "PENDING" : "ALL");
@@ -113,7 +118,10 @@ export default function DietPackagesPage() {
     const [patients, setPatients] = useState<Array<{ id: string; fullName: string | null }>>([]);
     const [assignForm, setAssignForm] = useState({
         patientId: "", startDate: new Date().toISOString().slice(0, 10),
-        durationDays: 14, notes: "",
+        // Default to 7 days; once a package is selected, openAssign() syncs
+        // this to the package's own durationDays so the form pre-fills with
+        // the curated value rather than this fallback.
+        durationDays: 7, notes: "",
     });
     const [assigning, setAssigning] = useState(false);
     const [assignContext, setAssignContext] = useState<DietAssignContext | null>(null);
@@ -184,13 +192,25 @@ export default function DietPackagesPage() {
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault();
+        // Client-side guards: surface specific reasons before hitting the
+        // backend so the doctor doesn't see a generic "validation failed"
+        // toast for a field they can immediately fix.
+        if (!form.title.trim()) {
+            toast({ title: "Title required", description: "Give the package a short title.", variant: "destructive" });
+            return;
+        }
+        const dur = Number(form.durationDays);
+        if (!Number.isFinite(dur) || dur < 1 || dur > 365) {
+            toast({ title: "Default duration required", description: "Default duration must be between 1 and 365 days.", variant: "destructive" });
+            return;
+        }
         try {
             const payload = {
-                title: form.title,
+                title: form.title.trim(),
                 description: form.description || undefined,
                 doshaTarget: form.doshaTarget,
                 category: form.category,
-                durationDays: Number(form.durationDays),
+                durationDays: dur,
                 notes: form.notes || undefined,
                 meals: meals.map((m): DietMealPlan => ({
                     mealTime: m.mealTime,
@@ -265,7 +285,13 @@ export default function DietPackagesPage() {
     };
 
     const archive = async (id: string) => {
-        if (!confirm("Archive this package? It will be hidden and can no longer be assigned.")) return;
+        const ok = await confirm({
+            title: "Archive this package?",
+            description: "It will be hidden from the list and can no longer be assigned to new patients. Existing assignments are unaffected.",
+            confirmLabel: "Archive",
+            tone: "danger",
+        });
+        if (!ok) return;
         try {
             await iwisApi.archiveDietPackage(id);
             toast({ title: "Package archived" });
@@ -588,8 +614,25 @@ export default function DietPackagesPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Default duration (days)</Label>
-                                    <Input type="number" min={1} max={365} required value={form.durationDays}
-                                        onChange={(e) => setForm({ ...form, durationDays: Number(e.target.value) || 1 })} />
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        max={365}
+                                        value={form.durationDays === 0 ? "" : form.durationDays}
+                                        onChange={(e) => {
+                                            const n = e.target.valueAsNumber;
+                                            setForm({ ...form, durationDays: Number.isFinite(n) ? n : 0 });
+                                        }}
+                                        onBlur={() => {
+                                            // On blur, clamp the value back into the valid range so the
+                                            // submit-time guard never has to reject a legitimate edit.
+                                            if (!form.durationDays || form.durationDays < 1) {
+                                                setForm({ ...form, durationDays: 1 });
+                                            } else if (form.durationDays > 365) {
+                                                setForm({ ...form, durationDays: 365 });
+                                            }
+                                        }}
+                                    />
                                 </div>
                             </div>
 
@@ -907,6 +950,7 @@ export default function DietPackagesPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+                {confirmDialog}
             </div>
         </AppLayout>
     );

@@ -19,6 +19,8 @@ import type { PerformanceScorecard } from "@/types";
 import {
   Loader2, BarChart3, TrendingUp, TrendingDown, Award, Users, Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
+import { useBranchScope } from "@/hooks/useBranchScope";
 
 const metricLabels: { key: keyof PerformanceScorecard; label: string; max: number; color: string; invert?: boolean }[] = [
   { key: "patientsSeenCount", label: "Patients Seen", max: 100, color: "bg-blue-500" },
@@ -39,9 +41,17 @@ function ScoreDisplay({ score }: { score: number }) {
 }
 
 export default function PerformanceScorecards() {
-  const { role } = useAuth();
+  const { role, profile } = useAuth();
   const { branches } = useBranches();
-  const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  // Branch is read from the global navbar selector. We fall back to the
+  // first available branch when admin has "All branches" picked, since the
+  // scorecard endpoint requires a single branchId.
+  const { branchIdParam } = useBranchScope();
+  const isBranchAdmin = role === "BRANCH_ADMIN";
+  const canSeeBranchTab = role === "ADMIN" || role === "ADMIN_DOCTOR" || isBranchAdmin;
+  const canGenerate = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  // Backwards-compat alias used by the older render code below.
+  const isAdmin = canSeeBranchTab;
 
   const [myCards, setMyCards] = useState<PerformanceScorecard[]>([]);
   const [branchCards, setBranchCards] = useState<PerformanceScorecard[]>([]);
@@ -54,12 +64,19 @@ export default function PerformanceScorecards() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
+    // BRANCH_ADMIN has no Doctor/Therapist profile, so the personal scorecard
+    // call would 404 — skip it and land them on the Branch tab instead.
+    if (isBranchAdmin) {
+      setMyCards([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     operationsApi.getMyScorecards({ periodType })
       .then(setMyCards)
       .catch(() => setError("Failed to load your scorecard"))
       .finally(() => setLoading(false));
-  }, [periodType]);
+  }, [periodType, isBranchAdmin]);
 
   useEffect(() => {
     if (!isAdmin || !branchId) return;
@@ -68,12 +85,22 @@ export default function PerformanceScorecards() {
       .catch(() => {});
   }, [branchId, periodType, isAdmin]);
 
-  // Set default branch
+  // Sync from navbar branch scope. Defaults to the first branch when
+  // "All branches" is active. BRANCH_ADMIN is hard-pinned to their own
+  // branchId regardless of the navbar selection — backend re-enforces this
+  // server-side, but we lock it client-side too to keep the UI honest.
   useEffect(() => {
-    if (isAdmin && (branches as any[]).length > 0 && !branchId) {
+    if (isBranchAdmin) {
+      const ownBranch = profile?.branchId ?? null;
+      if (ownBranch) setBranchId(ownBranch);
+      return;
+    }
+    if (!isAdmin) return;
+    if (branchIdParam) { setBranchId(branchIdParam); return; }
+    if ((branches as any[]).length > 0 && !branchId) {
       setBranchId((branches as any[])[0].id);
     }
-  }, [branches, isAdmin, branchId]);
+  }, [branches, isAdmin, isBranchAdmin, profile?.branchId, branchIdParam, branchId]);
 
   const handleGenerate = async () => {
     if (!branchId) return;
@@ -84,12 +111,12 @@ export default function PerformanceScorecards() {
         ? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
         : `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
       const result = await operationsApi.generateScorecards({ period, periodType });
-      alert(`Generated ${result.generated} scorecards`);
+      toast.success(`Generated ${result.generated} scorecards`);
       // Refresh branch cards
       const updated = await operationsApi.getBranchScorecards(branchId, { period: periodType });
       setBranchCards(updated);
     } catch {
-      alert("Failed to generate scorecards");
+      toast.error("Failed to generate scorecards");
     } finally {
       setGenerating(false);
     }
@@ -147,9 +174,9 @@ export default function PerformanceScorecards() {
           <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
         )}
 
-        <Tabs defaultValue="my">
+        <Tabs defaultValue={isBranchAdmin ? "branch" : "my"}>
           <TabsList>
-            <TabsTrigger value="my">My Scorecard</TabsTrigger>
+            {!isBranchAdmin && <TabsTrigger value="my">My Scorecard</TabsTrigger>}
             {isAdmin && <TabsTrigger value="branch">Branch Overview</TabsTrigger>}
           </TabsList>
 
@@ -258,20 +285,18 @@ export default function PerformanceScorecards() {
           {isAdmin && (
             <TabsContent value="branch" className="mt-6 space-y-6">
               <div className="flex flex-wrap items-center gap-3">
-                <Select value={branchId} onValueChange={setBranchId}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Select Branch" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(branches as any[]).map((b: any) => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={handleGenerate} disabled={generating} size="sm">
-                  {generating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                  Generate Scorecards
-                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Branch: <span className="font-semibold text-foreground">
+                    {(branches as any[]).find((b: any) => b.id === branchId)?.name || "—"}
+                  </span>{" "}
+                  <span className="text-xs">(switch via navbar)</span>
+                </span>
+                {canGenerate && (
+                  <Button onClick={handleGenerate} disabled={generating} size="sm">
+                    {generating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                    Generate Scorecards
+                  </Button>
+                )}
               </div>
 
               {sortedBranch.length === 0 ? (

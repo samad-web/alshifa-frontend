@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
-import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
+import { Input } from "@/components/ui/input";
 import { apiClient } from "@/lib/api-client";
 import {
     Video,
@@ -16,13 +17,33 @@ import {
     User,
     Clock,
     ExternalLink,
-    ClipboardList
+    ClipboardList,
+    History,
+    ChevronDown,
+    Salad,
+    Loader2,
+    UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ChatWrapper } from "@/components/chat/ChatWrapper";
 import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
 import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
 import type { FollowUpPayload } from "@/services/followUp.service";
+import { iwisApi, type DietPackage } from "@/services/iwis.service";
+
+interface PreviousPrescription {
+    id: string;
+    medicationName?: string;
+    dosage?: string;
+    frequency?: string;
+    duration?: string;
+    notes?: string;
+    timing?: string;
+    vehicle?: string;
+    videoUrl?: string;
+    createdAt: string;
+    doctor?: { fullName?: string };
+}
 
 export default function ConsultationRoom() {
     const { appointmentId } = useParams();
@@ -34,6 +55,22 @@ export default function ConsultationRoom() {
     const [showChecklist, setShowChecklist] = useState(false);
     const [showFollowUpModal, setShowFollowUpModal] = useState(false);
     const [completing, setCompleting] = useState(false);
+
+    // Previous prescriptions panel — collapsible, fetched once the patient is
+    // resolved on the appointment payload. The doctor needs a quick read of
+    // prior medications without leaving the consultation screen.
+    const [previousOpen, setPreviousOpen] = useState(false);
+    const [previousList, setPreviousList] = useState<PreviousPrescription[] | null>(null);
+    const [previousLoading, setPreviousLoading] = useState(false);
+
+    // Diet package picker — searches APPROVED + active templates and assigns
+    // the chosen one to the patient inline so the doctor doesn't have to
+    // navigate away to /diet-packages.
+    const [dietOpen, setDietOpen] = useState(false);
+    const [dietPackages, setDietPackages] = useState<DietPackage[]>([]);
+    const [dietLoading, setDietLoading] = useState(false);
+    const [dietQuery, setDietQuery] = useState("");
+    const [dietAssigningId, setDietAssigningId] = useState<string | null>(null);
 
     useEffect(() => {
         fetchAppointment();
@@ -48,6 +85,80 @@ export default function ConsultationRoom() {
             toast.error("Failed to fetch appointment details");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const patientId: string | undefined = appointment?.patient?.id;
+
+    // Lazy-load the previous prescriptions list the first time the panel is
+    // opened. We don't pre-fetch on mount to keep the consult-room cold start
+    // fast — most sessions never need this surface.
+    const loadPreviousPrescriptions = async () => {
+        if (!patientId || previousList !== null || previousLoading) return;
+        setPreviousLoading(true);
+        try {
+            const { data } = await apiClient.get<PreviousPrescription[]>(`/api/prescriptions/patient/${patientId}`);
+            setPreviousList(Array.isArray(data) ? data : []);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to load previous prescriptions");
+            setPreviousList([]);
+        } finally {
+            setPreviousLoading(false);
+        }
+    };
+
+    const togglePrevious = async () => {
+        const next = !previousOpen;
+        setPreviousOpen(next);
+        if (next) await loadPreviousPrescriptions();
+    };
+
+    const loadDietPackages = async () => {
+        if (dietPackages.length > 0 || dietLoading) return;
+        setDietLoading(true);
+        try {
+            const list = await iwisApi.listDietPackages({ status: "APPROVED" });
+            setDietPackages(list.filter((p) => p.isActive));
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to load diet packages");
+        } finally {
+            setDietLoading(false);
+        }
+    };
+
+    const toggleDiet = async () => {
+        const next = !dietOpen;
+        setDietOpen(next);
+        if (next) await loadDietPackages();
+    };
+
+    const filteredDietPackages = useMemo(() => {
+        const q = dietQuery.trim().toLowerCase();
+        if (!q) return dietPackages;
+        return dietPackages.filter((p) =>
+            (p.title || "").toLowerCase().includes(q) ||
+            (p.doshaTarget || "").toLowerCase().includes(q) ||
+            (p.category || "").toLowerCase().includes(q));
+    }, [dietPackages, dietQuery]);
+
+    const assignDietPackage = async (pkg: DietPackage) => {
+        if (!patientId) return;
+        setDietAssigningId(pkg.id);
+        try {
+            await iwisApi.assignDietPackage(pkg.id, {
+                patientId,
+                durationDays: pkg.durationDays,
+                deactivateExisting: false,
+            });
+            toast.success(`Assigned "${pkg.title}" — patient notified`);
+        } catch (err: unknown) {
+            // Surface the conflict in plain text rather than blocking the
+            // consultation flow with a modal — the doctor can always retry
+            // from the Diet Packages page if they need fine-grained control.
+            const msg = err instanceof Error ? err.message : "Assign failed";
+            toast.error(msg);
+        } finally {
+            setDietAssigningId(null);
         }
     };
 
@@ -199,6 +310,138 @@ export default function ConsultationRoom() {
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
                         />
+
+                        {/* Previous Prescriptions — collapsible. Doctor can review
+                            prior medications without leaving the consultation. */}
+                        <div className="border border-border/50 rounded-xl overflow-hidden">
+                            <button
+                                type="button"
+                                onClick={togglePrevious}
+                                className="w-full flex items-center justify-between px-3 py-2 bg-muted/40 text-xs font-bold uppercase tracking-tight hover:bg-muted/60 transition-colors"
+                            >
+                                <span className="flex items-center gap-1.5 text-foreground">
+                                    <History className="w-3.5 h-3.5 text-primary" />
+                                    Previous Prescriptions
+                                    {previousList && (
+                                        <Badge variant="outline" className="text-[9px] py-0 px-1.5">
+                                            {previousList.length}
+                                        </Badge>
+                                    )}
+                                </span>
+                                <ChevronDown className={`w-4 h-4 transition-transform ${previousOpen ? "rotate-180" : ""}`} />
+                            </button>
+                            {previousOpen && (
+                                <div className="p-3 max-h-72 overflow-y-auto">
+                                    {previousLoading ? (
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
+                                            <Loader2 className="w-3 h-3 animate-spin" /> Loading prescriptions…
+                                        </div>
+                                    ) : !previousList || previousList.length === 0 ? (
+                                        <p className="text-xs text-muted-foreground italic py-2">
+                                            No prior prescriptions on file for this patient.
+                                        </p>
+                                    ) : (
+                                        <ul className="space-y-2">
+                                            {previousList.slice(0, 30).map((p) => (
+                                                <li key={p.id} className="p-2 rounded-md bg-secondary/30 border border-border/40">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="text-xs font-bold text-foreground truncate">
+                                                            {p.medicationName || "—"}
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground shrink-0">
+                                                            {new Date(p.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-[10px] text-muted-foreground mt-0.5 flex flex-wrap gap-x-2">
+                                                        {p.dosage && <span>· {p.dosage}</span>}
+                                                        {p.frequency && <span>· {p.frequency}</span>}
+                                                        {p.duration && <span>· {p.duration}</span>}
+                                                    </div>
+                                                    {p.notes && <p className="text-[10px] text-muted-foreground italic mt-1 line-clamp-2">{p.notes}</p>}
+                                                    {p.doctor?.fullName && (
+                                                        <p className="text-[9px] text-muted-foreground mt-0.5">— Dr. {p.doctor.fullName}</p>
+                                                    )}
+                                                </li>
+                                            ))}
+                                            {previousList.length > 30 && (
+                                                <li className="text-[10px] text-center text-muted-foreground italic">
+                                                    + {previousList.length - 30} older entries
+                                                </li>
+                                            )}
+                                        </ul>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Diet Package — search & assign without leaving the consultation. */}
+                        <div className="border border-border/50 rounded-xl overflow-hidden">
+                            <button
+                                type="button"
+                                onClick={toggleDiet}
+                                className="w-full flex items-center justify-between px-3 py-2 bg-muted/40 text-xs font-bold uppercase tracking-tight hover:bg-muted/60 transition-colors"
+                            >
+                                <span className="flex items-center gap-1.5 text-foreground">
+                                    <Salad className="w-3.5 h-3.5 text-wellness" />
+                                    Diet Package
+                                </span>
+                                <ChevronDown className={`w-4 h-4 transition-transform ${dietOpen ? "rotate-180" : ""}`} />
+                            </button>
+                            {dietOpen && (
+                                <div className="p-3 space-y-2">
+                                    <Input
+                                        value={dietQuery}
+                                        onChange={(e) => setDietQuery(e.target.value)}
+                                        placeholder="Search package by title, dosha, category…"
+                                        className="h-8 text-xs"
+                                    />
+                                    {dietLoading ? (
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                                            <Loader2 className="w-3 h-3 animate-spin" /> Loading packages…
+                                        </div>
+                                    ) : filteredDietPackages.length === 0 ? (
+                                        <p className="text-xs text-muted-foreground italic py-2">
+                                            {dietPackages.length === 0
+                                                ? "No approved diet packages available."
+                                                : "No packages match your search."}
+                                        </p>
+                                    ) : (
+                                        <ul className="space-y-2 max-h-60 overflow-y-auto">
+                                            {filteredDietPackages.slice(0, 25).map((pkg) => (
+                                                <li
+                                                    key={pkg.id}
+                                                    className="p-2 rounded-md bg-secondary/30 border border-border/40 flex items-start justify-between gap-2"
+                                                >
+                                                    <div className="min-w-0">
+                                                        <div className="text-xs font-bold truncate">{pkg.title}</div>
+                                                        <div className="text-[10px] text-muted-foreground flex flex-wrap gap-x-2">
+                                                            <span>{pkg.doshaTarget}</span>
+                                                            <span>· {pkg.category}</span>
+                                                            <span>· {pkg.durationDays}d</span>
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-7 px-2 text-[10px] gap-1 shrink-0"
+                                                        disabled={!patientId || dietAssigningId === pkg.id}
+                                                        onClick={() => assignDietPackage(pkg)}
+                                                    >
+                                                        {dietAssigningId === pkg.id
+                                                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                            : <UserPlus className="w-3 h-3" />}
+                                                        Assign
+                                                    </Button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                    <p className="text-[9px] text-muted-foreground italic">
+                                        Need finer control over duration / start date? Open the full Diet Packages module.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
 
                         <Panel title="Quick Templates" subtitle="Therapeutic frameworks">
                             <div className="space-y-2">

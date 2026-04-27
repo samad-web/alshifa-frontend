@@ -79,6 +79,15 @@ export default function VisitSummary() {
 
 // ── Doctor View ───────────────────────────────────────────────────────────────
 
+interface AppointmentOption {
+  id: string;
+  date: string;
+  patient?: { id: string; fullName: string | null } | null;
+  doctor?: { id: string; fullName: string | null } | null;
+  therapist?: { id: string; fullName: string | null } | null;
+  consultationType?: string;
+}
+
 function DoctorView({ userId }: { userId: string }) {
   const { role } = useAuth();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
@@ -86,6 +95,10 @@ function DoctorView({ userId }: { userId: string }) {
   const [summaries, setSummaries] = useState<VisitSummaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
+
+  // Appointments dropdown source for the picker. Loaded lazily when the
+  // dialog opens so the page render stays cheap.
+  const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
 
   // Form state
   const [appointmentId, setAppointmentId] = useState("");
@@ -103,15 +116,37 @@ function DoctorView({ userId }: { userId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [autoGenerating, setAutoGenerating] = useState(false);
 
+  // Used in confirmation labels: "For: <patient name>".
+  const selectedAppointment = appointments.find((a) => a.id === appointmentId) ?? null;
+
   useEffect(() => {
     loadSummaries();
   }, []);
 
+  // Lazy-load completed appointments the first time the dialog opens.
+  useEffect(() => {
+    if (!formOpen || appointments.length > 0) return;
+    (async () => {
+      try {
+        const { apiClient } = await import("@/lib/api-client");
+        const { data } = await apiClient.get<any>("/api/appointments");
+        const list: AppointmentOption[] = Array.isArray(data?.appointments)
+          ? data.appointments
+          : Array.isArray(data) ? data : [];
+        setAppointments(list);
+      } catch {
+        setAppointments([]);
+      }
+    })();
+  }, [formOpen, appointments.length]);
+
   const loadSummaries = async () => {
     try {
       setLoading(true);
-      // Doctor sees summaries they created - use their own ID as clinician
-      const data = await communicationApi.getPatientVisitSummaries(userId, { limit: 50 });
+      // Doctor / therapist view: summaries the *current clinician* authored.
+      // Previously this incorrectly called the patient endpoint with the
+      // doctor's user id, which returned empty for everyone.
+      const data = await communicationApi.getMyVisitSummaries({ limit: 50 });
       setSummaries(data.summaries);
     } catch (err: any) {
       toast.error(err?.message || "Failed to load summaries");
@@ -232,21 +267,48 @@ function DoctorView({ userId }: { userId: string }) {
               <DialogTitle>Create Visit Summary</DialogTitle>
             </DialogHeader>
             <div className="space-y-5 mt-2">
-              {/* Appointment + Auto-generate */}
+              {/* Appointment picker + Auto-generate. Replaces the previous
+                  raw-ID input — clinicians see patient name + visit date. */}
               <div className="bg-muted/50 rounded-lg p-4 space-y-3">
                 <div className="space-y-2">
-                  <Label>Appointment ID *</Label>
-                  <Input
-                    placeholder="Enter appointment ID"
-                    value={appointmentId}
-                    onChange={(e) => setAppointmentId(e.target.value)}
-                  />
+                  <Label>Appointment *</Label>
+                  <Select value={appointmentId} onValueChange={setAppointmentId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pick an appointment" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {appointments.length === 0 && (
+                        <div className="px-2 py-3 text-xs text-muted-foreground">
+                          No appointments to show
+                        </div>
+                      )}
+                      {appointments.map((a) => {
+                        const patientName = a.patient?.fullName || "Unnamed patient";
+                        const when = a.date ? new Date(a.date).toLocaleString(undefined, {
+                          month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
+                        }) : "Date pending";
+                        return (
+                          <SelectItem key={a.id} value={a.id}>
+                            <span className="flex flex-col">
+                              <span className="text-sm font-medium">{patientName}</span>
+                              <span className="text-xs text-muted-foreground">{when}</span>
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {selectedAppointment?.patient?.fullName && (
+                    <p className="text-xs text-muted-foreground ml-1">
+                      Patient: <span className="font-medium text-foreground">{selectedAppointment.patient.fullName}</span>
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={handleAutoGenerate}
-                  disabled={autoGenerating}
+                  disabled={autoGenerating || !appointmentId}
                 >
                   <Wand2 className="h-4 w-4 mr-1" />
                   {autoGenerating ? "Generating..." : "Auto-generate from appointment"}
@@ -457,7 +519,10 @@ function DoctorView({ userId }: { userId: string }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="text-sm font-medium">
-                      Appointment: {s.appointmentId.slice(0, 8)}...
+                      {/* Patient name first; visit date as the secondary
+                          context. The raw appointment id is no longer
+                          surfaced — it had zero meaning to the clinician. */}
+                      Patient: {s.patient?.fullName || s.patientName || "Unnamed patient"}
                     </span>
                     <Badge
                       variant={s.sentToPatient ? "default" : "secondary"}
@@ -475,8 +540,14 @@ function DoctorView({ userId }: { userId: string }) {
                   <p className="text-sm text-muted-foreground truncate">
                     {s.diagnosis || "No diagnosis recorded"}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {formatDate(s.createdAt)}
+                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+                    <span>{formatDate(s.createdAt)}</span>
+                    {s.appointment?.date && (
+                      <>
+                        <span>·</span>
+                        <span>Visit {formatDate(s.appointment.date)}</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 {!s.sentToPatient && (
@@ -515,7 +586,7 @@ function DoctorView({ userId }: { userId: string }) {
 
 // ── Patient View ──────────────────────────────────────────────────────────────
 
-function PatientView({ userId }: { userId: string }) {
+function PatientView({ userId: _userId }: { userId: string }) {
   const [summaries, setSummaries] = useState<VisitSummaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -527,7 +598,10 @@ function PatientView({ userId }: { userId: string }) {
   const loadSummaries = async () => {
     try {
       setLoading(true);
-      const data = await communicationApi.getPatientVisitSummaries(userId, { limit: 50 });
+      // /me resolves the patient id server-side from the JWT — previously
+      // we passed user.id where Patient.id was expected, so the page
+      // always rendered empty for patients.
+      const data = await communicationApi.getMySharedVisitSummaries({ limit: 50 });
       setSummaries(data.summaries);
     } catch (err: any) {
       toast.error(err?.message || "Failed to load visit summaries");

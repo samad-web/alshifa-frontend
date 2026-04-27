@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { AppLayout } from "@/components/layout/app-layout";
 import { apiClient } from "@/lib/api-client";
+import { MessagesTabs } from "@/components/chat/MessagesTabs";
 
 interface Message {
     id: string;
@@ -148,7 +149,10 @@ export default function Chat() {
 
     return (
         <AppLayout>
-            <div className="flex h-[calc(100vh-4rem)] md:h-[calc(100vh-4rem)] bg-background overflow-hidden border-t">
+            <MessagesTabs />
+            {/* Account for the 44px MessagesTabs strip in the inner height calc
+                so the chat layout still fills the viewport without scrolling. */}
+            <div className="flex h-[calc(100vh-4rem-44px)] md:h-[calc(100vh-4rem-44px)] bg-background overflow-hidden">
                 {/* Sidebar */}
                 <div className={cn(
                     "w-full md:w-80 border-r flex flex-col transition-all",

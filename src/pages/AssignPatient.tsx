@@ -33,11 +33,17 @@ interface PatientLite {
 
 interface DoctorLite {
   id: string;
+  userId?: string;
   fullName: string | null;
   specialization?: string | null;
   branchName?: string | null;
+  email?: string | null;
+  role?: string;
   user?: { email?: string } | null;
   _count?: { patients?: number };
+  appointmentsToday?: number;
+  availability?: "AVAILABLE" | "UNAVAILABLE" | "AT_CAPACITY";
+  unavailableReason?: string | null;
 }
 
 interface CurrentAssignment {
@@ -50,13 +56,18 @@ interface CurrentAssignment {
 }
 
 export default function AssignPatient() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { toast } = useToast();
 
   const [doctors, setDoctors] = useState<DoctorLite[]>([]);
   const [patients, setPatients] = useState<PatientLite[]>([]);
   const [unassignedIds, setUnassignedIds] = useState<Set<string>>(new Set());
   const [unassignedOnly, setUnassignedOnly] = useState(false);
+  // Doctor.id of the currently logged-in admin-doctor (resolved via /me).
+  // Used to surface a "Self-assign" affordance and to make sure the dropdown
+  // always includes the admin-doctor's own Doctor row even if list-doctors
+  // returns it last.
+  const [selfDoctorId, setSelfDoctorId] = useState<string | null>(null);
 
   const [patientId, setPatientId] = useState("");
   const [doctorId, setDoctorId] = useState("");
@@ -77,15 +88,30 @@ export default function AssignPatient() {
 
   const fetchPatients = useCallback(async () => {
     const { data } = await apiClient.get<PatientLite[]>("/api/user/list-patients");
-    setPatients(data);
+    setPatients(Array.isArray(data) ? data : []);
   }, []);
 
+  // Pull the unassigned-patient list. If the endpoint fails we fall
+  // back to deriving the set client-side from the (already-fetched)
+  // patient roster + their assignments — without this fallback the
+  // "Show only unassigned" toggle would silently render an empty list
+  // any time the backend hiccuped, which was the reported bug.
   const fetchUnassigned = useCallback(async () => {
     try {
       const { data } = await apiClient.get<Array<{ id: string }>>("/api/user/list-unassigned-patients");
-      setUnassignedIds(new Set(data.map((p) => p.id)));
-    } catch { /* non-fatal */ }
-  }, []);
+      const ids = Array.isArray(data) ? data.map((p) => p.id).filter(Boolean) : [];
+      setUnassignedIds(new Set(ids));
+      return { ok: true as const, count: ids.length };
+    } catch (err) {
+      console.error("[AssignPatient] Failed to fetch unassigned list:", err);
+      toast({
+        title: "Couldn't load unassigned patients",
+        description: err instanceof Error ? err.message : "Please refresh and try again.",
+        variant: "destructive",
+      });
+      return { ok: false as const, count: 0 };
+    }
+  }, [toast]);
 
   const fetchDoctors = async (branchId: string | null) => {
     setDoctorsLoading(true);
@@ -101,7 +127,7 @@ export default function AssignPatient() {
 
   // Initial load
   useEffect(() => {
-    if (role !== "ADMIN" && role !== "ADMIN_DOCTOR") return;
+    if (role !== "ADMIN" && role !== "ADMIN_DOCTOR" && role !== "BRANCH_ADMIN") return;
     (async () => {
       try {
         await Promise.all([fetchPatients(), fetchUnassigned()]);
@@ -112,6 +138,15 @@ export default function AssignPatient() {
       }
     })();
   }, [role, fetchPatients, fetchUnassigned, toast]);
+
+  // For admin-doctors, resolve their own Doctor.id once so we can default
+  // the dropdown to their record and offer a self-assign quick action.
+  useEffect(() => {
+    if (role !== "ADMIN_DOCTOR") return;
+    apiClient.get<{ doctor?: { id: string } | null }>("/api/user/me")
+      .then(({ data }) => { if (data?.doctor?.id) setSelfDoctorId(data.doctor.id); })
+      .catch(() => {});
+  }, [role]);
 
   // When patient selected → load doctors for that branch + their current assignments
   useEffect(() => {
@@ -137,6 +172,42 @@ export default function AssignPatient() {
 
   const primaryAssignment = currentAssignments.find((a) => a.type === "PRIMARY");
   const secondaryAssignments = currentAssignments.filter((a) => a.type !== "PRIMARY");
+
+  // Detect when the current PRIMARY doctor is unavailable today — the trigger
+  // for suggesting a TEMPORARY fallback assignment instead of replacing.
+  const primaryDoctor = primaryAssignment
+    ? doctors.find((d) => d.id === primaryAssignment.doctor.id)
+    : null;
+  const primaryUnavailable = !!primaryDoctor && primaryDoctor.availability !== "AVAILABLE";
+
+  // Auto-default to TEMPORARY when the primary is unavailable so the doctor
+  // picking a fallback doesn't accidentally clobber the primary relationship.
+  useEffect(() => {
+    if (primaryUnavailable && assignmentType === "PRIMARY") {
+      setAssignmentType("TEMPORARY");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primaryUnavailable]);
+
+  // Make sure the admin-doctor's own Doctor record is always in the dropdown,
+  // even if list-doctors returned a stale or filtered set. This is the
+  // visible part of the "admin-doctor can self-assign" fix.
+  const dropdownDoctors = useMemo(() => {
+    if (!selfDoctorId) return doctors;
+    if (doctors.some((d) => d.id === selfDoctorId)) return doctors;
+    return [
+      {
+        id: selfDoctorId,
+        userId: user?.id,
+        fullName: "Myself (you)",
+        specialization: null,
+        branchName: null,
+        availability: "AVAILABLE" as const,
+        unavailableReason: null,
+      },
+      ...doctors,
+    ];
+  }, [doctors, selfDoctorId, user?.id]);
 
   // Core submit — prompts for reassignment confirmation when replacing a primary.
   const onAssignClicked = async () => {
@@ -221,7 +292,7 @@ export default function AssignPatient() {
     }
   };
 
-  if (role !== "ADMIN" && role !== "ADMIN_DOCTOR") {
+  if (role !== "ADMIN" && role !== "ADMIN_DOCTOR" && role !== "BRANCH_ADMIN") {
     return <div className="p-8 text-center text-muted-foreground">Access denied.</div>;
   }
 
@@ -264,20 +335,31 @@ export default function AssignPatient() {
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {doctors.slice(0, 6).map((d) => (
-                      <div key={d.id} className="flex items-center justify-between p-3 rounded-xl bg-background border border-border/50">
-                        <div>
-                          <div className="font-bold text-sm">{d.fullName || d.user?.email}</div>
-                          <div className="text-[11px] text-muted-foreground uppercase">{d.specialization || "General"}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-12 bg-secondary rounded-full overflow-hidden">
-                            <div className="h-full bg-primary" style={{ width: `${Math.min((d._count?.patients || 0) * 10, 100)}%` }} />
+                    {doctors.slice(0, 6).map((d) => {
+                      const unavailable = d.availability === "UNAVAILABLE";
+                      const atCapacity = d.availability === "AT_CAPACITY";
+                      return (
+                        <div key={d.id} className="flex items-center justify-between p-3 rounded-xl bg-background border border-border/50">
+                          <div className="min-w-0">
+                            <div className="font-bold text-sm flex items-center gap-2">
+                              <span className="truncate">{d.fullName || d.email || d.user?.email}</span>
+                              {unavailable && <Badge variant="outline" className="text-[9px] border-amber-500/50 text-amber-600">Unavailable</Badge>}
+                              {atCapacity && <Badge variant="outline" className="text-[9px] border-orange-500/50 text-orange-600">At capacity</Badge>}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground uppercase">
+                              {d.specialization || "General"}
+                              {d.unavailableReason && <span className="normal-case lowercase text-amber-600 ml-1.5">· {d.unavailableReason}</span>}
+                            </div>
                           </div>
-                          <span className="text-xs font-black text-primary">{d._count?.patients || 0}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="h-1.5 w-12 bg-secondary rounded-full overflow-hidden">
+                              <div className="h-full bg-primary" style={{ width: `${Math.min((d.appointmentsToday || 0) * 8, 100)}%` }} />
+                            </div>
+                            <span className="text-xs font-black text-primary">{d.appointmentsToday || 0}</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {doctors.length > 6 && (
                       <p className="text-[11px] text-center text-muted-foreground uppercase font-bold tracking-widest pt-1">
                         + {doctors.length - 6} more
@@ -381,12 +463,24 @@ export default function AssignPatient() {
                         {secondaryAssignments.map((a) => (
                           <div key={a.id} className="flex items-center justify-between gap-2 pt-2 border-t border-border/40">
                             <div className="flex items-start gap-2">
-                              <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  a.type === "TEMPORARY"
+                                    ? "text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700"
+                                    : "text-[10px]"
+                                }
+                              >
+                                {a.type === "TEMPORARY" ? "TEMPORARY · fallback" : a.type}
+                              </Badge>
                               <div>
                                 <div className="text-sm">{a.doctor.fullName}</div>
                                 <div className="text-[11px] text-muted-foreground">
                                   {a.doctor.specialization || "—"} · since {new Date(a.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })}
                                 </div>
+                                {a.type === "TEMPORARY" && a.reason && (
+                                  <div className="text-[10px] text-amber-700 italic mt-0.5">Reason: {a.reason}</div>
+                                )}
                               </div>
                             </div>
                             <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => openUnassign(a)}>
@@ -399,6 +493,42 @@ export default function AssignPatient() {
                   </div>
                 )}
 
+                {/* Primary doctor unavailable → suggest TEMPORARY fallback. The
+                    primary relationship in the database is preserved either way. */}
+                {patientId && primaryAssignment && primaryUnavailable && (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs space-y-1">
+                      <div className="font-semibold text-amber-700">
+                        Primary doctor is unavailable today
+                      </div>
+                      <div className="text-muted-foreground">
+                        {primaryDoctor?.unavailableReason || "Check schedule"}. Select a different
+                        clinician below — assignment type has been switched to <strong>Temporary</strong>{" "}
+                        so {primaryAssignment.doctor.fullName} stays as this patient's primary.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Self-assign quick action for admin-doctors. Surfaced even
+                    before the user opens the dropdown so they always have a
+                    one-click path to assign themselves to the selected patient. */}
+                {role === "ADMIN_DOCTOR" && selfDoctorId && patientId && doctorId !== selfDoctorId && (
+                  <div className="flex items-center justify-end">
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDoctorId(selfDoctorId)}
+                      className="gap-1.5 border-primary/30 text-primary hover:bg-primary/5"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Assign to me
+                    </Button>
+                  </div>
+                )}
+
                 {/* Doctor picker */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="md:col-span-2 space-y-2">
@@ -406,21 +536,55 @@ export default function AssignPatient() {
                     <SearchableSelect
                       value={doctorId}
                       onChange={setDoctorId}
-                      disabled={doctors.length === 0 || doctorsLoading}
+                      disabled={dropdownDoctors.length === 0 || doctorsLoading}
                       loading={doctorsLoading}
                       loadingPlaceholder="Loading doctors…"
                       placeholder={
                         !patientId ? "Select patient first"
-                        : doctors.length === 0 ? "No doctors in this branch"
+                        : dropdownDoctors.length === 0 ? "No doctors in this branch"
                         : "Select a doctor"
                       }
                       searchPlaceholder="Search by name or specialisation…"
-                      items={doctors.map((d) => ({
-                        value: d.id,
-                        label: d.fullName || d.user?.email || d.id,
-                        sub:   d.specialization || undefined,
-                      }))}
+                      items={dropdownDoctors.map((d) => {
+                        const isSelf = selfDoctorId && d.id === selfDoctorId;
+                        const availabilityNote = d.availability === "UNAVAILABLE"
+                          ? `· Unavailable${d.unavailableReason ? ` (${d.unavailableReason})` : ""}`
+                          : d.availability === "AT_CAPACITY"
+                            ? "· At capacity today"
+                            : "";
+                        const subParts = [
+                          d.specialization || (isSelf ? "Admin Doctor" : null),
+                          isSelf ? "(you)" : null,
+                          availabilityNote || null,
+                        ].filter(Boolean) as string[];
+                        return {
+                          value: d.id,
+                          label: d.fullName || d.email || d.user?.email || d.id,
+                          sub:   subParts.length ? subParts.join(" ") : undefined,
+                        };
+                      })}
                     />
+                    {doctorId && (() => {
+                      const picked = dropdownDoctors.find((d) => d.id === doctorId);
+                      if (!picked) return null;
+                      if (picked.availability === "UNAVAILABLE") {
+                        return (
+                          <p className="text-[11px] text-amber-700 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            This doctor is marked unavailable today {picked.unavailableReason ? `— ${picked.unavailableReason}` : ""}.
+                          </p>
+                        );
+                      }
+                      if (picked.availability === "AT_CAPACITY") {
+                        return (
+                          <p className="text-[11px] text-orange-700 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            Already booked {picked.appointmentsToday} appointments today.
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   <div className="space-y-2">
                     <Label>Assignment Type</Label>
@@ -432,6 +596,11 @@ export default function AssignPatient() {
                         <SelectItem value="TEMPORARY">Temporary</SelectItem>
                       </SelectContent>
                     </Select>
+                    {assignmentType === "TEMPORARY" && primaryAssignment && (
+                      <p className="text-[10px] text-muted-foreground italic leading-snug">
+                        Primary relationship with {primaryAssignment.doctor.fullName} stays in place.
+                      </p>
+                    )}
                   </div>
                 </div>
               </CardContent>

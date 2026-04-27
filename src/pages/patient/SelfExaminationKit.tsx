@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +48,7 @@ import {
   type AppetiteLevel,
   type SleepPosition,
 } from "@/services/selfExam.service";
+import { PhotoCaptureDialog } from "@/components/clinical/PhotoCaptureDialog";
 import { cn } from "@/lib/utils";
 
 // ─── Labels & icon maps ────────────────────────────────────────────────
@@ -146,6 +147,107 @@ const PHYSICAL_LABELS: Record<PhysicalObservationType, string> = {
   GENERAL_APPEARANCE: "General appearance photo",
 };
 
+// ─── Empty-state: pick zones + start a fresh kit ────────────────────────
+//
+// Surfaces a zone picker so the patient can self-start a kit even when no
+// triage seeded a draft. Calls `selfExamService.createManual` then asks the
+// parent to reload.
+
+function StartKitCard({ onStarted }: { onStarted: () => Promise<void> }) {
+  const navigate = useNavigate();
+  const [picked, setPicked] = useState<PainZone[]>([]);
+  const [creating, setCreating] = useState(false);
+
+  const togglePicked = (zone: PainZone) =>
+    setPicked((prev) =>
+      prev.includes(zone) ? prev.filter((z) => z !== zone) : [...prev, zone],
+    );
+
+  const handleStart = async () => {
+    if (picked.length === 0) {
+      toast.error("Pick at least one area of concern.");
+      return;
+    }
+    setCreating(true);
+    try {
+      await selfExamService.createManual(picked);
+      toast.success("Kit started — answer the prompts before your appointment.");
+      await onStarted();
+    } catch (err) {
+      toast.error(`Couldn't start the kit: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const ZONES = Object.keys(ZONE_LABELS) as PainZone[];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-teal-700" />
+          Start your Self-Examination Kit
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <p className="text-sm text-muted-foreground">
+          Capture pre-consultation observations the Vaidya reviews before your
+          appointment — tongue, stool, urine, range of motion, voice, and
+          lifestyle context. Pick the areas that concern you most and we'll
+          tailor the checklist.
+        </p>
+
+        <div>
+          <Label className="text-sm font-medium">Areas of concern</Label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+            {ZONES.map((zone) => {
+              const active = picked.includes(zone);
+              return (
+                <button
+                  key={zone}
+                  type="button"
+                  onClick={() => togglePicked(zone)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors text-left",
+                    active
+                      ? "border-teal-500 bg-teal-50 text-teal-900"
+                      : "border-border hover:bg-muted/50",
+                  )}
+                  disabled={creating}
+                >
+                  {active
+                    ? <CheckCircle2 className="h-4 w-4 text-teal-600 shrink-0" />
+                    : <Circle className="h-4 w-4 text-muted-foreground shrink-0" />}
+                  <span className="truncate">{ZONE_LABELS[zone]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <Alert>
+          <AlertDescription className="text-xs">
+            You can add more zones later. If you've already completed a triage,
+            we'll seed the kit automatically — there's no need to start one
+            here.
+          </AlertDescription>
+        </Alert>
+
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleStart} disabled={creating || picked.length === 0}>
+            {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+            {creating ? "Starting…" : `Start kit (${picked.length} ${picked.length === 1 ? "zone" : "zones"})`}
+          </Button>
+          <Button variant="outline" onClick={() => navigate("/patient")}>
+            Back to dashboard
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Main page ─────────────────────────────────────────────────────────
 
 export default function SelfExaminationKit() {
@@ -233,19 +335,7 @@ export default function SelfExaminationKit() {
     return (
       <AppLayout>
         <div className="max-w-3xl mx-auto p-6 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Self-Examination Kit</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Your self-exam kit becomes available after you complete a triage
-                assessment. It guides you through tongue, stool, urine and other
-                observations the Vaidya uses before your consultation.
-              </p>
-              <Button onClick={() => navigate("/patient")}>Go to dashboard</Button>
-            </CardContent>
-          </Card>
+          <StartKitCard onStarted={loadList} />
         </div>
       </AppLayout>
     );
@@ -847,7 +937,7 @@ function TongueForm({
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [photoUrl, setPhotoUrl] = useState(initial?.photoUrl ?? "");
   const [uploading, setUploading] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
 
   const { saving, submit } = useAsyncSave(
     (body: Parameters<typeof selfExamService.tongue>[1]) =>
@@ -912,20 +1002,20 @@ function TongueForm({
         {photoUrl && (
           <div className="text-xs text-muted-foreground break-all">Saved: {photoUrl}</div>
         )}
-        <input
-          ref={fileInput}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleFile(f);
-          }}
-        />
-        <Button type="button" variant="outline" onClick={() => fileInput.current?.click()} disabled={uploading}>
-          {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UploadCloud className="h-4 w-4 mr-2" />}
-          {photoUrl ? "Replace photo" : "Upload photo"}
+        <Button type="button" variant="outline" onClick={() => setPhotoDialogOpen(true)} disabled={uploading}>
+          {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Camera className="h-4 w-4 mr-2" />}
+          {photoUrl ? "Replace photo" : "Add photo"}
         </Button>
+        <PhotoCaptureDialog
+          open={photoDialogOpen}
+          onOpenChange={setPhotoDialogOpen}
+          onConfirm={handleFile}
+          // Tongue photos are taken with the front camera so the patient can
+          // see what they're capturing.
+          facingMode="user"
+          title="Tongue photo"
+          description="Open your mouth in natural daylight. Capture a clear photo or upload one from your device."
+        />
       </div>
 
       <div className="space-y-2">
@@ -1261,7 +1351,7 @@ function PhysicalForm({
 
 function PhotoPickerRow({ label, url, onChange }: { label: string; url: string; onChange: (u: string) => void }) {
   const [uploading, setUploading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
   const handle = async (f: File) => {
     setUploading(true);
     try {
@@ -1281,16 +1371,26 @@ function PhotoPickerRow({ label, url, onChange }: { label: string; url: string; 
         <Label className="text-xs">{label}</Label>
         {url && <div className="text-xs text-muted-foreground truncate">{url}</div>}
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handle(f); }}
-      />
-      <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={uploading}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        disabled={uploading}
+        title={`Take or upload ${label.toLowerCase()} photo`}
+      >
         {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Camera className="h-3 w-3" />}
       </Button>
+      <PhotoCaptureDialog
+        open={open}
+        onOpenChange={setOpen}
+        onConfirm={handle}
+        // Physical observations (posture, knees, hands) are best with the
+        // rear camera so a helper can frame the shot.
+        facingMode="environment"
+        title={`${label} photo`}
+        description="Use the rear camera for a clean shot, or upload one from your device."
+      />
     </div>
   );
 }

@@ -549,11 +549,16 @@ export interface ResourceSharingEntry {
   fromBranch?: Branch;
   toBranchId: string;
   toBranch?: Branch;
+  /** Start date of the sharing window. */
   date: string;
+  /** End date of the sharing window — populated for new requests; null for legacy rows. */
+  endDate?: string | null;
   startTime: string;
   endTime: string;
   status: SharingStatus;
   reason?: string;
+  /** User.id of the request creator — used for the creator-only edit/delete gate. */
+  createdById?: string | null;
   createdAt: string;
 }
 
@@ -589,10 +594,12 @@ export interface StaffActivityEntry {
   fullName: string;
   role: AppRole;
   status: StaffPresenceStatus;
-  currentActivity?: string;
+  currentActivity?: string | null;
   branchName?: string;
-  lastSeen: string;
-  profilePhoto?: string;
+  /** ISO timestamp of the freshest StaffActivity / AuditLog / RefreshToken
+   *  for this user, or `null` when they've never been active. */
+  lastSeen: string | null;
+  profilePhoto?: string | null;
 }
 
 // ── Feature 8: Performance Scorecards ───────────────────────────────────────
@@ -1005,6 +1012,7 @@ export interface VisitSummaryEntry {
   id: string;
   appointmentId: string;
   patientId: string;
+  patientName?: string;
   clinicianId: string;
   clinicianName: string;
   diagnosis?: string;
@@ -1015,5 +1023,9 @@ export interface VisitSummaryEntry {
   nextSteps?: string;
   followUpDate?: string;
   sentToPatient: boolean;
+  sentAt?: string | null;
   createdAt: string;
+  /** Joined Patient.fullName when the API includes the patient relation. */
+  patient?: { id: string; fullName: string | null } | null;
+  appointment?: { id: string; date: string; consultationType?: string } | null;
 }

@@ -55,23 +55,54 @@ export default function BranchManagement() {
         fetchBranches();
     }, [fetchBranches]);
 
-    const handleOpenDialog = (branch = null) => {
+    /** Fill the form from a branch record. Extracted so we can call it
+     *  with either the cached list row OR a freshly-fetched detail
+     *  payload — which is important because `GET /api/branches` is
+     *  served from a 24h Redis cache and will silently miss the IPD/OPD
+     *  fields right after a migration runs (the cache pre-dates them). */
+    const fillFormFromBranch = (b: any) => {
+        setFormData({
+            name: b.name || "",
+            address: b.address || "",
+            phone: b.phone || "",
+            email: b.email || "",
+            ipdEnabled: !!b.ipdEnabled,
+            // OPD defaults to true historically — preserve that for branches
+            // that pre-date the OPD toggle being added.
+            opdEnabled: b.opdEnabled ?? true,
+            totalBeds: b.totalBeds != null ? String(b.totalBeds) : "",
+            availableBeds: b.availableBeds != null ? String(b.availableBeds) : "",
+            totalRooms: b.totalRooms != null ? String(b.totalRooms) : "",
+            totalTherapyRooms: b.totalTherapyRooms != null ? String(b.totalTherapyRooms) : "",
+            operatingHoursFrom: b.operatingHoursFrom || "",
+            operatingHoursTo: b.operatingHoursTo || "",
+        });
+    };
+
+    const handleOpenDialog = async (branch: any = null) => {
         if (branch) {
             setEditingBranch(branch);
-            setFormData({
-                name: branch.name,
-                address: branch.address || "",
-                phone: branch.phone || "",
-                email: branch.email || "",
-                ipdEnabled: !!branch.ipdEnabled,
-                opdEnabled: branch.opdEnabled ?? true,
-                totalBeds: branch.totalBeds?.toString() || "",
-                availableBeds: branch.availableBeds?.toString() || "",
-                totalRooms: branch.totalRooms?.toString() || "",
-                totalTherapyRooms: branch.totalTherapyRooms?.toString() || "",
-                operatingHoursFrom: branch.operatingHoursFrom || "",
-                operatingHoursTo: branch.operatingHoursTo || "",
-            });
+            // Pre-fill immediately from the list row so the dialog opens
+            // without a flash of empty fields, then re-fetch the detail
+            // record and overwrite. The detail call always returns the
+            // full F0 column set (IPD/OPD, beds, rooms, hours) — without
+            // it, IPD/OPD switches sometimes opened to the default-off
+            // state because the cached list row was stale.
+            fillFormFromBranch(branch);
+            setIsDialogOpen(true);
+            try {
+                const { data: fresh } = await apiClient.get<any>(`/api/branches/${branch.id}`);
+                if (fresh) {
+                    setEditingBranch(fresh);
+                    fillFormFromBranch(fresh);
+                }
+            } catch (err: any) {
+                toast({
+                    title: "Couldn't refresh branch",
+                    description: err?.message || "Showing cached values; reopen to retry.",
+                    variant: "destructive",
+                });
+            }
         } else {
             setEditingBranch(null);
             setFormData({
@@ -81,8 +112,8 @@ export default function BranchManagement() {
                 totalRooms: "", totalTherapyRooms: "",
                 operatingHoursFrom: "", operatingHoursTo: "",
             });
+            setIsDialogOpen(true);
         }
-        setIsDialogOpen(true);
     };
 
     const handleCloseDialog = () => {

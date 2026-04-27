@@ -17,6 +17,7 @@ import {
   DeliveryChannel,
   ReminderDeliveryLog,
 } from "@/services/messaging.service";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 const CHANNELS: DeliveryChannel[] = ["WHATSAPP", "SMS", "EMAIL", "IN_APP"];
 
@@ -26,6 +27,7 @@ export default function ReminderSettings() {
   const [logs, setLogs] = useState<ReminderDeliveryLog[]>([]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => { refresh(); }, []);
 
@@ -69,7 +71,13 @@ export default function ReminderSettings() {
   }
 
   async function triggerNow() {
-    if (!confirm("Fire the daily reminder broadcast to all patients right now? This will send WhatsApp / SMS / email immediately.")) return;
+    const ok = await confirm({
+      title: "Send daily reminder broadcast now?",
+      description: "WhatsApp / SMS / email reminders will be sent to every eligible patient immediately. This bypasses the scheduled time.",
+      confirmLabel: "Send now",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       setRunning(true);
       const r = await reminderSettingService.triggerNow();
@@ -224,6 +232,7 @@ export default function ReminderSettings() {
           )}
         </CardContent>
       </Card>
+      {confirmDialog}
     </div>
   );
 }

@@ -1,14 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useBranches } from "@/hooks/useBranches";
+import { useBranchScope } from "@/hooks/useBranchScope";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { operationsApi } from "@/services/operations.service";
 import type { StaffActivityEntry, StaffPresenceStatus } from "@/types";
 import {
@@ -28,23 +26,38 @@ function getInitials(name: string) {
   return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
+function timeAgo(dateStr: string | null | undefined) {
+  if (!dateStr) return "Never";
+  const t = new Date(dateStr).getTime();
+  if (Number.isNaN(t)) return "Never";
+  const diff = Date.now() - t;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "Just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+  if (hrs < 24) {
+    if (hrs < 2) return `${hrs}h ago`;
+    // Same-day reads like "Yesterday at 3:45 PM" once we cross midnight.
+    return `${hrs}h ago`;
+  }
+  const days = Math.floor(hrs / 24);
+  if (days === 1) {
+    return `Yesterday at ${new Date(dateStr).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
 }
 
 export default function StaffActivityFeed() {
   const { role } = useAuth();
   const { branches } = useBranches();
+  // Reads the global navbar branch scope. `branchIdParam` is `undefined`
+  // when the navbar has "All branches" picked — we surface staff across
+  // all branches in that case for ADMIN/ADMIN_DOCTOR.
+  const { branchIdParam } = useBranchScope();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
 
   const [staff, setStaff] = useState<StaffActivityEntry[]>([]);
-  const [branchId, setBranchId] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,10 +65,10 @@ export default function StaffActivityFeed() {
     try {
       setError(null);
       let data: StaffActivityEntry[];
-      if (isAdmin && branchId === "all") {
+      if (isAdmin && !branchIdParam) {
         data = await operationsApi.getAllBranchesStaffFeed() as unknown as StaffActivityEntry[];
       } else {
-        data = await operationsApi.getLiveStaffFeed(branchId === "all" ? undefined : branchId);
+        data = await operationsApi.getLiveStaffFeed(branchIdParam);
       }
       setStaff(data);
     } catch {
@@ -63,7 +76,7 @@ export default function StaffActivityFeed() {
     } finally {
       setLoading(false);
     }
-  }, [branchId, isAdmin]);
+  }, [branchIdParam, isAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -100,17 +113,14 @@ export default function StaffActivityFeed() {
         >
           <div className="flex items-center gap-3">
             {isAdmin && (
-              <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="All Branches" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {(branches as any[]).map((b: any) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <span className="text-sm text-muted-foreground">
+                Branch: <span className="font-semibold text-foreground">
+                  {branchIdParam
+                    ? (branches as any[]).find((b: any) => b.id === branchIdParam)?.name || "—"
+                    : "All branches"}
+                </span>{" "}
+                <span className="text-xs">(switch via navbar)</span>
+              </span>
             )}
             <Button variant="outline" size="sm" onClick={fetchData}>
               <RefreshCw className="w-4 h-4 mr-2" />

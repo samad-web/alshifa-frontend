@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth, type SignInError, type SignInErrorKind } from "@/hooks/useAuth";
 import { getRoleRedirectPath } from "@/components/auth/ProtectedRoute";
-import { Activity, Loader2, AlertCircle, CheckCircle2, WifiOff, ShieldAlert, Mail, Clock } from "lucide-react";
+import { Activity, Loader2, AlertCircle, CheckCircle2, WifiOff, ShieldAlert, Mail, Clock, Eye, EyeOff } from "lucide-react";
 import { Input } from "@/components/common/input";
 import { Label } from "@/components/common/label";
 import { Button } from "@/components/common/button";
@@ -22,9 +22,9 @@ function errorCopy(kind: SignInErrorKind): { title: string; hint: string; icon: 
     case "hospital_suspended":
       return { title: "Account suspended", hint: "Your clinic's access is paused. Contact your administrator.", icon: ShieldAlert };
     case "mfa_required":
-      return { title: "MFA required", hint: "Your account requires a second factor. Use the MFA flow to sign in.", icon: ShieldAlert };
+      return { title: "Two-factor required", hint: "Redirecting you to verify your authenticator code.", icon: ShieldAlert };
     case "invalid_credentials":
-      return { title: "Email or password is incorrect", hint: "Double-check your credentials. If you don't have an account yet, contact your clinic administrator.", icon: AlertCircle };
+      return { title: "Incorrect password. Please try again.", hint: "Double-check your password and try again. If you forgot it, contact your clinic administrator.", icon: AlertCircle };
     default:
       return { title: "Sign-in failed", hint: "Something unexpected happened. Please try again.", icon: AlertCircle };
   }
@@ -33,9 +33,11 @@ function errorCopy(kind: SignInErrorKind): { title: string; hint: string; icon: 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [signInErr, setSignInErr] = useState<SignInError | null>(null);
   const [emailIssue, setEmailIssue] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [inactivityNotice, setInactivityNotice] = useState(false);
   const { user, role, signIn, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -44,6 +46,15 @@ export default function Login() {
       navigate(getRoleRedirectPath(role), { replace: true });
     }
   }, [user, role, loading, navigate]);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("auth:logout-reason") === "inactivity") {
+        setInactivityNotice(true);
+        sessionStorage.removeItem("auth:logout-reason");
+      }
+    } catch { /* storage may be blocked */ }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,9 +68,25 @@ export default function Login() {
     if (password.length === 0) return;
 
     setIsLoading(true);
-    const { error } = await signIn(stripEdgeSpaces(email), stripEdgeSpaces(password));
-    if (error) {
-      setSignInErr(error);
+    try {
+      const { error } = await signIn(stripEdgeSpaces(email), stripEdgeSpaces(password));
+      if (error) {
+        setSignInErr(error);
+        // Clear the password on every failed attempt so it's never left
+        // visible in the input for the next user at the same machine, and so
+        // a wrong-password retry doesn't double-submit the same credentials.
+        setPassword("");
+        // MFA-required isn't really a "failure" — route to the MFA page
+        // (the temp token was already stashed by useAuth.signIn).
+        if (error.kind === "mfa_required") {
+          navigate("/mfa", { replace: true });
+        }
+      }
+    } finally {
+      // Always reset the local spinner. On success, the auth-state effect
+      // navigates away so this is a no-op; on error, it resets the button.
+      // Previously this only fired in the error branch — leaving a successful
+      // login stuck showing "Authenticating..." until the redirect raced in.
       setIsLoading(false);
     }
   };
@@ -144,6 +171,15 @@ export default function Login() {
 
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+            {inactivityNotice && !copy && (
+              <div className="flex items-start gap-3 p-4 rounded-xl bg-primary/5 border border-primary/20">
+                <Clock className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-foreground">You were signed out</p>
+                  <p className="text-sm text-muted-foreground">For your security, we ended your session after 15 minutes of inactivity.</p>
+                </div>
+              </div>
+            )}
             {copy && (
               <div className="flex items-start gap-3 p-4 rounded-xl bg-attention/5 border border-attention/20 animate-shake">
                 <ErrIcon className="w-5 h-5 text-attention shrink-0 mt-0.5" />
@@ -179,19 +215,40 @@ export default function Login() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="password" title="Password" className="text-sm font-bold text-muted-foreground ml-1">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(stripLeadingSpaces(e.target.value))}
-                onBlur={() => setPassword(p => stripEdgeSpaces(p))}
-                required
-                className="h-14 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl text-lg"
-                disabled={isLoading}
-              />
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password" title="Password" className="text-sm font-bold text-muted-foreground ml-1">Password</Label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-semibold text-primary hover:underline mr-1"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(stripLeadingSpaces(e.target.value))}
+                  onBlur={() => setPassword(p => stripEdgeSpaces(p))}
+                  required
+                  className="h-14 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl text-lg pr-12"
+                  disabled={isLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  disabled={isLoading}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
 
             <Button

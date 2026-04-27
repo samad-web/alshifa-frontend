@@ -9,9 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { DoorOpen, Plus, Loader2, Building2, Users, Edit2, Trash2 } from "lucide-react";
+import { DoorOpen, Plus, Loader2, Building2, Users, Edit2, Trash2, AlertCircle } from "lucide-react";
 import { iwisApi, type TherapyRoom, type TherapyRoomType } from "@/services/iwis.service";
 import { branchesApi } from "@/services/branches.service";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { useAuth } from "@/hooks/useAuth";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 const ROOM_TYPES: TherapyRoomType[] = ["SHIRODHARA", "ABHYANGA", "PANCHAKARMA_GENERAL", "STEAM", "CONSULTATION", "GROUP"];
 
@@ -26,8 +29,19 @@ const TYPE_LABEL: Record<TherapyRoomType, string> = {
 
 export default function TherapyRoomsPage() {
     const { toast } = useToast();
+    const { profile } = useAuth();
+    const { confirm, dialog: confirmDialog } = useConfirm();
+    // Branch is derived from the global navbar selector. ALL_BRANCHES (i.e.
+    // `branchIdParam === undefined`) means the admin hasn't picked a branch
+    // yet — therapy rooms belong to a single branch, so we fall back to the
+    // current user's home branch in that case so the page never renders
+    // empty for non-admin clinicians.
+    const { branchIdParam } = useBranchScope();
+    const homeBranchId = (profile as any)?.branchId
+        ?? (profile as any)?.user?.branchId
+        ?? null;
+    const branchId = branchIdParam ?? homeBranchId ?? "";
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
-    const [branchId, setBranchId] = useState<string>("");
     const [rooms, setRooms] = useState<TherapyRoom[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -37,14 +51,18 @@ export default function TherapyRoomsPage() {
     });
 
     useEffect(() => {
-        branchesApi.list().then((b) => {
-            setBranches(b);
-            if (b[0]) setBranchId(b[0].id);
-        });
+        // Used purely to render the active branch name in the header
+        // breadcrumb — branch *selection* itself has been delegated to the
+        // navbar's branch scope.
+        branchesApi.list().then(setBranches).catch(() => setBranches([]));
     }, []);
 
     const reload = useCallback(async () => {
-        if (!branchId) return;
+        if (!branchId) {
+            setRooms([]);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
             setRooms(await iwisApi.listRooms(branchId));
@@ -54,6 +72,8 @@ export default function TherapyRoomsPage() {
     }, [branchId]);
 
     useEffect(() => { reload(); }, [reload]);
+
+    const activeBranchName = branches.find((b) => b.id === branchId)?.name ?? null;
 
     const open = (room: TherapyRoom | null = null) => {
         if (room) {
@@ -68,6 +88,10 @@ export default function TherapyRoomsPage() {
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!branchId) {
+            toast({ title: "Pick a branch", description: "Use the navbar branch selector first.", variant: "destructive" });
+            return;
+        }
         try {
             const payload = { branchId, name: form.name, type: form.type, capacity: Number(form.capacity), notes: form.notes || undefined };
             if (editing) await iwisApi.updateRoom(editing.id, payload);
@@ -82,7 +106,13 @@ export default function TherapyRoomsPage() {
     };
 
     const deactivate = async (room: TherapyRoom) => {
-        if (!confirm(`Deactivate "${room.name}"?`)) return;
+        const ok = await confirm({
+            title: `Deactivate "${room.name}"?`,
+            description: "Existing bookings remain on the schedule, but no new bookings can target this room until it's reactivated.",
+            confirmLabel: "Deactivate",
+            tone: "danger",
+        });
+        if (!ok) return;
         await iwisApi.deactivateRoom(room.id);
         toast({ title: "Room deactivated" });
         reload();
@@ -97,14 +127,21 @@ export default function TherapyRoomsPage() {
                     </Button>
                 </PageHeader>
 
-                <div className="flex items-center gap-3">
-                    <Building2 className="w-4 h-4 text-muted-foreground" />
-                    <Select value={branchId} onValueChange={setBranchId}>
-                        <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select branch" /></SelectTrigger>
-                        <SelectContent>
-                            {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
+                {/* Branch indicator — read-only mirror of the navbar branch
+                    scope. The page-level branch dropdown was removed so
+                    every screen consumes the same global selector. */}
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Building2 className="w-4 h-4" />
+                    {activeBranchName ? (
+                        <span>
+                            Showing rooms for <span className="font-medium text-foreground">{activeBranchName}</span>
+                            <span className="ml-1 text-xs">— change via the branch selector in the top navigation.</span>
+                        </span>
+                    ) : (
+                        <span className="flex items-center gap-1 text-amber-600">
+                            <AlertCircle className="w-4 h-4" /> No branch selected — pick one in the navbar to see rooms.
+                        </span>
+                    )}
                 </div>
 
                 {loading ? (
@@ -179,6 +216,7 @@ export default function TherapyRoomsPage() {
                         </form>
                     </DialogContent>
                 </Dialog>
+                {confirmDialog}
             </div>
         </AppLayout>
     );

@@ -29,6 +29,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { iwisApi, type TreatmentPackage } from "@/services/iwis.service";
+import { useAuth } from "@/hooks/useAuth";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { formatDate, expiryTone } from "@/lib/format-date";
 
 interface Medicine {
     id: string;
@@ -40,6 +44,11 @@ interface Medicine {
     totalStock: number;
     videoUrl?: string;
     sku?: string;
+    /** Earliest expiry across the medicine's stock batches in this branch.
+     *  Server-computed on `/api/pharmacy/medicines/search`. */
+    nearestExpiry?: string | null;
+    /** Per-batch detail used by the dispense flow. */
+    stocks?: Array<{ id: string; batchNumber?: string; expiryDate: string; quantity: number }>;
 }
 
 interface PrescriptionItem {
@@ -53,6 +62,9 @@ interface PrescriptionItem {
     medicineId?: string;
     videoUrl: string;
     sku?: string;
+    /** Captured at selection so the row can render the expiry chip even
+     *  after the picker is closed. */
+    nearestExpiry?: string | null;
 }
 
 interface ExternalVideo {
@@ -130,6 +142,35 @@ export function MultiplePrescriptionForm({
 }: MultiplePrescriptionFormProps) {
     const [loading, setLoading] = useState(false);
     const [videos, setVideos] = useState<ExternalVideo[]>([]);
+
+    // ── Treatment package selector ─────────────────────────────────────
+    // Loads packages scoped to the active branch (navbar context first,
+    // user's home branch as fallback) and lets the clinician attach one
+    // to the prescription as broader plan context. The selected package's
+    // id is sent up with the batch payload (Prescription.packageId).
+    const { profile } = useAuth();
+    const { branchIdParam } = useBranchScope();
+    const homeBranchId =
+        (profile as any)?.branchId
+        ?? (profile as any)?.user?.branchId
+        ?? null;
+    const packageBranchId = branchIdParam ?? homeBranchId ?? null;
+    const [packages, setPackages] = useState<TreatmentPackage[]>([]);
+    const [packagesLoading, setPackagesLoading] = useState(false);
+    const [selectedPackageId, setSelectedPackageId] = useState<string>("");
+    const selectedPackage = packages.find((p) => p.id === selectedPackageId) ?? null;
+
+    useEffect(() => {
+        if (!packageBranchId) {
+            setPackages([]);
+            return;
+        }
+        setPackagesLoading(true);
+        iwisApi.listPackages(packageBranchId)
+            .then((list) => setPackages(Array.isArray(list) ? list.filter((p) => p.isActive) : []))
+            .catch(() => setPackages([]))
+            .finally(() => setPackagesLoading(false));
+    }, [packageBranchId]);
 
     // Per-row server-side search state. Each medication line has its
     // own query + filter combination + result cache so opening a
@@ -272,14 +313,55 @@ export function MultiplePrescriptionForm({
 
     const handleSelectMedicine = (index: number, med: Medicine) => {
         const newItems = [...prescriptionItems];
+        const incomingVideo = (med.videoUrl || "").trim();
+        const previousVideo = (newItems[index].videoUrl || "").trim();
+
         newItems[index] = {
             ...newItems[index],
             medicationName: med.name,
             medicineId: med.id,
             sku: med.sku,
-            videoUrl: med.videoUrl || newItems[index].videoUrl
+            nearestExpiry: med.nearestExpiry ?? null,
+            // Catalog video always wins when the medicine has one — the
+            // pharmacy team curates these on the inventory record so doctors
+            // shouldn't have to type the URL during a consult. The previous
+            // implementation only auto-filled when the field was empty,
+            // which silently discarded curated links if a user had typed
+            // anything earlier in the row (e.g. a placeholder space).
+            videoUrl: incomingVideo || previousVideo,
         };
         setPrescriptionItems(newItems);
+
+        if (incomingVideo && incomingVideo !== previousVideo) {
+            toast.success("Instruction video auto-filled from inventory record", { duration: 2200 });
+        }
+
+        // Surface a heads-up when the selected medicine is already past
+        // its earliest-batch expiry — this prevents the doctor from
+        // silently prescribing a stockout-imminent line.
+        if (med.nearestExpiry && expiryTone(med.nearestExpiry) === "expired") {
+            toast.error(`Heads up: nearest batch of ${med.name} expired on ${formatDate(med.nearestExpiry)}`);
+        } else if (med.nearestExpiry && expiryTone(med.nearestExpiry) === "expiring") {
+            toast.success(`${med.name} — nearest batch expires ${formatDate(med.nearestExpiry)}`, { duration: 2500 });
+        }
+    };
+
+    /** Render the right-tone chip for an expiry date — amber within 30 days,
+     *  red once past, muted otherwise. Shared across the picker rows and
+     *  the selected-medicine confirmation strip. */
+    const ExpiryChip = ({ date }: { date: string | null | undefined }) => {
+        if (!date) return null;
+        const tone = expiryTone(date);
+        const cls = tone === "expired"
+            ? "bg-red-100 text-red-700 border border-red-200"
+            : tone === "expiring"
+                ? "bg-amber-100 text-amber-700 border border-amber-200"
+                : "bg-muted text-muted-foreground border border-border";
+        return (
+            <span className={cn("inline-flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded", cls)}>
+                {tone === "expired" ? "Expired" : "Exp"} {formatDate(date)}
+            </span>
+        );
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -298,6 +380,7 @@ export function MultiplePrescriptionForm({
             await apiClient.post('/api/prescriptions/batch-add', {
                 patientId,
                 medicines: prescriptionItems,
+                packageId: selectedPackageId || undefined,
             });
             toast.success("Prescriptions added successfully");
             onSuccess?.();
@@ -321,6 +404,92 @@ export function MultiplePrescriptionForm({
                     <Plus className="w-4 h-4" />
                     Add Medication
                 </Button>
+            </div>
+
+            {/* ── Treatment package picker ──────────────────────────────
+                Optional. Lets the clinician attach a TreatmentPackage to
+                the prescription so the receiving pharmacist / patient
+                sees the broader plan context. */}
+            <div className="rounded-2xl border border-border/50 bg-secondary/10 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-primary" />
+                        <Label className="text-sm font-bold">Add Package</Label>
+                        <Badge variant="outline" className="text-[10px]">Optional</Badge>
+                    </div>
+                    {selectedPackageId && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setSelectedPackageId("")}
+                        >
+                            <X className="w-3 h-3 mr-1" /> Clear
+                        </Button>
+                    )}
+                </div>
+                <Select
+                    value={selectedPackageId || undefined}
+                    onValueChange={(v) => setSelectedPackageId(v === "__none__" ? "" : v)}
+                    disabled={packagesLoading || (!packageBranchId)}
+                >
+                    <SelectTrigger className="bg-background">
+                        <SelectValue
+                            placeholder={
+                                !packageBranchId
+                                    ? "Select a branch in the navbar to see packages"
+                                    : packagesLoading
+                                        ? "Loading packages…"
+                                        : packages.length === 0
+                                            ? "No active packages in this branch"
+                                            : "Pick a treatment package"
+                            }
+                        />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="__none__">No package</SelectItem>
+                        {packages.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                                <div className="flex flex-col">
+                                    <span className="font-medium">{p.name}</span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                        {p.durationDays} days · ₹{p.price.toLocaleString()}
+                                    </span>
+                                </div>
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+
+                {selectedPackage && (
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                            <div className="font-semibold text-sm">{selectedPackage.name}</div>
+                            <Badge className="bg-primary/15 text-primary border border-primary/20">
+                                {selectedPackage.durationDays} days
+                            </Badge>
+                        </div>
+                        {selectedPackage.description && (
+                            <p className="text-xs text-muted-foreground">{selectedPackage.description}</p>
+                        )}
+                        {Array.isArray(selectedPackage.components) && selectedPackage.components.length > 0 && (
+                            <ul className="text-xs space-y-1">
+                                {selectedPackage.components.map((c, i) => (
+                                    <li key={i} className="flex items-center gap-2">
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+                                        <span className="font-medium">{c.type}:</span>
+                                        <span className="text-muted-foreground">{c.description}</span>
+                                        <span className="text-muted-foreground">×{c.quantity}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        <div className="text-xs text-muted-foreground italic">
+                            Read-only summary. Edit the package itself from Treatment Packages.
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="space-y-4">
@@ -426,7 +595,7 @@ export function MultiplePrescriptionForm({
                                                                 onSelect={() => handleSelectMedicine(index, med)}
                                                             >
                                                                 <div className="flex flex-col w-full">
-                                                                    <div className="flex items-center gap-2">
+                                                                    <div className="flex items-center gap-2 flex-wrap">
                                                                         <Check
                                                                             className={cn(
                                                                                 "mr-2 h-4 w-4",
@@ -444,6 +613,8 @@ export function MultiplePrescriptionForm({
                                                                                 {med.type}
                                                                             </Badge>
                                                                         )}
+                                                                        {/* Earliest-batch expiry — amber within 30d, red once past. */}
+                                                                        <ExpiryChip date={med.nearestExpiry} />
                                                                     </div>
                                                                     <div className="ml-6 flex items-center gap-3 text-[10px] text-muted-foreground">
                                                                         <span>{med.brand || "Generics"}</span>
@@ -480,7 +651,7 @@ export function MultiplePrescriptionForm({
                                         </PopoverContent>
                                     </Popover>
                                     {item.medicationName && (
-                                        <div className="mt-1">
+                                        <div className="mt-1 flex items-center gap-2 flex-wrap">
                                             {item.medicineId ? (
                                                 <span className="text-[10px] text-wellness flex items-center gap-1 font-bold">
                                                     <CheckCircle2 className="w-3 h-3" /> Selected from Inventory {item.sku ? `(${item.sku})` : ""}
@@ -488,6 +659,9 @@ export function MultiplePrescriptionForm({
                                             ) : (
                                                 <span className="text-[10px] text-attention font-bold italic">Unlinked Medication</span>
                                             )}
+                                            {/* Persist the expiry chip after the picker closes so the
+                                                doctor sees the warning while filling out dosage / frequency. */}
+                                            <ExpiryChip date={item.nearestExpiry} />
                                         </div>
                                     )}
                                 </div>

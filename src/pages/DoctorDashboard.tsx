@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  Calendar, Clock, AlertTriangle, Pill, Trophy, CheckCircle2, Users, Video,
-  ChevronRight, ChevronDown, Stethoscope, Activity, Sparkles,
+  Calendar, Clock, AlertTriangle, Pill, Trophy, CheckCircle2, Users, Users2, Video,
+  ChevronRight, ChevronDown, Stethoscope, Activity, Sparkles, MapPin, Loader2,
 } from "lucide-react";
 import { DashboardSkeleton } from "@/components/ui/page-skeletons";
 import { PageTransition } from "@/components/ui/page-transition";
@@ -18,6 +18,7 @@ import {
   dashboardSummaryApi,
   DoctorDashboardSummary,
   DoctorAppointmentCard,
+  GroupSessionTask,
 } from "@/services/dashboardSummary.service";
 import { appointmentsApi } from "@/services/appointments.service";
 import TodoPanel from "@/components/todo/TodoPanel";
@@ -25,6 +26,9 @@ import { selfExamService, type SelfExamBundle } from "@/services/selfExam.servic
 import { BundleView } from "@/components/selfexam/BundleView";
 import { ClipboardList } from "lucide-react";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { apiClient } from "@/lib/api-client";
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -116,7 +120,6 @@ export default function DoctorDashboard() {
             />
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/staff-schedule?tab=attendance"><Button variant="outline" size="sm"><Clock className="w-4 h-4 mr-1" /> Check In / Out</Button></Link>
             <Link to="/staff-schedule?tab=availability"><Button variant="outline" size="sm">Availability</Button></Link>
           </div>
         </header>
@@ -240,8 +243,15 @@ export default function DoctorDashboard() {
           </div>
         </section>
 
-        {/* SECTION F — Todo Panel */}
+        {/* SECTION F — My Tasks (group sessions + todos)
+            Group sessions surface as date-keyed task cards above the freeform
+            todo list so the doctor sees their full upcoming load in one place. */}
+        <GroupSessionsTaskSection sessions={summary.groupSessions || []} />
         <TodoPanel title="My Tasks" />
+
+        {/* SECTION F2 — Public thank-you cards from completed journeys.
+            Self-hides when no PUBLIC letters exist in the lookback window. */}
+        <RecognitionPanel />
 
         {/* SECTION G — Performance Snapshot */}
         <section className="rounded-xl border bg-card shadow-card p-5">
@@ -364,6 +374,268 @@ function TodayAppointmentCard({ appt }: { appt: DoctorAppointmentCard }) {
       </button>
       {expanded && <SelfExamBundlePanel appointmentId={appt.id} />}
     </div>
+  );
+}
+
+// ── Group Sessions Task Section ─────────────────────────────────────
+// Renders upcoming group therapy sessions as task cards within the
+// doctor's "My Tasks" surface. Visually distinguished from individual
+// appointment cards via a teal-bordered card style + people icon, and
+// sorted chronologically by date+time.
+
+const SESSION_STATUS_BADGE: Record<GroupSessionTask["status"], string> = {
+  OPEN:      "bg-teal-100 text-teal-800 border-teal-300",
+  FULL:      "bg-amber-100 text-amber-800 border-amber-300",
+  COMPLETED: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  CANCELLED: "bg-red-100 text-red-800 border-red-300",
+};
+
+function formatDateDDMMYYYY(iso: string, time?: string): string {
+  // Expected output: DD/MM/YYYY HH:MM. The session's `date` is a full ISO
+  // datestamp and `startTime` is HH:MM so we combine them rather than rely
+  // on the time embedded in `date` (which is set by the server at midnight).
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const t = time && /^\d{2}:\d{2}$/.test(time)
+    ? time
+    : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${dd}/${mm}/${yyyy} ${t}`;
+}
+
+function GroupSessionsTaskSection({ sessions }: { sessions: GroupSessionTask[] }) {
+  const [rosterId, setRosterId] = useState<string | null>(null);
+  // Defensive sort — backend already returns chronologically but a re-sort
+  // here lets the section co-exist with future task types without depending
+  // on backend ordering guarantees.
+  const sorted = [...sessions].sort((a, b) => {
+    const ta = new Date(a.date).getTime() + minutesFromTime(a.startTime);
+    const tb = new Date(b.date).getTime() + minutesFromTime(b.startTime);
+    return ta - tb;
+  });
+
+  if (sorted.length === 0) {
+    // Render nothing when there's no data — the existing TodoPanel below
+    // already supplies a "My Tasks" surface, so an empty group-session card
+    // would be visual noise.
+    return null;
+  }
+
+  return (
+    <section className="rounded-xl border bg-card shadow-card overflow-hidden">
+      <div className="px-5 py-3 border-b flex items-center justify-between">
+        <h2 className="font-semibold flex items-center gap-2">
+          <Users2 className="w-5 h-5 text-teal-600" /> Scheduled Group Sessions
+          <Badge variant="outline" className="ml-2">{sorted.length}</Badge>
+        </h2>
+        <Link to="/group-sessions" className="text-xs text-primary hover:underline">View all</Link>
+      </div>
+      <div className="divide-y">
+        {sorted.map((s) => (
+          <div
+            key={s.id}
+            className="px-5 py-3 border-l-4 border-l-teal-500 bg-teal-50/40 flex flex-col gap-2"
+          >
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <Users2 className="w-4 h-4 text-teal-600 shrink-0" />
+                  <span className="font-medium text-sm truncate">{s.title}</span>
+                  <Badge variant="outline" className="text-[10px] border-teal-300 text-teal-700 bg-white">
+                    {s.sessionType}
+                  </Badge>
+                  <Badge variant="outline" className={cn("text-[10px]", SESSION_STATUS_BADGE[s.status])}>
+                    {s.status}
+                  </Badge>
+                </div>
+                <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="inline-flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {formatDateDDMMYYYY(s.date, s.startTime)}
+                    {s.endTime ? <span className="opacity-60"> – {s.endTime}</span> : null}
+                  </span>
+                  {s.room?.name && (
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin className="w-3 h-3" /> {s.room.name}
+                    </span>
+                  )}
+                  {s.therapist?.fullName && (
+                    <span className="inline-flex items-center gap-1">
+                      <Stethoscope className="w-3 h-3" /> {s.therapist.fullName}
+                    </span>
+                  )}
+                </div>
+                <CapacityBar enrolled={s.enrolledCount} max={s.maxCapacity} />
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs border-teal-300 text-teal-700 hover:bg-teal-100"
+                onClick={() => setRosterId(s.id)}
+              >
+                <Users className="w-3 h-3 mr-1" /> View Roster
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <GroupSessionRosterDialog
+        sessionId={rosterId}
+        onClose={() => setRosterId(null)}
+      />
+    </section>
+  );
+}
+
+function minutesFromTime(t?: string): number {
+  if (!t || !/^\d{2}:\d{2}$/.test(t)) return 0;
+  const [h, m] = t.split(":").map(Number);
+  return ((h || 0) * 60 + (m || 0)) * 60_000;
+}
+
+function CapacityBar({ enrolled, max }: { enrolled: number; max: number }) {
+  const pct = max > 0 ? Math.min(100, Math.round((enrolled / max) * 100)) : 0;
+  const tone = pct >= 100 ? "bg-amber-500" : pct >= 80 ? "bg-orange-500" : "bg-teal-500";
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-0.5">
+        <span>{enrolled} / {max} enrolled</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className={cn("h-full transition-all", tone)} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// Roster modal — fetched lazily when a session is selected. The roster
+// endpoint returns the full GroupSession + appointments + nested patient,
+// so we destructure the appointments list for the table view.
+interface RosterAppointmentRow {
+  id: string;
+  status: string;
+  patient: {
+    id: string;
+    fullName: string | null;
+    // Human-readable identifier — distinct from `id` (UUID).
+    patientId: string | null;
+    phoneNumber: string | null;
+  } | null;
+}
+
+interface RosterResponse {
+  id: string;
+  title: string;
+  sessionType: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  maxCapacity: number;
+  appointments: RosterAppointmentRow[];
+  therapist?: { fullName: string | null } | null;
+  room?: { name: string | null } | null;
+}
+
+function GroupSessionRosterDialog({
+  sessionId,
+  onClose,
+}: {
+  sessionId: string | null;
+  onClose: () => void;
+}) {
+  const [data, setData] = useState<RosterResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setData(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    apiClient
+      .get<RosterResponse>(`/api/group-sessions/${sessionId}/roster`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setData(data);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load roster");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
+  return (
+    <Dialog open={!!sessionId} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Users2 className="w-4 h-4 text-teal-600" />
+            {data?.title || "Group Session Roster"}
+          </DialogTitle>
+          <DialogDescription>
+            {data
+              ? `${formatDateDDMMYYYY(data.date, data.startTime)} · ${data.appointments.length} / ${data.maxCapacity} enrolled${data.room?.name ? ` · ${data.room.name}` : ""}`
+              : "Loading…"}
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading && (
+          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading roster…
+          </div>
+        )}
+        {error && !loading && (
+          <div className="rounded-md bg-destructive/5 border border-destructive/30 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+        {!loading && !error && data && (
+          data.appointments.length === 0 ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              No patients enrolled yet.
+            </div>
+          ) : (
+            <div className="max-h-[400px] overflow-y-auto rounded border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Patient</th>
+                    <th className="text-left px-3 py-2 font-medium">Patient ID</th>
+                    <th className="text-left px-3 py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {data.appointments.map((row) => (
+                    <tr key={row.id}>
+                      <td className="px-3 py-2">{row.patient?.fullName || "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground font-mono text-xs">
+                        {row.patient?.patientId || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge variant="outline" className="text-[10px]">{row.status}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

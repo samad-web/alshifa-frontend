@@ -14,6 +14,8 @@ import { iwisApi, type GroupSession, type TherapyRoom } from "@/services/iwis.se
 import { branchesApi } from "@/services/branches.service";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { useBranchScope } from "@/hooks/useBranchScope";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 const STATUS_TONE: Record<string, string> = {
     OPEN: "bg-wellness/10 text-wellness border-wellness/30",
@@ -25,6 +27,8 @@ const STATUS_TONE: Record<string, string> = {
 export default function GroupSessionsPage() {
     const { toast } = useToast();
     const { role } = useAuth();
+    const { branchIdParam } = useBranchScope();
+    const { confirm, dialog: confirmDialog } = useConfirm();
     const isClinician = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "THERAPIST";
 
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
@@ -42,10 +46,17 @@ export default function GroupSessionsPage() {
     });
 
     useEffect(() => {
-        branchesApi.list().then((b) => { setBranches(b); if (b[0]) setBranchId(b[0].id); });
+        branchesApi.list().then(setBranches).catch(() => setBranches([]));
         apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-therapists")
             .then(({ data }) => setTherapists(data)).catch(() => {});
     }, []);
+
+    // Sync branch from the global navbar selector. Falls back to the first
+    // branch in the user's list when "All branches" is active.
+    useEffect(() => {
+        if (branchIdParam) { setBranchId(branchIdParam); return; }
+        if (branches[0] && !branchId) setBranchId(branches[0].id);
+    }, [branchIdParam, branches, branchId]);
 
     useEffect(() => {
         if (!branchId) return;
@@ -90,7 +101,13 @@ export default function GroupSessionsPage() {
     };
 
     const complete = async (id: string) => {
-        if (!confirm("Mark session completed? This locks all enrolled appointments.")) return;
+        const ok = await confirm({
+            title: "Mark session completed?",
+            description: "All linked appointments are locked. This action cannot be reversed from the UI.",
+            confirmLabel: "Complete",
+            tone: "default",
+        });
+        if (!ok) return;
         await iwisApi.completeGroupSession(id);
         toast({ title: "Session completed" });
         reload();
@@ -103,12 +120,12 @@ export default function GroupSessionsPage() {
                     {isClinician && <Button onClick={() => setDialogOpen(true)}><Plus className="w-4 h-4 mr-2" /> New Session</Button>}
                 </PageHeader>
 
-                <div className="flex items-center gap-3">
-                    <Building2 className="w-4 h-4 text-muted-foreground" />
-                    <Select value={branchId} onValueChange={setBranchId}>
-                        <SelectTrigger className="w-[280px]"><SelectValue /></SelectTrigger>
-                        <SelectContent>{branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-                    </Select>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Building2 className="w-4 h-4" />
+                    Branch: <span className="font-semibold text-foreground">
+                        {branches.find((b) => b.id === branchId)?.name || "—"}
+                    </span>
+                    <span className="text-xs">(switch via navbar)</span>
                 </div>
 
                 {loading ? (
@@ -213,6 +230,7 @@ export default function GroupSessionsPage() {
                         </form>
                     </DialogContent>
                 </Dialog>
+                {confirmDialog}
             </div>
         </AppLayout>
     );

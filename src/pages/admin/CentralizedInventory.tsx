@@ -23,6 +23,8 @@ import {
   Pill, Warehouse,
 } from "lucide-react";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { toast } from "sonner";
+import { formatDate } from "@/lib/format-date";
 
 const transferStatusBadge: Record<TransferStatus, { className: string; label: string }> = {
   PENDING: { className: "bg-yellow-100 text-yellow-800 border-yellow-300", label: "Pending" },
@@ -116,8 +118,16 @@ export default function CentralizedInventory() {
     ? transfers.filter(tx => tx.fromBranch?.id === branchIdParam || tx.toBranch?.id === branchIdParam)
     : transfers;
 
+  // Inline validation flag mirrored in the form so the submit button
+  // and the destination dropdown both react to it.
+  const sameBranchSelected = !!tfFrom && tfFrom === tfTo;
+
   const handleCreateTransfer = async () => {
     if (!tfMedicine || !tfFrom || !tfTo || !tfQty) return;
+    if (sameBranchSelected) {
+      toast.error("Source and destination branch cannot be the same");
+      return;
+    }
     setSubmitting(true);
     try {
       await operationsApi.createTransferRequest({
@@ -134,8 +144,9 @@ export default function CentralizedInventory() {
       setTfQty("");
       setTfNotes("");
       await fetchData();
-    } catch {
-      alert("Failed to create transfer request");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create transfer request";
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +157,7 @@ export default function CentralizedInventory() {
       await operationsApi.approveTransfer(id);
       await fetchData();
     } catch {
-      alert("Failed to approve transfer");
+      toast.error("Failed to approve transfer");
     }
   };
 
@@ -155,7 +166,7 @@ export default function CentralizedInventory() {
       await operationsApi.receiveTransfer(id);
       await fetchData();
     } catch {
-      alert("Failed to mark as received");
+      toast.error("Failed to mark as received");
     }
   };
 
@@ -196,6 +207,66 @@ export default function CentralizedInventory() {
           <StatCard title="Low Stock Alerts" value={lowStockCount} icon={AlertTriangle} variant="attention" />
           <StatCard title="Expiring Items" value={expiringCount} icon={Package} variant="risk" />
         </div>
+
+        {/* Recent Transfers — surfaced ABOVE the full stock grid so admins
+            and pharmacists see the latest transfer activity without
+            scrolling. Capped to the last 10 by createdAt; the full
+            transfer table follows the inventory grid below. */}
+        <Card className="border-none shadow-sm overflow-hidden border-l-4 border-l-primary">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ArrowRightLeft className="w-5 h-5 text-primary" />
+              Recent Transfers
+              <Badge variant="outline" className="ml-2 text-[10px] font-normal">
+                Last {Math.min(scopedTransfers.length, 10)}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {scopedTransfers.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic text-center py-4">
+                No transfer activity yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Status</TableHead>
+                      <TableHead>From</TableHead>
+                      <TableHead>To</TableHead>
+                      <TableHead>Medicine</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead>Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[...scopedTransfers]
+                      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      .slice(0, 10)
+                      .map((tx) => {
+                        const cfg = transferStatusBadge[tx.status];
+                        return (
+                          <TableRow key={`recent-${tx.id}`}>
+                            <TableCell>
+                              <Badge variant="outline" className={cfg.className}>{cfg.label}</Badge>
+                            </TableCell>
+                            <TableCell className="text-xs">{tx.fromBranch?.name || "--"}</TableCell>
+                            <TableCell className="text-xs">{tx.toBranch?.name || "--"}</TableCell>
+                            <TableCell className="font-medium text-sm">
+                              {(tx.medicine as any)?.name || tx.medicineId.slice(0, 8)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold">{tx.quantity}</TableCell>
+                            <TableCell className="text-xs">{formatDate(tx.createdAt)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Search */}
         <div className="flex items-center gap-3">
@@ -321,7 +392,7 @@ export default function CentralizedInventory() {
                           <TableCell>
                             <Badge variant="outline" className={cfg.className}>{cfg.label}</Badge>
                           </TableCell>
-                          <TableCell className="text-xs">{new Date(tx.createdAt).toLocaleDateString()}</TableCell>
+                          <TableCell className="text-xs">{formatDate(tx.createdAt)}</TableCell>
                           <TableCell className="max-w-[120px] truncate text-xs">{tx.notes || "--"}</TableCell>
                           {isAdmin && (
                             <TableCell>
@@ -392,7 +463,16 @@ export default function CentralizedInventory() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">From Branch</label>
-                  <Select value={tfFrom} onValueChange={setTfFrom}>
+                  <Select
+                    value={tfFrom}
+                    onValueChange={(v) => {
+                      setTfFrom(v);
+                      // Clear destination when it would create a same-branch
+                      // transfer — so the user re-picks rather than submitting
+                      // an obviously invalid pair.
+                      if (v === tfTo) setTfTo("");
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
@@ -407,16 +487,26 @@ export default function CentralizedInventory() {
                   <label className="text-sm font-medium">To Branch</label>
                   <Select value={tfTo} onValueChange={setTfTo}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select" />
+                      <SelectValue placeholder={tfFrom ? "Select" : "Pick source first"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {allBranches.map(b => (
-                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                      ))}
+                      {/* Source branch is excluded so the dropdown
+                          can't even offer a same-branch transfer. */}
+                      {allBranches
+                        .filter((b) => b.id !== tfFrom)
+                        .map(b => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+              {sameBranchSelected && (
+                <p className="text-xs text-destructive flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Source and destination branch cannot be the same.
+                </p>
+              )}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Quantity</label>
                 <Input
@@ -438,7 +528,7 @@ export default function CentralizedInventory() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreateTransfer} disabled={submitting}>
+              <Button onClick={handleCreateTransfer} disabled={submitting || sameBranchSelected}>
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                 Create Transfer
               </Button>
