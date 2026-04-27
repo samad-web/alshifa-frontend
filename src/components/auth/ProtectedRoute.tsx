@@ -49,6 +49,8 @@ export function getRoleRedirectPath(role: AppRole | null): string {
       return "/admin";
     case "ADMIN_DOCTOR":
       return "/doctor-admin";
+    case "BRANCH_ADMIN":
+      return "/branch-admin";
     case "DOCTOR":
       return "/doctor";
     case "THERAPIST":

@@ -1,5 +1,7 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
+// Corner-toast UIs replaced by the centered <NotifyProvider> modal in lib/notify.
+// We keep the imports stubbed out so any leftover JSX references compile, but the
+// actual rendering happens inside <NotifyProvider> below.
+import { NotifyProvider } from "@/lib/notify";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
@@ -16,10 +18,16 @@ import { AnimatePresence, motion } from "framer-motion";
 
 // Lazy-loaded pages
 const Login = lazy(() => import("./pages/Login"));
+const VerifyEmail = lazy(() => import("./pages/auth/VerifyEmail"));
+const ForgotPassword = lazy(() => import("./pages/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/auth/ResetPassword"));
+const MfaChallenge = lazy(() => import("./pages/auth/MfaChallenge"));
 const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const DoctorAdminDashboard = lazy(() => import("./pages/DoctorAdminDashboard"));
+const BranchAdminDashboard = lazy(() => import("./pages/branch-admin/BranchAdminDashboard"));
+const BranchAdminStaffDirectory = lazy(() => import("./pages/branch-admin/StaffDirectory"));
 const DoctorDashboard = lazy(() => import("./pages/DoctorDashboard"));
 const DoctorAvailability = lazy(() => import("./pages/DoctorAvailability"));
 const DoctorGamification = lazy(() => import("./pages/DoctorGamification"));
@@ -43,6 +51,7 @@ const Appointments = lazy(() => import("./pages/Appointments"));
 const PrescriptionManagement = lazy(() => import("./pages/PrescriptionManagement"));
 const Reports = lazy(() => import("./pages/Reports"));
 const ManageUsers = lazy(() => import("./pages/ManageUsers"));
+const UsersExport = lazy(() => import("./pages/admin/UsersExport"));
 const CreateUser = lazy(() => import("./pages/CreateUser"));
 const BranchManagement = lazy(() => import("./pages/BranchManagement"));
 const AssignPatient = lazy(() => import("./pages/AssignPatient"));
@@ -97,7 +106,8 @@ const DietPackagesPage = lazy(() => import("./pages/iwis/DietPackages"));
 const PatientDietPage = lazy(() => import("./pages/iwis/PatientDiet"));
 const ClinicalPhotosPage = lazy(() => import("./pages/iwis/ClinicalPhotos"));
 const TreatmentPackagesPage = lazy(() => import("./pages/iwis/TreatmentPackages"));
-const TherapistMatchPage = lazy(() => import("./pages/iwis/TherapistMatch"));
+// /therapist-match is now a redirect to /skill-matrix; the standalone
+// TherapistMatch page is no longer mounted as a route.
 const GroupSessionsPage = lazy(() => import("./pages/iwis/GroupSessions"));
 
 // Super Admin (IWIS platform-level)
@@ -188,10 +198,47 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* ── Branch Admin (scoped to a single branch) ─────────────────────── */}
+      <Route
+        path="/branch-admin"
+        element={
+          <ProtectedRoute allowedRoles={["BRANCH_ADMIN"]}>
+            <BranchAdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/branch-admin/staff"
+        element={
+          <ProtectedRoute allowedRoles={["BRANCH_ADMIN", "ADMIN", "ADMIN_DOCTOR"]}>
+            <BranchAdminStaffDirectory />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/branch-admin/scorecards"
+        element={
+          <ProtectedRoute allowedRoles={["BRANCH_ADMIN", "ADMIN", "ADMIN_DOCTOR"]}>
+            <FeatureGate feature="PERFORMANCE_SCORECARDS" title="Performance Scorecards isn't enabled">
+              <PerformanceScorecards />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/branch-admin/skill-matrix"
+        element={
+          <ProtectedRoute allowedRoles={["BRANCH_ADMIN", "ADMIN", "ADMIN_DOCTOR"]}>
+            <FeatureGate feature="STAFF_SKILL_MATRIX" title="Staff Skill Matrix isn't enabled">
+              <SkillMatrix />
+            </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/assign-patient"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
             <AssignPatient />
           </ProtectedRoute>
         }
@@ -295,8 +342,16 @@ function AppRoutes() {
       <Route
         path="/manage-users"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
             <ManageUsers />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users-export"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+            <UsersExport />
           </ProtectedRoute>
         }
       />
@@ -352,7 +407,7 @@ function AppRoutes() {
       <Route
         path="/chat"
         element={
-          <ProtectedRoute allowedRoles={["PATIENT", "DOCTOR", "ADMIN", "ADMIN_DOCTOR", "THERAPIST", "PHARMACIST"]}>
+          <ProtectedRoute allowedRoles={["PATIENT", "DOCTOR", "ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "THERAPIST", "PHARMACIST"]}>
             <Chat />
           </ProtectedRoute>
         }
@@ -362,7 +417,7 @@ function AppRoutes() {
       <Route
         path="/staff-chat"
         element={
-          <ProtectedRoute allowedRoles={["DOCTOR", "ADMIN", "ADMIN_DOCTOR", "THERAPIST", "PHARMACIST"]}>
+          <ProtectedRoute allowedRoles={["DOCTOR", "ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "THERAPIST", "PHARMACIST"]}>
             <StaffChat />
           </ProtectedRoute>
         }
@@ -378,7 +433,7 @@ function AppRoutes() {
       <Route
         path="/staff-schedule"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "DOCTOR", "THERAPIST"]}>
             <StaffSchedule />
           </ProtectedRoute>
         }
@@ -445,7 +500,7 @@ function AppRoutes() {
       <Route
         path="/performance-scorecards"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "DOCTOR", "THERAPIST"]}>
             <FeatureGate feature="PERFORMANCE_SCORECARDS" title="Performance Scorecards isn't enabled">
               <PerformanceScorecards />
             </FeatureGate>
@@ -455,7 +510,7 @@ function AppRoutes() {
       <Route
         path="/attendance"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PHARMACIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "THERAPIST", "PHARMACIST"]}>
             <FeatureGate feature="STAFF_ATTENDANCE" title="Staff Attendance isn't enabled">
               <AttendanceTracker />
             </FeatureGate>
@@ -465,7 +520,7 @@ function AppRoutes() {
       <Route
         path="/skill-matrix"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "DOCTOR", "THERAPIST"]}>
             <FeatureGate feature="STAFF_SKILL_MATRIX" title="Staff Skill Matrix isn't enabled">
               <SkillMatrix />
             </FeatureGate>
@@ -786,15 +841,12 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* Therapist Match is now bundled into the Skill Matrix page. The
+          old route is kept as a redirect so bookmarks and legacy
+          notification deep-links don't break. */}
       <Route
         path="/therapist-match"
-        element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
-            <FeatureGate feature="THERAPIST_SKILL_MATCHING" title="Therapist Skill Matching isn't enabled">
-              <TherapistMatchPage />
-            </FeatureGate>
-          </ProtectedRoute>
-        }
+        element={<Navigate to="/skill-matrix" replace />}
       />
       <Route
         path="/group-sessions"
@@ -807,8 +859,10 @@ function AppRoutes() {
         }
       />
 
-      <Route path="/verify-email" element={<Login />} />
-      <Route path="/reset-password" element={<Login />} />
+      <Route path="/verify-email"     element={<VerifyEmail />} />
+      <Route path="/forgot-password"  element={<ForgotPassword />} />
+      <Route path="/reset-password"   element={<ResetPassword />} />
+      <Route path="/mfa"              element={<MfaChallenge />} />
 
       {/* Super Admin — platform-level; role-gated by ProtectedRoute */}
       <Route
@@ -832,7 +886,7 @@ function AppRoutes() {
       <Route
         path="/profile"
         element={
-          <ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST", "PATIENT", "PHARMACIST"]}>
+          <ProtectedRoute allowedRoles={["SUPER_ADMIN", "ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "DOCTOR", "THERAPIST", "PATIENT", "PHARMACIST"]}>
             <ProfilePage />
           </ProtectedRoute>
         }
@@ -873,15 +927,15 @@ const App = () => (
       <AuthProvider>
         <WebSocketProvider>
           <NotificationProvider>
-            <TooltipProvider>
-              <Toaster />
-              <Sonner />
-              <ErrorBoundary>
-                <Suspense fallback={<PageLoader />}>
-                  <AppRoutes />
-                </Suspense>
-              </ErrorBoundary>
-            </TooltipProvider>
+            <NotifyProvider>
+              <TooltipProvider>
+                <ErrorBoundary>
+                  <Suspense fallback={<PageLoader />}>
+                    <AppRoutes />
+                  </Suspense>
+                </ErrorBoundary>
+              </TooltipProvider>
+            </NotifyProvider>
           </NotificationProvider>
         </WebSocketProvider>
       </AuthProvider>

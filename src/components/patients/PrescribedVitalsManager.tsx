@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 const VITAL_TYPES: Array<{ value: string; label: string; defaultUnit: string }> = [
   { value: "BP_SYSTOLIC", label: "Blood Pressure (Systolic)", defaultUnit: "mmHg" },
@@ -48,6 +49,7 @@ export function PrescribedVitalsManager({ patientId, editable = true }: Props) {
   const [frequency, setFrequency] = useState("DAILY");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
     try {
@@ -85,7 +87,13 @@ export function PrescribedVitalsManager({ patientId, editable = true }: Props) {
   };
 
   const remove = async (id: string) => {
-    if (!confirm("Remove this prescribed vital?")) return;
+    const ok = await confirm({
+      title: "Remove this prescribed vital?",
+      description: "The patient will no longer be reminded to log this vital.",
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await apiClient.delete(`/api/patients/${patientId}/prescribed-vitals/${id}`);
       toast.success("Removed");
@@ -196,6 +204,7 @@ export function PrescribedVitalsManager({ patientId, editable = true }: Props) {
           )}
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }

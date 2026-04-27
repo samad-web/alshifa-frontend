@@ -2,8 +2,6 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +14,6 @@ import {
     ChevronLeft,
     Activity,
     Stethoscope,
-    Clock,
     FileText,
     UploadCloud,
     X,
@@ -35,11 +32,6 @@ interface UploadedFile {
     fileUrl: string;
 }
 
-const SYMPTOMS_LIST = [
-    "Back Pain", "Joint Pain", "Stomach Pain", "Acid Reflux", "Skin Rash",
-    "Acne", "Headache", "Dizziness", "Anxiety", "Depression", "Cough", "Fever"
-];
-
 interface TriageQuestionnaireProps {
     onComplete: (session: any) => void;
     onCancel: () => void;
@@ -48,6 +40,11 @@ interface TriageQuestionnaireProps {
 export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnaireProps) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
+    // duration / symptoms are no longer collected via a dedicated step —
+    // the body map on Step 1 captures per-region duration, and free-text
+    // symptoms now live in the medical-history textarea on Step 2. Kept
+    // here with safe defaults so the /api/triage/submit payload shape
+    // (and the backend triage scorer that reads them) is unchanged.
     const [formData, setFormData] = useState({
         painArea: "",
         painSeverity: 0,
@@ -60,15 +57,6 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
     const [uploadedDocuments, setUploadedDocuments] = useState<UploadedFile[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const [result, setResult] = useState<any>(null);
-
-    const handleSymptomToggle = (symptom: string) => {
-        setFormData(prev => ({
-            ...prev,
-            symptoms: prev.symptoms.includes(symptom)
-                ? prev.symptoms.filter(s => s !== symptom)
-                : [...prev.symptoms, symptom]
-        }));
-    };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -119,7 +107,7 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
             });
             console.log("[Triage] Submission successful:", data);
             setResult(data);
-            setStep(4);
+            setStep(3);
             toast.success("Assessment completed successfully.");
         } catch (error: any) {
             console.error("[Triage] Network/Server error:", error);
@@ -142,10 +130,10 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
                             <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
                             <span className="truncate">Triage Assessment</span>
                         </h2>
-                        <p className="text-xs sm:text-sm text-muted-foreground">Step {step} of 4</p>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Step {step} of 3</p>
                     </div>
                     <div className="flex gap-1 shrink-0">
-                        {[1, 2, 3, 4].map(s => (
+                        {[1, 2, 3].map(s => (
                             <div
                                 key={s}
                                 className={cn(
@@ -223,49 +211,8 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
                         </div>
                     )}
 
-                    {/* Step 2: Symptoms & Duration */}
+                    {/* Step 2: Medical History & Documents */}
                     {step === 2 && (
-                        <div className="space-y-4 sm:space-y-6">
-                            <div className="space-y-1.5 sm:space-y-2">
-                                <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
-                                    <Clock className="w-4 h-4 shrink-0" />
-                                    How long have you had this?
-                                </Label>
-                                <Select value={formData.duration} onValueChange={v => setFormData({ ...formData, duration: v })}>
-                                    <SelectTrigger className="text-sm">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Less than 24 hours">Less than 24 hours</SelectItem>
-                                        <SelectItem value="1-3 days">1-3 days</SelectItem>
-                                        <SelectItem value="1 week">1 week</SelectItem>
-                                        <SelectItem value="2-4 weeks">2-4 weeks</SelectItem>
-                                        <SelectItem value="Long-term">Long-term (1 month+)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-3 sm:space-y-4">
-                                <Label className="text-sm sm:text-base font-semibold text-foreground/80">Select relevant areas of concern:</Label>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 max-h-[200px] sm:max-h-[220px] overflow-y-auto p-2.5 sm:p-3 bg-secondary/10 border border-border/50 rounded-xl">
-                                    {SYMPTOMS_LIST.map(symptom => (
-                                        <div key={symptom} className="flex items-center space-x-2">
-                                            <Checkbox
-                                                id={symptom}
-                                                checked={formData.symptoms.includes(symptom)}
-                                                onCheckedChange={() => handleSymptomToggle(symptom)}
-                                            />
-                                            <label htmlFor={symptom} className="text-xs sm:text-sm cursor-pointer select-none">
-                                                {symptom}
-                                            </label>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Step 3: Medical History & Documents */}
-                    {step === 3 && (
                         <div className="space-y-4 sm:space-y-6">
                             <div className="space-y-1.5 sm:space-y-2">
                                 <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
@@ -338,8 +285,8 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
                         </div>
                     )}
 
-                    {/* Step 4: Results */}
-                    {step === 4 && result && (
+                    {/* Step 3: Results */}
+                    {step === 3 && result && (
                         <div className="space-y-4 sm:space-y-6 animate-in zoom-in-95 duration-300">
                             <Alert className={cn(
                                 "border-2",
@@ -415,19 +362,19 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
 
                 {/* Navigation Buttons — sticky on mobile for easy thumb reach */}
                 <div className="flex justify-between items-center pt-4 sm:pt-6 border-t gap-2 sticky bottom-0 bg-card/95 backdrop-blur-sm -mx-1 px-1 pb-1 sm:static sm:bg-transparent sm:backdrop-blur-none sm:mx-0 sm:px-0 sm:pb-0">
-                    {step < 4 ? (
+                    {step < 3 ? (
                         <>
                             <Button variant="ghost" size="sm" className="text-xs sm:text-sm" onClick={step === 1 ? onCancel : prevStep}>
                                 {step === 1 ? "Cancel" : <><ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" /> Back</>}
                             </Button>
                             <Button
-                                onClick={step === 3 ? handleSubmit : nextStep}
+                                onClick={step === 2 ? handleSubmit : nextStep}
                                 disabled={loading || (step === 1 && !formData.painArea)}
                                 className="px-5 sm:px-8 font-bold text-xs sm:text-sm"
                                 size="sm"
                             >
                                 {loading ? "Analyzing..." : (
-                                    step === 3 ? "Complete Assessment" : <>Next <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 ml-1 sm:ml-2" /></>
+                                    step === 2 ? "Complete Assessment" : <>Next <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 ml-1 sm:ml-2" /></>
                                 )}
                             </Button>
                         </>

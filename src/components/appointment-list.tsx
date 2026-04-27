@@ -157,9 +157,10 @@ export function AppointmentList({
 
     const formatDateTime = (dateString: string) => {
         const date = new Date(dateString);
-        const dateStr = date.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
+        // DD/MM/YYYY per the app-wide Indian date format spec.
+        const dateStr = date.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
             year: "numeric",
         });
         const timeStr = date.toLocaleTimeString("en-US", {

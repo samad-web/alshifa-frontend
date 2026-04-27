@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -18,6 +17,7 @@ import {
   Trophy, Flame, Calendar, ArrowRight, Plus, MessageSquare, MapPin,
   Smartphone, MessageCircle, AtSign, Mail, Send, Smile, Frown, Meh,
   Heart, ChevronRight, Loader2, X, Target, Award, Wind, TrendingUp,
+  Megaphone, Pin, Info, Stethoscope, UserPlus,
 } from "lucide-react";
 import {
   enhancedDashboardApi,
@@ -28,11 +28,20 @@ import {
   type SmartMessage,
   type DashboardJourneyPhase,
   type MedicationForecast,
+  type DashboardCareTeam,
+  type CareTeamMember,
+  type CheckInPainRegion,
+  type SmartInsight,
 } from "@/services/enhancedDashboard.service";
+import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
 import { selfExamService, type SelfExamSubmission } from "@/services/selfExam.service";
+import { communicationApi } from "@/services/communication.service";
+import type { AnnouncementEntry } from "@/types";
 import { cn } from "@/lib/utils";
 import { BreathingExercise } from "@/components/wellness/BreathingExercise";
 import { VitalChart } from "@/components/vitals/VitalChart";
+import { ConsultationFeedbackPrompt } from "@/components/feedback/ConsultationFeedbackFlow";
+import { JourneyFeedbackPrompt } from "@/components/journey-feedback/JourneyFeedbackFlow";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -113,53 +122,98 @@ function SmartBanner({
 
 // ── Self-Exam Kit banner ──────────────────────────────────────────────────
 
-function SelfExamBanner({
-  submission,
-  onOpen,
-}: {
-  submission: SelfExamSubmission;
+interface SelfExamBannerProps {
+  /** null = patient has no submission yet — surface a "Start your kit" CTA. */
+  submission: SelfExamSubmission | null;
   onOpen: () => void;
-}) {
-  // Local completion count from whatever child rows were loaded by the
-  // `/mine` endpoint — we don't pull the full checklist here to keep the
-  // dashboard fast. This is a rough indicator; the full kit page recomputes.
-  const count =
-    submission.symptomHistory.length +
-    submission.tongueObservations.length +
-    submission.stoolLogs.length +
-    submission.urineLogs.length +
-    submission.romMeasurements.length +
-    submission.physicalObservations.length +
-    submission.voiceObservations.length +
-    (submission.digestiveProfile ? 1 : 0) +
-    (submission.lifestyleContext ? 1 : 0);
-  const zonesText = submission.painZones.length
-    ? submission.painZones.length === 1
-      ? "1 pain zone"
-      : `${submission.painZones.length} pain zones`
-    : "your consultation";
+}
+
+function SelfExamBanner({ submission, onOpen }: SelfExamBannerProps) {
+  // Status-driven copy + colour scheme. The empty-state (no submission) used
+  // to render nothing on the dashboard — patients had no entry point unless
+  // a triage seeded a draft for them. Now the banner is always visible while
+  // there's a relevant action to take.
+  let title: string;
+  let subtitle: string;
+  let cta: string;
+  let tone: "primary" | "info" | "success";
+
+  if (!submission) {
+    title = "Start your Self-Exam Kit";
+    subtitle = "Capture pre-consultation observations (tongue, stool, voice, range of motion). Your Vaidya reviews these before your visit.";
+    cta = "Begin kit";
+    tone = "primary";
+  } else if (submission.status === "DRAFT") {
+    const count =
+      submission.symptomHistory.length +
+      submission.tongueObservations.length +
+      submission.stoolLogs.length +
+      submission.urineLogs.length +
+      submission.romMeasurements.length +
+      submission.physicalObservations.length +
+      submission.voiceObservations.length +
+      (submission.digestiveProfile ? 1 : 0) +
+      (submission.lifestyleContext ? 1 : 0);
+    const zonesText = submission.painZones.length
+      ? submission.painZones.length === 1
+        ? "1 pain zone"
+        : `${submission.painZones.length} pain zones`
+      : "your consultation";
+    title = "Complete your Self-Exam Kit";
+    subtitle = `Pre-consultation observations for ${zonesText}${
+      count > 0 ? ` — ${count} captured so far` : " — nothing captured yet"
+    }. Your Vaidya will review before the appointment.`;
+    cta = "Open kit";
+    tone = "primary";
+  } else if (submission.status === "SUBMITTED") {
+    title = "Self-Exam Kit submitted";
+    subtitle = "Your Vaidya has been notified and will review your observations before the appointment.";
+    cta = "View kit";
+    tone = "info";
+  } else {
+    // REVIEWED
+    title = "Vaidya reviewed your Self-Exam Kit";
+    subtitle = submission.reviewNotes
+      ? "Open the kit to see the Vaidya's notes."
+      : "Your observations were reviewed before your consultation.";
+    cta = "View notes";
+    tone = "success";
+  }
+
+  const toneClass = tone === "primary"
+    ? "border-teal-300 bg-teal-50 text-teal-900"
+    : tone === "info"
+      ? "border-sky-300 bg-sky-50 text-sky-900"
+      : "border-emerald-300 bg-emerald-50 text-emerald-900";
+  const iconToneClass = tone === "primary"
+    ? "text-teal-700"
+    : tone === "info"
+      ? "text-sky-700"
+      : "text-emerald-700";
+  const buttonToneClass = tone === "primary"
+    ? "bg-teal-700 hover:bg-teal-800 text-white"
+    : tone === "info"
+      ? "bg-sky-700 hover:bg-sky-800 text-white"
+      : "bg-emerald-700 hover:bg-emerald-800 text-white";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="rounded-2xl border-2 border-teal-300 bg-teal-50 text-teal-900 p-4 flex items-start gap-3"
+      className={cn("rounded-2xl border-2 p-4 flex items-start gap-3", toneClass)}
     >
       <div className="mt-0.5">
-        <Sparkles className="h-5 w-5 text-teal-700" />
+        {tone === "success"
+          ? <CheckCircle2 className={cn("h-5 w-5", iconToneClass)} />
+          : <Sparkles className={cn("h-5 w-5", iconToneClass)} />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-semibold leading-tight">
-          Complete your Self-Exam Kit
-        </p>
-        <p className="text-sm text-teal-800/90 mt-0.5">
-          Pre-consultation observations for {zonesText}
-          {count > 0 ? ` — ${count} captured so far` : " — nothing captured yet"}.
-          Your Vaidya will review before the appointment.
-        </p>
+        <p className="font-semibold leading-tight">{title}</p>
+        <p className="text-sm opacity-90 mt-0.5">{subtitle}</p>
       </div>
-      <Button size="sm" onClick={onOpen} className="flex-shrink-0 bg-teal-700 hover:bg-teal-800 text-white">
-        Open kit
+      <Button size="sm" onClick={onOpen} className={cn("flex-shrink-0", buttonToneClass)}>
+        {cta}
         <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
       </Button>
     </motion.div>
@@ -242,20 +296,27 @@ function CheckInModal({
   open,
   onClose,
   onSubmit,
+  initialStep = 1,
 }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (body: {
     mood: "TERRIBLE" | "LOW" | "OKAY" | "GOOD" | "GREAT";
-    painLevel: number;
+    painRegions: CheckInPainRegion[];
     sleepQuality: "POOR" | "FAIR" | "GOOD" | "GREAT";
   }) => Promise<void>;
+  /** When the modal is opened from the Pain Map "+ Add" button we land
+   *  the patient straight on the body-map step rather than starting at
+   *  mood selection. Mood / sleep still need to be filled to submit. */
+  initialStep?: 1 | 2 | 3;
 }) {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState<1 | 2 | 3>(initialStep);
   const [mood, setMood] = useState<string | null>(null);
-  const [pain, setPain] = useState(3);
+  const [painRegions, setPainRegions] = useState<CheckInPainRegion[]>([]);
   const [sleep, setSleep] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [insight, setInsight] = useState<SmartInsight | null>(null);
+  const [prefillSource, setPrefillSource] = useState<"check_in" | "triage" | null>(null);
 
   const moods = [
     { key: "TERRIBLE", label: "Terrible", icon: <Frown className="h-7 w-7" />, color: "text-rose-500" },
@@ -266,15 +327,47 @@ function CheckInModal({
   ];
   const sleepOpts = ["POOR", "FAIR", "GOOD", "GREAT"];
 
-  const reset = () => { setStep(1); setMood(null); setPain(3); setSleep(null); };
+  const reset = () => { setStep(initialStep); setMood(null); setPainRegions([]); setSleep(null); setInsight(null); setPrefillSource(null); };
 
   const close = () => { reset(); onClose(); };
+
+  // Pre-populate the body map from the patient's most recent recorded
+  // pain regions (latest check-in → triage fallback). Returning patients
+  // see their previous selection so they only need to adjust rather than
+  // re-enter from scratch. Insight is fetched in parallel and rendered
+  // beneath the body map on Step 2.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [last, ins] = await Promise.all([
+          enhancedDashboardApi.getLastPainRegions(),
+          enhancedDashboardApi.getInsight().catch(() => null),
+        ]);
+        if (cancelled) return;
+        setPainRegions(Array.isArray(last.painRegions) ? last.painRegions : []);
+        setPrefillSource(last.source);
+        setInsight(ins);
+      } catch {
+        // Pre-population is best-effort — modal still works without it.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  // Reset internal step when the modal is reopened (so a freshly-mounted
+  // CheckInModal that was triggered by "+ Add Pain Point" lands on the
+  // body-map step, not whatever the previous open ended on).
+  useEffect(() => {
+    if (open) setStep(initialStep);
+  }, [open, initialStep]);
 
   const submit = async () => {
     if (!mood || !sleep) return;
     setSubmitting(true);
     try {
-      await onSubmit({ mood, painLevel: pain, sleepQuality: sleep });
+      await onSubmit({ mood: mood as never, painRegions, sleepQuality: sleep as never });
       toast.success("+20 Zen Points · Check-in saved");
       close();
     } catch (err) {
@@ -284,16 +377,15 @@ function CheckInModal({
     }
   };
 
-  // Insight inline (optional contextual hint)
-  const painInsight = pain >= 7
-    ? "High pain reported — your doctor will see this immediately."
-    : pain >= 4
-      ? "Tip: regular breathing exercises reduce mid-range pain over time."
-      : "Looking good. Keep moving.";
+  const insightToneClass = insight?.severity === "HIGH"
+    ? "border-rose-300 bg-rose-50 text-rose-900"
+    : insight?.severity === "MEDIUM"
+      ? "border-amber-300 bg-amber-50 text-amber-900"
+      : "border-blue-300 bg-blue-50 text-blue-900";
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Daily check-in · Step {step} of 3</DialogTitle>
           <DialogDescription>
@@ -325,18 +417,38 @@ function CheckInModal({
 
           {step === 2 && (
             <motion.div key="s2" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
-              <p className="text-sm font-medium mb-1">Pain level (0–10)</p>
-              <p className="text-xs text-muted-foreground mb-4">0 = none, 10 = worst imaginable</p>
-              <div className="flex items-center gap-4 mb-3">
-                <Slider value={[pain]} onValueChange={(v) => setPain(v[0])} min={0} max={10} step={1} className="flex-1" />
-                <div className="w-12 text-center">
-                  <span className="text-2xl font-bold tabular-nums">{pain}</span>
+              <p className="text-base font-semibold mb-1">Where do you hurt today?</p>
+              <p className="text-xs text-muted-foreground mb-3">
+                Tap the areas where you feel pain and rate each one.
+                {prefillSource === "check_in" && " We've pre-filled your last check-in — tap any region to adjust."}
+                {prefillSource === "triage" && " We've pre-filled from your last triage session — adjust as needed."}
+              </p>
+
+              <BodyMapPainSelector
+                initialPainRegions={painRegions}
+                onChange={setPainRegions}
+                showDuration={false}
+              />
+
+              {painRegions.length === 0 && (
+                <p className="text-[11px] text-muted-foreground text-center mt-3">
+                  No pain today? You can submit with no regions selected.
+                </p>
+              )}
+
+              {/* Region-specific insight surfaced beneath the body map */}
+              {insight && (
+                <div className={cn(
+                  "mt-3 rounded-lg border p-3 flex items-start gap-2",
+                  insightToneClass,
+                )}>
+                  <Sparkles className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold leading-tight">{insight.title}</p>
+                    <p className="text-xs leading-snug mt-0.5">{insight.message}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-lg bg-muted/40 p-3 flex items-start gap-2">
-                <Sparkles className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-muted-foreground">{painInsight}</p>
-              </div>
+              )}
             </motion.div>
           )}
 
@@ -362,19 +474,19 @@ function CheckInModal({
         </AnimatePresence>
 
         <div className="flex items-center justify-between pt-2">
-          <Button variant="ghost" size="sm" onClick={() => (step > 1 ? setStep(step - 1) : close())}>
+          <Button variant="ghost" size="sm" onClick={() => (step > 1 ? setStep((step - 1) as 1 | 2 | 3) : close())}>
             {step > 1 ? "Back" : "Cancel"}
           </Button>
           {step < 3 ? (
             <Button
               size="sm"
-              onClick={() => setStep(step + 1)}
-              disabled={(step === 1 && !mood) || step === 2 ? false : false}
+              onClick={() => setStep((step + 1) as 1 | 2 | 3)}
+              disabled={step === 1 && !mood}
             >
               Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           ) : (
-            <Button size="sm" onClick={submit} disabled={!sleep || submitting}>
+            <Button size="sm" onClick={submit} disabled={!mood || !sleep || submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
               Submit
             </Button>
@@ -851,13 +963,32 @@ function ZenCard({
 
 // ── Pain Map Card ─────────────────────────────────────────────────────────
 
+/** Format an ISO timestamp as DD/MM/YYYY HH:MM in the user's local time —
+ *  matches the doctor-side "Last updated" formatting requirement. */
+function formatLastUpdated(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
 function PainMapCard({
   painMap,
   onAdd,
 }: {
   painMap: DashboardSummary["painMap"];
+  /** Opens the unified Daily Check-In modal directly at the body-map
+   *  step. Replaces the previous lightweight inline region selector so
+   *  every pain update is saved as a full DailyCheckIn record. */
   onAdd: () => void;
 }) {
+  const lastUpdated = formatLastUpdated(painMap.lastUpdated);
+  const hasData = (painMap.regionsRaw?.length ?? 0) > 0;
+
   return (
     <Card>
       <CardHeader className="pb-3 flex flex-row items-center justify-between">
@@ -866,89 +997,25 @@ function PainMapCard({
           Pain map
         </CardTitle>
         <Button variant="ghost" size="sm" onClick={onAdd} className="h-7 px-2 text-xs">
-          <Plus className="h-3 w-3 mr-1" /> Add
+          <Plus className="h-3 w-3 mr-1" /> Add Pain Point
         </Button>
       </CardHeader>
-      <CardContent className="pt-0">
-        {painMap.regions.length === 0 ? (
+      <CardContent className="pt-0 space-y-2">
+        {!hasData ? (
           <p className="text-sm text-muted-foreground text-center py-3">No active pain points logged.</p>
         ) : (
-          <div className="space-y-2">
-            {painMap.regions.map((r, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <span className="text-sm w-24 truncate">{r.region}</span>
-                <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-2 rounded-full",
-                      r.severity > 6 ? "bg-rose-500" : r.severity > 3 ? "bg-amber-500" : "bg-emerald-500",
-                    )}
-                    style={{ width: `${(r.severity / 10) * 100}%` }}
-                  />
-                </div>
-                <span className="text-xs font-semibold w-6 text-right">{r.severity}</span>
-              </div>
-            ))}
-          </div>
+          <BodyMapPainSelector
+            initialPainRegions={painMap.regionsRaw ?? []}
+            readOnly
+          />
+        )}
+        {lastUpdated && hasData && (
+          <p className="text-[10px] text-muted-foreground text-right">
+            Last updated {lastUpdated}
+          </p>
         )}
       </CardContent>
     </Card>
-  );
-}
-
-// ── Pain log dialog ───────────────────────────────────────────────────────
-
-function PainLogDialog({
-  open, onClose, onSubmit,
-}: {
-  open: boolean; onClose: () => void;
-  onSubmit: (body: { region: string; severity: number }) => Promise<void>;
-}) {
-  const [region, setRegion] = useState("");
-  const [severity, setSeverity] = useState(5);
-  const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { if (open) { setRegion(""); setSeverity(5); } }, [open]);
-
-  const submit = async () => {
-    if (!region.trim()) return;
-    setSubmitting(true);
-    try {
-      await onSubmit({ region: region.trim(), severity });
-      toast.success("Pain point recorded · doctor notified");
-      onClose();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to log pain");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Log pain region</DialogTitle>
-          <DialogDescription>Updates your pain map and notifies your care team.</DialogDescription>
-        </DialogHeader>
-        <Input
-          value={region}
-          onChange={(e) => setRegion(e.target.value)}
-          placeholder="e.g. Lower back, Right knee"
-          autoFocus
-        />
-        <div>
-          <p className="text-xs font-medium mb-2">Severity: <span className="font-bold">{severity}/10</span></p>
-          <Slider value={[severity]} onValueChange={(v) => setSeverity(v[0])} min={0} max={10} step={1} />
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={submit} disabled={submitting || !region.trim()}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-            Save
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -1087,6 +1154,301 @@ function MedicationSupplyCard({
   );
 }
 
+// ── Announcements (mirrors /announcements but read-only & compact) ───────
+
+const ANNOUNCEMENT_PRIORITY: Record<
+  string,
+  { label: string; tone: string; Icon: React.ElementType }
+> = {
+  URGENT: { label: "Urgent", tone: "bg-red-100 text-red-700 border-red-200", Icon: AlertCircle },
+  HIGH:   { label: "High",   tone: "bg-orange-100 text-orange-700 border-orange-200", Icon: AlertCircle },
+  NORMAL: { label: "Normal", tone: "bg-blue-100 text-blue-700 border-blue-200", Icon: Info },
+  LOW:    { label: "Low",    tone: "bg-gray-100 text-gray-600 border-gray-200", Icon: Info },
+};
+
+function announcementTimeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
+// ── Care Team card ────────────────────────────────────────────────────────
+//
+// Surfaces the patient's active care assignments. Always visible in the
+// right rail so the patient can see at a glance who their primary doctor is
+// and any consulting / temporary fall-backs. The empty state nudges them to
+// flag the missing assignment with admin — surfacing this absence is more
+// useful than hiding it.
+
+function CareTeamMemberRow({
+  member,
+  emphasized,
+}: {
+  member: CareTeamMember;
+  emphasized: boolean;
+}) {
+  const initials = (member.doctor.fullName || "Dr")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("") || "DR";
+  const roleLabel =
+    member.type === "PRIMARY" ? "Primary Vaidya"
+      : member.type === "TEMPORARY" ? "Covering today"
+      : "Consulting";
+  const roleClass =
+    member.type === "PRIMARY" ? "bg-primary/10 text-primary border-primary/30"
+      : member.type === "TEMPORARY" ? "bg-amber-100 text-amber-800 border-amber-300"
+      : "bg-muted text-muted-foreground border-border";
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 p-3 rounded-xl border",
+        emphasized ? "border-primary/40 bg-primary/5" : "border-border/60",
+      )}
+    >
+      <div
+        className={cn(
+          "w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden",
+          emphasized ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+        )}
+      >
+        {member.doctor.profilePhoto ? (
+          <img src={member.doctor.profilePhoto} alt={member.doctor.fullName ?? ""} className="h-full w-full object-cover" />
+        ) : (
+          initials
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold truncate">
+            Dr. {member.doctor.fullName || "Unnamed"}
+          </p>
+          <span
+            className={cn(
+              "text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+              roleClass,
+            )}
+          >
+            {roleLabel}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground truncate">
+          {member.doctor.specialization || member.doctor.qualification || "Specialisation on file"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CareTeamCard({ careTeam }: { careTeam: DashboardCareTeam }) {
+  const hasPrimary = !!careTeam.primary;
+  const hasAdditional = careTeam.additional.length > 0;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 flex flex-row items-center justify-between">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Stethoscope className="h-4 w-4 text-primary" />
+          Your care team
+        </CardTitle>
+        {careTeam.primary && (
+          <span className="text-[11px] text-muted-foreground">
+            Assigned {new Date(careTeam.primary.assignedAt).toLocaleDateString()}
+          </span>
+        )}
+      </CardHeader>
+      <CardContent className="pt-0 space-y-2">
+        {hasPrimary ? (
+          <CareTeamMemberRow member={careTeam.primary!} emphasized />
+        ) : (
+          <div className="rounded-xl border border-dashed border-border/70 p-4 text-center space-y-2">
+            <UserPlus className="h-5 w-5 text-muted-foreground mx-auto" />
+            <p className="text-sm font-medium">No primary doctor assigned yet</p>
+            <p className="text-xs text-muted-foreground">
+              Your clinic admin will assign a Vaidya before your next consultation.
+            </p>
+          </div>
+        )}
+        {hasAdditional && careTeam.additional.map((member) => (
+          <CareTeamMemberRow key={member.assignmentId} member={member} emphasized={false} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AnnouncementsCard() {
+  const [items, setItems] = useState<AnnouncementEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<AnnouncementEntry | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    communicationApi
+      .getAnnouncements({ limit: 10 })
+      .then(({ announcements }) => {
+        if (cancelled) return;
+        const sorted = [...announcements].sort((a, b) => {
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+        setItems(sorted.slice(0, 4));
+      })
+      .catch(() => { /* silent — empty state covers it */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const unreadCount = items.filter((a) => !a.isRead).length;
+
+  // Open the popup AND mark as read optimistically. Failure to persist the
+  // read state is silently swallowed — the user still sees the content.
+  const openAnnouncement = (entry: AnnouncementEntry) => {
+    setSelected(entry);
+    if (!entry.isRead) {
+      setItems((prev) =>
+        prev.map((a) => (a.id === entry.id ? { ...a, isRead: true } : a)),
+      );
+      communicationApi.markAnnouncementRead(entry.id).catch(() => { /* silent */ });
+    }
+  };
+
+  const selectedCfg = selected
+    ? ANNOUNCEMENT_PRIORITY[selected.priority] || ANNOUNCEMENT_PRIORITY.NORMAL
+    : null;
+  const SelectedIcon = selectedCfg?.Icon;
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Megaphone className="h-4 w-4 text-primary" />
+            Announcements
+            {unreadCount > 0 && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 h-5">
+                {unreadCount} new
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-2">
+          {loading ? (
+            <>
+              <Skeleton className="h-14 w-full rounded-lg" />
+              <Skeleton className="h-14 w-full rounded-lg" />
+            </>
+          ) : items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+              <Megaphone className="h-8 w-8 mb-1 opacity-40" />
+              <p className="text-xs">No announcements right now</p>
+            </div>
+          ) : (
+            items.map((a) => {
+              const cfg = ANNOUNCEMENT_PRIORITY[a.priority] || ANNOUNCEMENT_PRIORITY.NORMAL;
+              const PIcon = cfg.Icon;
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => openAnnouncement(a)}
+                  className={cn(
+                    "w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/50",
+                    !a.isRead ? "border-l-4 border-l-blue-500 bg-blue-50/30" : "border-border",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                    <Badge className={cn(cfg.tone, "border text-[10px] px-1.5 py-0 h-4")}>
+                      <PIcon className="h-2.5 w-2.5 mr-1" />
+                      {cfg.label}
+                    </Badge>
+                    {a.isPinned && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                        <Pin className="h-2.5 w-2.5 mr-1" />
+                        Pinned
+                      </Badge>
+                    )}
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-1 ml-auto">
+                      <Clock className="h-2.5 w-2.5" />
+                      {announcementTimeAgo(a.createdAt)}
+                    </span>
+                  </div>
+                  <p className="font-medium text-sm leading-snug line-clamp-1">{a.title}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                    {a.message}
+                  </p>
+                </button>
+              );
+            })
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          {selected && selectedCfg && SelectedIcon && (
+            <>
+              <DialogHeader>
+                <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                  <Badge className={cn(selectedCfg.tone, "border text-xs")}>
+                    <SelectedIcon className="h-3 w-3 mr-1" />
+                    {selectedCfg.label}
+                  </Badge>
+                  {selected.isPinned && (
+                    <Badge variant="secondary" className="text-xs">
+                      <Pin className="h-3 w-3 mr-1" />
+                      Pinned
+                    </Badge>
+                  )}
+                </div>
+                <DialogTitle className="text-lg leading-snug">
+                  {selected.title}
+                </DialogTitle>
+                <DialogDescription className="flex items-center gap-2 text-xs flex-wrap pt-1">
+                  <span>{selected.authorName || "Admin"}</span>
+                  <span className="text-muted-foreground/40">|</span>
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {announcementTimeAgo(selected.createdAt)}
+                  </span>
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-2 text-sm whitespace-pre-wrap leading-relaxed">
+                {selected.message}
+              </div>
+              {selected.branches && selected.branches.length > 0 && (
+                <div className="mt-3 pt-3 border-t flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                  <span className="font-medium">Branches:</span>
+                  {selected.branches.map((b) => (
+                    <Badge key={b.id} variant="outline" className="text-[10px]">
+                      {b.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setSelected(null)}>
+                  Close
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 
 export default function EnhancedPatientDashboard() {
@@ -1097,11 +1459,20 @@ export default function EnhancedPatientDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCheckIn, setShowCheckIn] = useState(false);
+  // The body-map step of the check-in is also the entry point for ad-hoc
+  // pain updates: clicking "+ Add Pain Point" on the Pain Map card opens
+  // the same modal but lands directly on Step 2 instead of mood selection.
+  const [checkInInitialStep, setCheckInInitialStep] = useState<1 | 2 | 3>(1);
   const [showVitalLog, setShowVitalLog] = useState<string | null>(null);
-  const [showPainLog, setShowPainLog] = useState(false);
   const [showBreathing, setShowBreathing] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
-  const [selfExamDraft, setSelfExamDraft] = useState<SelfExamSubmission | null>(null);
+  // Latest relevant self-exam submission (DRAFT > SUBMITTED > REVIEWED).
+  // `null` means the patient has no submission at all — the banner then
+  // surfaces a "Start your kit" CTA instead of staying hidden.
+  const [selfExam, setSelfExam] = useState<SelfExamSubmission | null>(null);
+  // Only flip to true once the /mine fetch resolves so we don't flash the
+  // empty-state banner for a beat while the request is in flight.
+  const [selfExamLoaded, setSelfExamLoaded] = useState(false);
   const [forecasts, setForecasts] = useState<MedicationForecast[]>([]);
   const [refillingId, setRefillingId] = useState<string | null>(null);
   const medsRef = useRef<HTMLDivElement>(null);
@@ -1153,22 +1524,26 @@ export default function EnhancedPatientDashboard() {
 
   useEffect(() => { load(); loadForecasts(); }, [load, loadForecasts]);
 
-  // Load the most recent self-exam submission (if any) to decide whether to
-  // surface a banner. Best-effort — any failure is silent so the rest of the
-  // dashboard keeps rendering.
+  // Load the most relevant self-exam submission so we can surface the right
+  // banner state. Priority: DRAFT (still working on it) > SUBMITTED (waiting
+  // for review) > REVIEWED (Vaidya finished). When nothing exists the banner
+  // renders a "Start your kit" CTA so the patient has an entry point.
+  // Best-effort — any failure is silent and the dashboard keeps rendering.
   useEffect(() => {
     let cancelled = false;
     selfExamService
       .mine()
       .then((list) => {
         if (cancelled) return;
-        const draft =
+        const pick =
           list.find((s) => s.status === "DRAFT") ??
           list.find((s) => s.status === "SUBMITTED") ??
+          list.find((s) => s.status === "REVIEWED") ??
           null;
-        setSelfExamDraft(draft);
+        setSelfExam(pick);
+        setSelfExamLoaded(true);
       })
-      .catch(() => { /* silent */ });
+      .catch(() => { setSelfExamLoaded(true); /* still render the empty CTA */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -1280,13 +1655,37 @@ export default function EnhancedPatientDashboard() {
         {/* ── Smart Banner ───────────────────────────────────────────── */}
         <SmartBanner banner={data.banner} onAction={dispatch} />
 
-        {/* ── Self-Exam Kit banner (only while a DRAFT exists) ──────── */}
-        {selfExamDraft && selfExamDraft.status === "DRAFT" && (
+        {/* ── Post-consultation feedback prompt (4-question flow) ───── */}
+        <ConsultationFeedbackPrompt />
+
+        {/* ── End-of-journey feedback (full-screen takeover, 7 stages) ──
+            Self-contained: checks /api/feedback/journey/available on mount
+            and opens itself when a pending row exists. Renders nothing
+            otherwise. */}
+        <JourneyFeedbackPrompt />
+
+        {/* ── Self-Exam Kit banner — always shown once the /mine fetch
+            resolves. Empty state surfaces a "Start your kit" CTA, the
+            other states reflect submission progress. ─────────────── */}
+        {selfExamLoaded && (
           <SelfExamBanner
-            submission={selfExamDraft}
+            submission={selfExam}
             onOpen={() => navigate("/self-exam")}
           />
         )}
+
+        {/* ── Vitals — pinned to the top of the dashboard so today's
+            log-status is the first thing the patient sees. Full-width
+            above the two-column grid; the vitalsRef stays on the wrapper
+            so the SCROLL_TO_VITALS dispatch still targets it. ──────── */}
+        <div ref={vitalsRef}>
+          <VitalsTiles
+            vitals={data.vitals.items}
+            journeyId={data.journey?.id ?? null}
+            onLog={(t) => setShowVitalLog(t)}
+            onOpenBreathing={() => setShowBreathing(true)}
+          />
+        </div>
 
         {/* ── Two-column grid ────────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1316,20 +1715,16 @@ export default function EnhancedPatientDashboard() {
               onRequestRefill={handleRequestRefill}
             />
 
-            <div ref={vitalsRef}>
-              <VitalsTiles
-                vitals={data.vitals.items}
-                journeyId={data.journey?.id ?? null}
-                onLog={(t) => setShowVitalLog(t)}
-                onOpenBreathing={() => setShowBreathing(true)}
-              />
-            </div>
-
-            <PainMapCard painMap={data.painMap} onAdd={() => setShowPainLog(true)} />
+            <PainMapCard
+              painMap={data.painMap}
+              onAdd={() => { setCheckInInitialStep(2); setShowCheckIn(true); }}
+            />
           </div>
 
           {/* Right column — context + rewards */}
           <div className="space-y-4">
+            <CareTeamCard careTeam={data.careTeam} />
+            <AnnouncementsCard />
             <ZenCard zen={data.zen} onActOnChallenge={dispatch} />
             <SmartMessagesPanel messages={data.smartMessages} channels={data.channels} />
             <TreatmentJourneyCard journey={data.journey} />
@@ -1344,7 +1739,8 @@ export default function EnhancedPatientDashboard() {
       {/* ── Modals & overlays ───────────────────────────────────────── */}
       <CheckInModal
         open={showCheckIn}
-        onClose={() => setShowCheckIn(false)}
+        initialStep={checkInInitialStep}
+        onClose={() => { setShowCheckIn(false); setCheckInInitialStep(1); }}
         onSubmit={async (body) => {
           await enhancedDashboardApi.submitCheckIn(body);
           await load();
@@ -1357,15 +1753,6 @@ export default function EnhancedPatientDashboard() {
         vitalType={showVitalLog}
         onSubmit={async (body) => {
           await enhancedDashboardApi.quickLogVital(body);
-          await load();
-        }}
-      />
-
-      <PainLogDialog
-        open={showPainLog}
-        onClose={() => setShowPainLog(false)}
-        onSubmit={async (body) => {
-          await enhancedDashboardApi.logPainPoint(body);
           await load();
         }}
       />

@@ -70,6 +70,21 @@ export interface RosterEntry {
   currentPhase: string | null;
 }
 
+export interface GroupSessionTask {
+  id: string;
+  title: string;
+  sessionType: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: 'OPEN' | 'FULL' | 'COMPLETED' | 'CANCELLED';
+  maxCapacity: number;
+  enrolledCount: number;
+  room: { id: string; name: string } | null;
+  therapist: { id: string; fullName: string | null } | null;
+  branchId: string;
+}
+
 export interface DoctorDashboardSummary {
   greeting: Greeting;
   stats: {
@@ -86,6 +101,7 @@ export interface DoctorDashboardSummary {
   };
   careGaps: CareGapAlert[];
   roster: RosterEntry[];
+  groupSessions: GroupSessionTask[];
   todos: TodoSummary;
   performance: {
     xp: XPProfile | null;

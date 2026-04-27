@@ -48,6 +48,10 @@ export function ClientBookingModal({
     const [triageSessionId, setTriageSessionId] = useState<string | null>(null);
     const [triageResult, setTriageResult] = useState<any>(null);
     const [suggestedSlot, setSuggestedSlot] = useState<string | null>(null);
+    // When true the patient has tapped "Change branch" — we expand the
+    // full branch grid. Default false so the Branch step shows only the
+    // registered branch with a "Change branch" affordance below it.
+    const [changingBranch, setChangingBranch] = useState(false);
     // Self-exam kit preview — auto-created by the triage hook.
     const [selfExamBundle, setSelfExamBundle] = useState<SelfExamBundle | null>(null);
     const [loadingSelfExam, setLoadingSelfExam] = useState(false);
@@ -74,8 +78,11 @@ export function ClientBookingModal({
             setStep(initialBranchId ? "type" : "branch");
             setTriageSessionId(null);
             setTriageResult(null);
+            // Pre-seed branchId with the patient's registered branch so the
+            // Continue button on the locked-in branch view already has a
+            // value to commit. URL-passed initialBranchId still wins.
             setFormData({
-                branchId: initialBranchId ?? "",
+                branchId: initialBranchId ?? profile?.branchId ?? "",
                 consultationType: "DOCTOR",
                 consultationMode: "OFFLINE",
                 doctorId: "",
@@ -84,8 +91,9 @@ export function ClientBookingModal({
                 notes: "",
             });
             setSuggestedSlot(null);
+            setChangingBranch(false);
         }
-    }, [isOpen, initialBranchId]);
+    }, [isOpen, initialBranchId, profile?.branchId]);
 
     // Fetch staff when entering the clinician step or when branchId changes while on it.
     // No longer depends on date/slot because clinician is now chosen BEFORE date selection.
@@ -267,34 +275,97 @@ export function ClientBookingModal({
                 </div>
 
                 <div className="p-5 space-y-6">
-                    {step === "branch" && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                            <Label className="text-base font-bold text-foreground">Select a Branch</Label>
-                            <div className="grid gap-2.5">
-                                {branches.map((b) => (
-                                    <button
-                                        key={b.id}
-                                        onClick={() => {
-                                            setFormData({ ...formData, branchId: b.id });
-                                            nextStep();
-                                        }}
-                                        className={cn(
-                                            "flex items-center gap-3.5 p-3.5 rounded-lg border transition-all hover:border-primary/50 hover:bg-primary/5 text-left",
-                                            formData.branchId === b.id ? "border-primary bg-primary/5 shadow-sm" : "border-border"
-                                        )}
-                                    >
+                    {step === "branch" && (() => {
+                        // Default-and-confirm flow: when the patient has a
+                        // registered branch and hasn't tapped "Change branch",
+                        // show only that branch as a locked-in card with a
+                        // Continue button. The full branch grid is one tap
+                        // away via the "Change branch" link below it.
+                        const registeredBranch = profile?.branchId
+                            ? branches.find((b) => b.id === profile.branchId)
+                            : null;
+                        const showRegisteredOnly = !changingBranch && !!registeredBranch;
+
+                        if (showRegisteredOnly) {
+                            return (
+                                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                                    <Label className="text-base font-bold text-foreground">Your Branch</Label>
+                                    <div className="flex items-center gap-3.5 p-3.5 rounded-lg border border-primary bg-primary/5 shadow-sm">
                                         <div className="p-2 bg-primary/10 rounded-md text-primary">
                                             <MapPin className="w-5 h-5" />
                                         </div>
-                                        <div>
-                                            <p className="text-sm font-bold">{b.name}</p>
-                                            <p className="text-[11px] text-muted-foreground">{b.address}</p>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-bold">{registeredBranch.name}</p>
+                                            <p className="text-[11px] text-muted-foreground">{registeredBranch.address}</p>
+                                            <p className="text-[10px] text-primary font-semibold mt-0.5 uppercase tracking-wider">Your registered branch</p>
                                         </div>
-                                    </button>
-                                ))}
+                                    </div>
+                                    <div className="flex items-center justify-between gap-3 pt-1">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-xs text-muted-foreground hover:text-foreground"
+                                            onClick={() => setChangingBranch(true)}
+                                        >
+                                            Change branch
+                                        </Button>
+                                        <Button
+                                            onClick={() => {
+                                                setFormData({ ...formData, branchId: registeredBranch.id });
+                                                nextStep();
+                                            }}
+                                        >
+                                            Continue <ChevronRight className="w-4 h-4 ml-1" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-base font-bold text-foreground">
+                                        {registeredBranch ? "Select a Different Branch" : "Select a Branch"}
+                                    </Label>
+                                    {registeredBranch && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                                            onClick={() => setChangingBranch(false)}
+                                        >
+                                            <ChevronLeft className="w-3 h-3 mr-1" />
+                                            Use my branch
+                                        </Button>
+                                    )}
+                                </div>
+                                <div className="grid gap-2.5">
+                                    {branches.map((b) => (
+                                        <button
+                                            key={b.id}
+                                            onClick={() => {
+                                                setFormData({ ...formData, branchId: b.id });
+                                                nextStep();
+                                            }}
+                                            className={cn(
+                                                "flex items-center gap-3.5 p-3.5 rounded-lg border transition-all hover:border-primary/50 hover:bg-primary/5 text-left",
+                                                formData.branchId === b.id ? "border-primary bg-primary/5 shadow-sm" : "border-border"
+                                            )}
+                                        >
+                                            <div className="p-2 bg-primary/10 rounded-md text-primary">
+                                                <MapPin className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-bold">{b.name}</p>
+                                                <p className="text-[11px] text-muted-foreground">{b.address}</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
                     {step === "type" && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
                             <Label className="text-base font-bold text-foreground">How would you like to meet your doctor?</Label>

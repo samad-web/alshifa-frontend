@@ -14,6 +14,16 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, ArrowRight, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const STATUS_COLOR: Record<HospitalStatus, string> = {
   ACTIVE: "bg-emerald-100 text-emerald-900",
@@ -31,6 +41,11 @@ const PLAN_COLOR: Record<HospitalPlan, string> = {
 export default function HospitalList() {
   const [hospitals, setHospitals] = useState<HospitalListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // Suspend prompt — replaces native window.prompt with an in-app modal so
+  // the reason capture matches the rest of the platform's UI.
+  const [suspendTarget, setSuspendTarget] = useState<HospitalListItem | null>(null);
+  const [suspendReason, setSuspendReason] = useState("");
+  const [suspending, setSuspending] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -42,14 +57,23 @@ export default function HospitalList() {
   };
   useEffect(load, []);
 
-  const handleSuspend = async (id: string) => {
-    const reason = window.prompt("Reason for suspension (optional):");
+  const handleSuspend = (h: HospitalListItem) => {
+    setSuspendTarget(h);
+    setSuspendReason("");
+  };
+
+  const submitSuspend = async () => {
+    if (!suspendTarget) return;
+    setSuspending(true);
     try {
-      await superAdminApi.suspendHospital(id, reason ?? undefined);
+      await superAdminApi.suspendHospital(suspendTarget.id, suspendReason.trim() || undefined);
       toast.success("Hospital suspended. Active sessions revoked.");
+      setSuspendTarget(null);
       load();
     } catch (e: any) {
       toast.error(e?.message ?? "Failed to suspend");
+    } finally {
+      setSuspending(false);
     }
   };
 
@@ -122,7 +146,7 @@ export default function HospitalList() {
                     <TableCell>{new Date(h.createdAt).toLocaleDateString()}</TableCell>
                     <TableCell className="space-x-2 text-right">
                       {h.status === "ACTIVE" ? (
-                        <Button size="sm" variant="outline" onClick={() => handleSuspend(h.id)}>
+                        <Button size="sm" variant="outline" onClick={() => handleSuspend(h)}>
                           <Pause className="mr-1 h-3 w-3" /> Suspend
                         </Button>
                       ) : h.status === "SUSPENDED" ? (
@@ -143,6 +167,33 @@ export default function HospitalList() {
           </Table>
         </div>
       )}
+
+      <Dialog open={!!suspendTarget} onOpenChange={(o) => !o && !suspending && setSuspendTarget(null)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Suspend {suspendTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              All active sessions for this hospital will be revoked immediately. Add a reason for the audit log if useful.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="suspendReason">Reason (optional)</Label>
+            <Input
+              id="suspendReason"
+              placeholder="e.g. Non-payment, security review, contract pause…"
+              value={suspendReason}
+              onChange={(e) => setSuspendReason(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setSuspendTarget(null)} disabled={suspending}>Cancel</Button>
+            <Button variant="destructive" onClick={submitSuspend} disabled={suspending}>
+              {suspending ? "Suspending…" : "Suspend hospital"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

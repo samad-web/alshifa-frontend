@@ -16,10 +16,24 @@ export const operationsApi = {
 
   async createSharingRequest(data: {
     userId: string; fromBranchId: string; toBranchId: string;
-    date: string; startTime: string; endTime: string; reason?: string;
+    date: string; endDate?: string; startTime: string; endTime: string; reason?: string;
   }): Promise<ResourceSharingEntry> {
     const { data: result } = await apiClient.post<ResourceSharingEntry>('/api/operations/resource-sharing', data);
     return result;
+  },
+
+  async updateSharingRequest(id: string, patch: Partial<{
+    date: string; endDate: string | null;
+    startTime: string; endTime: string; reason: string | null;
+    fromBranchId: string; toBranchId: string;
+  }>): Promise<ResourceSharingEntry> {
+    const { data } = await apiClient.patch<ResourceSharingEntry>(`/api/operations/resource-sharing/${id}`, patch);
+    return data;
+  },
+
+  async deleteSharingRequest(id: string): Promise<{ id: string; deleted: true }> {
+    const { data } = await apiClient.delete<{ id: string; deleted: true }>(`/api/operations/resource-sharing/${id}`);
+    return data;
   },
 
   async getSharingRequests(params?: { branchId?: string; status?: string }): Promise<ResourceSharingEntry[]> {

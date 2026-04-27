@@ -44,18 +44,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     const fetchNotifications = async () => {
         try {
-            const { data } = await apiClient.get<{ notifications: NotificationApiItem[]; unreadCount: number }>(
-                '/api/notifications', { take: 50 }
-            );
-            setNotifications(data.notifications.map((n) => ({
+            // Backend returns `{ data, total, page, limit, totalPages, unreadCount }`.
+            // Reading `data.notifications` (the previous shape) silently produced
+            // undefined and crashed the .map() — hidden by the catch — so the bell
+            // never populated even though the API was healthy.
+            const { data } = await apiClient.get<{
+                data: NotificationApiItem[];
+                total: number;
+                unreadCount: number;
+            }>('/api/notifications', { take: 50 });
+            const list = Array.isArray(data?.data) ? data.data : [];
+            setNotifications(list.map((n) => ({
                 ...n,
                 timestamp: new Date(n.createdAt),
                 read: n.isRead,
                 priority: (n.priority as Notification['priority']) || 'INFO',
             })));
-            setUnreadCount(data.unreadCount);
-        } catch {
-            // Silently ignore — notifications are non-critical; will retry on next mount
+            setUnreadCount(data?.unreadCount ?? 0);
+        } catch (err) {
+            // Log so the failure isn't fully invisible if it recurs.
+            console.warn('[NotificationContext] Failed to load notifications', err);
         }
     };
 

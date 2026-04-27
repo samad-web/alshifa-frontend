@@ -99,9 +99,60 @@ export interface DashboardZen {
   pointsEarnedToday: number;
 }
 
+/** Single pain region as captured by the body-map step of the daily
+ *  check-in. Mirrors the structure persisted in DailyCheckIn.painRegions
+ *  and TriageSession.painRegions. */
+export interface CheckInPainRegion {
+  regionId: string;
+  regionLabel: string;
+  intensity: number;
+  characters: string[];
+  radiates?: boolean;
+  radiatesTo?: string;
+  duration?: string;
+}
+
 export interface DashboardPainMap {
+  /** Simplified shape kept for the legacy severity-bar tile layout. */
   regions: Array<{ region: string; severity: number }>;
+  /** Full structured regions for the BodyMapPainSelector renderer. */
+  regionsRaw: CheckInPainRegion[];
   lastUpdated: string | null;
+}
+
+export interface SmartInsight {
+  id: string;
+  title: string;
+  message: string;
+  severity: "HIGH" | "MEDIUM" | "INFO";
+  regionId?: string;
+}
+
+export interface LastPainRegionsResponse {
+  painRegions: CheckInPainRegion[];
+  source: "check_in" | "triage" | null;
+  recordedAt: string | null;
+}
+
+export type AssignmentType = "PRIMARY" | "CONSULTING" | "TEMPORARY";
+
+export interface CareTeamMember {
+  assignmentId: string;
+  type: AssignmentType;
+  assignedAt: string;
+  doctor: {
+    id: string;
+    fullName: string | null;
+    specialization: string | null;
+    qualification: string | null;
+    profilePhoto: string | null;
+    email: string | null;
+  };
+}
+
+export interface DashboardCareTeam {
+  primary: CareTeamMember | null;
+  additional: CareTeamMember[];
 }
 
 export interface SmartMessage {
@@ -126,6 +177,7 @@ export interface DashboardSummary {
   zen: DashboardZen;
   painMap: DashboardPainMap;
   smartMessages: SmartMessage[];
+  careTeam: DashboardCareTeam;
   channels: {
     emailEnabled: boolean;
     smsEnabled: boolean;
@@ -145,11 +197,28 @@ export const enhancedDashboardApi = {
 
   submitCheckIn(body: {
     mood: "TERRIBLE" | "LOW" | "OKAY" | "GOOD" | "GREAT";
-    painLevel: number;
+    /** Body-map pain regions captured in Step 2. Empty array = no pain
+     *  today (a valid, saveable state). */
+    painRegions: CheckInPainRegion[];
+    /** Legacy scalar — derived server-side from painRegions when the body
+     *  map is non-empty, but still accepted for compatibility. */
+    painLevel?: number;
     sleepQuality: "POOR" | "FAIR" | "GOOD" | "GREAT";
     notes?: string;
   }): Promise<unknown> {
     return apiClient.post("/api/patient/dashboard/check-in", body).then((r) => r.data);
+  },
+
+  getLastPainRegions(): Promise<LastPainRegionsResponse> {
+    return apiClient
+      .get<LastPainRegionsResponse>("/api/patient/dashboard/last-pain-regions")
+      .then((r) => r.data);
+  },
+
+  getInsight(): Promise<SmartInsight | null> {
+    return apiClient
+      .get<SmartInsight | null>("/api/patient/dashboard/insight")
+      .then((r) => r.data);
   },
 
   markMedicationTaken(prescriptionId: string, slot: MedSlot): Promise<unknown> {

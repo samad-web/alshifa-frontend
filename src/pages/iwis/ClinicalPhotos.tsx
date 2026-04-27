@@ -17,10 +17,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { useBranchScope } from "@/hooks/useBranchScope";
 
-function patientBranchId(p: any): string | null {
-    return p?.branchId ?? p?.user?.branchId ?? null;
-}
-
 const CATEGORIES: PhotoCategory[] = ["SKIN_CONDITION", "SWELLING_OEDEMA", "WOUND_HEALING", "WEIGHT_CHANGE", "GENERAL_PROGRESS"];
 const STAGES: PhotoStage[] = ["BEFORE", "DURING", "AFTER"];
 const CAT_LABEL: Record<PhotoCategory, string> = {
@@ -51,17 +47,41 @@ export default function ClinicalPhotosPage() {
         notes: "",
     });
 
+    // Reload the patient roster whenever the navbar branch scope changes.
+    // We pass `branchId` server-side so the dropdown only shows patients
+    // assigned to the active branch — the previous client-side filter was
+    // brittle (depended on a typed-out `branchId` field that wasn't in
+    // the typed shape and silently fell through when the API call failed).
     useEffect(() => {
         if (isClinician) {
-            apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-patients")
-                .then(({ data }) => setPatients(data)).catch(() => {});
+            const params = branchIdParam ? { branchId: branchIdParam } : undefined;
+            apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-patients", params)
+                .then(({ data }) => {
+                    setPatients(Array.isArray(data) ? data : []);
+                })
+                .catch((err) => {
+                    setPatients([]);
+                    toast({
+                        title: "Couldn't load patients",
+                        description: err instanceof Error ? err.message : "Try refreshing the page.",
+                        variant: "destructive",
+                    });
+                });
         } else {
             // Patient views their own photos
             apiClient.get<{ patient?: { id: string } | null }>("/api/user/me")
                 .then(({ data }) => setPatientId(data?.patient?.id || user?.id || ""))
                 .catch(() => {});
         }
-    }, [isClinician, user]);
+    }, [isClinician, user, branchIdParam, toast]);
+
+    // Clear the picked patient when the navbar branch changes — the
+    // previously selected patient may not belong to the new branch.
+    useEffect(() => {
+        if (isClinician && patientId && !patients.some((p) => p.id === patientId)) {
+            setPatientId("");
+        }
+    }, [isClinician, patientId, patients]);
 
     const reload = useCallback(async () => {
         if (!patientId) return;
@@ -110,22 +130,31 @@ export default function ClinicalPhotosPage() {
                     </Button>
                 </PageHeader>
 
-                {isClinician && (() => {
-                    const scopedPatients = branchIdParam
-                        ? patients.filter((p) => patientBranchId(p) === branchIdParam)
-                        : patients;
-                    return (
-                        <div className="flex items-center gap-3">
-                            <User className="w-4 h-4 text-muted-foreground" />
-                            <Select value={patientId} onValueChange={setPatientId}>
-                                <SelectTrigger className="w-[320px]"><SelectValue placeholder="Select patient" /></SelectTrigger>
-                                <SelectContent>
-                                    {scopedPatients.map((p) => <SelectItem key={p.id} value={p.id}>{p.fullName || "Unnamed"}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    );
-                })()}
+                {isClinician && (
+                    <div className="flex items-center gap-3">
+                        <User className="w-4 h-4 text-muted-foreground" />
+                        <Select value={patientId} onValueChange={setPatientId}>
+                            <SelectTrigger className="w-[320px]">
+                                <SelectValue placeholder={
+                                    patients.length === 0
+                                        ? (branchIdParam ? "No patients in this branch" : "No patients available")
+                                        : "Select patient"
+                                } />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {patients.length === 0 ? (
+                                    <div className="px-2 py-3 text-xs text-muted-foreground">
+                                        No patients found{branchIdParam ? " in the current branch" : ""}.
+                                    </div>
+                                ) : (
+                                    patients.map((p) => (
+                                        <SelectItem key={p.id} value={p.id}>{p.fullName || "Unnamed"}</SelectItem>
+                                    ))
+                                )}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
 
                 {!patientId ? (
                     <div className="py-16 text-center text-muted-foreground">Select a patient to view photos.</div>

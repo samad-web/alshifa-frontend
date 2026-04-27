@@ -22,6 +22,7 @@ import {
 import { branchesApi } from "@/services/branches.service";
 import TodoPanel, { AssignedByMePanel } from "@/components/todo/TodoPanel";
 import { useBranchScope, ALL_BRANCHES } from "@/hooks/useBranchScope";
+import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -91,7 +92,7 @@ export default function DoctorAdminDashboard() {
         {/* SECTION A — Header + Branch Scope Switcher */}
         <header className="flex items-start justify-between flex-wrap gap-3">
           <PageHeader
-            title={`${greetingPrefix()}, Dr. ${name} — Admin Doctor`}
+            title={`${greetingPrefix()}, Dr. ${name}`}
             subtitle={new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
           />
           <div className="flex items-center gap-2">
@@ -300,6 +301,10 @@ export default function DoctorAdminDashboard() {
             awards for the clinicians they manage. */}
         <TodoPanel canAssign title="My Tasks" />
         <AssignedByMePanel />
+
+        {/* Public thank-you cards from completed journeys. Self-hides when
+            no PUBLIC letters exist in the lookback window. */}
+        <RecognitionPanel />
 
         {/* SECTION F — Performance Analytics (replaces gamification oversight).
             Data-centric view of clinical throughput: top performers by

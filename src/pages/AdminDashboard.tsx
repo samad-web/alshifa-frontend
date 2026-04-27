@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import {
   Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift, CheckCircle2,
-  Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse,
+  Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse, Bell, RefreshCw, Loader2, Download,
 } from "lucide-react";
 import {
   dashboardSummaryApi,
@@ -19,12 +19,50 @@ import {
 } from "@/services/dashboardSummary.service";
 import TodoPanel, { AssignedByMePanel } from "@/components/todo/TodoPanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { apiClient } from "@/lib/api-client";
+import { iwisApi } from "@/services/iwis.service";
+import { describeActivity, formatRelative, type ActivityFeedItem } from "@/lib/auditActivity";
 
 export default function AdminDashboard() {
   const { toast } = useToast();
   const { branchIdParam } = useBranchScope();
   const [summary, setSummary] = useState<AdminDashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  // Pending diet-package count — surfaced inline as an operational alert so
+  // admins immediately see PENDING reviews on dashboard load. Best-effort:
+  // silent when the diet-prescription feature flag is off for this hospital.
+  const [pendingDietCount, setPendingDietCount] = useState(0);
+  useEffect(() => {
+    iwisApi.listDietPackages({ status: "PENDING" })
+      .then((list) => setPendingDietCount(Array.isArray(list) ? list.length : 0))
+      .catch(() => setPendingDietCount(0));
+  }, [branchIdParam]);
+
+  const handleExportUsers = async () => {
+    setExporting(true);
+    try {
+      const params = branchIdParam ? { branchId: branchIdParam, format: 'csv' } : { format: 'csv' };
+      const blob = await apiClient.getBlob('/api/user/export', params);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `users-export-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Export ready', description: 'CSV download started.' });
+    } catch (err) {
+      toast({
+        title: 'Export failed',
+        description: err instanceof Error ? err.message : 'Could not generate CSV',
+        variant: 'destructive',
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   async function refresh() {
     setLoading(true);
@@ -71,12 +109,24 @@ export default function AdminDashboard() {
         {/* SECTION A — Header + System Status */}
         <header className="flex items-start justify-between flex-wrap gap-3">
           <PageHeader
-            title={`${greetingPrefix}, ${summary.greeting.name} — Administrator`}
+            title={`${greetingPrefix}, ${summary.greeting.name}`}
             subtitle={new Date().toLocaleString(undefined, { weekday: "long", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
           />
-          <Badge className={cn("text-white", healthColor)}>
-            <ShieldAlert className="w-3 h-3 mr-1" /> {healthStatus}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportUsers}
+              disabled={exporting}
+              className="gap-2"
+            >
+              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Export Users
+            </Button>
+            <Badge className={cn("text-white", healthColor)}>
+              <ShieldAlert className="w-3 h-3 mr-1" /> {healthStatus}
+            </Badge>
+          </div>
         </header>
 
         {/* SECTION B — System-wide KPIs. Each card links to the full-detail
@@ -153,8 +203,16 @@ export default function AdminDashboard() {
               action={<Link to="/gamification-analytics" className="text-xs text-primary hover:underline">Investigate →</Link>}
               visible={summary.systemHealth.unresolvedAnomalies > 0}
             />
+            <AlertRow
+              icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}
+              title="Diet Packages Awaiting Review"
+              detail={`${pendingDietCount} diet package${pendingDietCount === 1 ? "" : "s"} pending approval`}
+              action={<Link to="/diet-packages" className="text-xs text-primary hover:underline">Review →</Link>}
+              visible={pendingDietCount > 0}
+            />
             {summary.systemHealth.pendingRewards === 0 &&
-              summary.systemHealth.unresolvedAnomalies === 0 && (
+              summary.systemHealth.unresolvedAnomalies === 0 &&
+              pendingDietCount === 0 && (
                 <div className="p-6 text-center text-sm text-muted-foreground">
                   <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-emerald-500" />
                   No active alerts.
@@ -162,6 +220,9 @@ export default function AdminDashboard() {
               )}
           </div>
         </section>
+
+        {/* SECTION C3 — Recent Activity Feed (system-wide audit-log surface) */}
+        <ActivityFeedSection />
 
         {/* SECTION D — Branch Health */}
         <section className="rounded-xl border bg-card shadow-card overflow-hidden">
@@ -335,5 +396,89 @@ function AlertRow({ icon, title, detail, action, visible }: {
       </div>
       {action}
     </div>
+  );
+}
+
+/**
+ * Recent Updates / Activity Feed widget.
+ *
+ * Pulls from /api/audit-logs/recent which surfaces the latest hospital-scoped
+ * AuditLog rows. Refreshes on mount and via a 60s polling interval — the
+ * polling cadence is conservative so a busy clinic doesn't pay a query cost
+ * each second; admins can always hit Refresh manually.
+ */
+function ActivityFeedSection() {
+  const [items, setItems] = useState<ActivityFeedItem[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await apiClient.get<ActivityFeedItem[]>("/api/audit-logs/recent", { limit: 20 });
+      setItems(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load activity");
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  return (
+    <section className="rounded-xl border bg-card shadow-card overflow-hidden">
+      <div className="px-5 py-3 border-b flex items-center justify-between">
+        <h2 className="font-semibold flex items-center gap-2">
+          <Bell className="w-5 h-5 text-primary" />
+          Recent Updates
+        </h2>
+        <Button size="sm" variant="ghost" onClick={load} disabled={loading} className="h-7 px-2 text-xs">
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          <span className="ml-1.5">Refresh</span>
+        </Button>
+      </div>
+      <div className="divide-y max-h-[360px] overflow-y-auto">
+        {loading && !items ? (
+          <div className="p-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading activity…
+          </div>
+        ) : error ? (
+          <div className="p-6 text-center text-sm text-destructive">{error}</div>
+        ) : !items || items.length === 0 ? (
+          <div className="p-6 text-center text-sm text-muted-foreground">
+            <CheckCircle2 className="w-5 h-5 mx-auto mb-1 text-emerald-500" />
+            No activity recorded yet.
+          </div>
+        ) : (
+          items.map((it) => {
+            const { verb, subject } = describeActivity(it);
+            return (
+              <div key={it.id} className="px-5 py-3 flex items-start justify-between gap-3 hover:bg-muted/20">
+                <div className="min-w-0">
+                  <div className="text-sm">
+                    <span className="font-semibold">{it.actor.name || "System"}</span>
+                    <span className="text-muted-foreground"> {verb}</span>
+                    {subject && (
+                      <span className="text-muted-foreground"> — {subject}</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                    <Badge variant="outline" className="text-[9px] py-0 px-1.5">{it.actor.role}</Badge>
+                    <span>· {formatRelative(it.createdAt)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
   );
 }

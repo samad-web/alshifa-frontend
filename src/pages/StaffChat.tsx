@@ -33,6 +33,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { MessagesTabs } from "@/components/chat/MessagesTabs";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { branchesApi } from "@/services/branches.service";
 import {
@@ -56,6 +57,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 const MANAGE_ROLES = new Set(["ADMIN", "ADMIN_DOCTOR"]);
 
@@ -231,6 +233,7 @@ export default function StaffChat() {
 
   return (
     <AppLayout>
+      <MessagesTabs />
       <PageTransition className="container max-w-7xl mx-auto px-4 py-6">
         <PageHeader
           title="Team Messages"
@@ -707,6 +710,7 @@ function ManageMembersDialog({
   const [users, setUsers] = useState<AddressableUser[]>([]);
   const [search, setSearch] = useState("");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => {
     if (!open) return;
@@ -737,7 +741,15 @@ function ManageMembersDialog({
   }
 
   async function remove(userId: string, name: string, isAuto: boolean) {
-    if (isAuto && !confirm(`${name} is an auto-included admin doctor for oversight. Remove anyway?`)) return;
+    if (isAuto) {
+      const ok = await confirm({
+        title: `Remove ${name}?`,
+        description: `${name} is an auto-included admin doctor for oversight. Removing them disables that oversight for this group.`,
+        confirmLabel: "Remove anyway",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
     setBusyUserId(userId);
     try {
       await staffChatApi.removeMember(detail.id, userId);
@@ -844,7 +856,13 @@ function ManageMembersDialog({
               variant="outline"
               className="text-red-600"
               onClick={async () => {
-                if (!confirm("Archive this group? Existing messages remain visible to members but no new messages can be sent.")) return;
+                const ok = await confirm({
+                  title: "Archive this group?",
+                  description: "Existing messages remain visible to members, but no new messages can be sent. This can be reversed by an admin from the database.",
+                  confirmLabel: "Archive",
+                  tone: "danger",
+                });
+                if (!ok) return;
                 try {
                   await staffChatApi.archive(detail.id);
                   toast({ title: "Group archived" });
@@ -863,6 +881,7 @@ function ManageMembersDialog({
             </Button>
           </DialogFooter>
         )}
+        {confirmDialog}
       </DialogContent>
     </Dialog>
   );

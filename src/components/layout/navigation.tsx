@@ -6,7 +6,6 @@ import {
   Heart,
   Activity,
   Menu,
-  X,
   LogOut,
   FilePlus2,
   CalendarDays,
@@ -19,19 +18,18 @@ import {
   Trophy,
   Users,
   Megaphone,
-  Phone,
   ArrowRightLeft,
   ClipboardCheck,
-  Clock,
   Shield,
   Sparkles,
   Swords,
   Gift,
   GraduationCap,
   Star,
-  Map,
+  // Aliased — `Map` would shadow the built-in `Map` constructor used by
+  // the dropdown's section bucketing.
+  Map as MapIcon,
   Flame,
-  Lock,
   Home,
   FileText,
   Sprout,
@@ -41,12 +39,12 @@ import {
   Salad,
   Camera,
   ImageIcon,
-  ChevronRight,
   ClipboardList,
   HeartPulse,
+  MoreHorizontal,
   LucideIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth, AppRole } from "@/hooks/useAuth";
 import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
@@ -55,13 +53,15 @@ import { BranchScopeSwitcher } from "@/components/layout/BranchScopeSwitcher";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
-type NavLeaf = { path: string; label: string; icon: LucideIcon; featureKey?: string };
+type NavLeaf = { path: string; label: string; icon: LucideIcon; featureKey?: string; section?: string };
 type NavGroup = { label: string; icon: LucideIcon; items: NavLeaf[]; featureKey?: string };
 type NavEntry = NavLeaf | NavGroup;
 
@@ -78,7 +78,6 @@ const PATH_TO_FEATURE: Record<string, string> = {
   "/therapy-rooms":       "THERAPY_ROOM_MANAGEMENT",
   "/treatment-packages":  "TREATMENT_PACKAGES",
   "/group-sessions":      "GROUP_SESSIONS",
-  "/therapist-match":     "THERAPIST_SKILL_MATCHING",
   "/clinical-photos":     "CLINICAL_PHOTOS",
   "/diet-prescriptions":  "DIET_PRESCRIPTION",
   "/diet-packages":       "DIET_PRESCRIPTION",
@@ -116,23 +115,12 @@ const PATH_TO_FEATURE: Record<string, string> = {
   "/critical-journey":  "CRITICAL_JOURNEY_DASHBOARD",
 };
 
-/**
- * Match the current pathname against a nav leaf's path. Exact match for
- * top-level entries like "/" or "/chat"; otherwise prefix match so deep
- * sub-routes (e.g. `/pharmacy/orders/123`) still highlight their parent
- * nav entry (`/pharmacy/orders`).
- */
 function pathMatchesNav(pathname: string, navPath: string): boolean {
   if (navPath === "/") return pathname === "/";
   if (pathname === navPath) return true;
   return pathname.startsWith(navPath + "/");
 }
 
-/**
- * When multiple nav leaves prefix-match the pathname (e.g. `/pharmacy` and
- * `/pharmacy/orders` both match `/pharmacy/orders`), pick the longest — so
- * only the most-specific entry lights up as active.
- */
 function bestMatchingPath(pathname: string, paths: string[]): string | null {
   let best: string | null = null;
   for (const p of paths) {
@@ -142,11 +130,6 @@ function bestMatchingPath(pathname: string, paths: string[]): string | null {
   return best;
 }
 
-/**
- * Filter nav items by the tenant's enabled feature set. Disabled features are
- * removed from nav entirely; direct URL access still hits the route but is
- * caught by <FeatureGate> which renders the "contact admin to upgrade" screen.
- */
 function filterNavByFeatures(items: NavEntry[], has: (key: string) => boolean): NavEntry[] {
   return items
     .map((entry) => {
@@ -155,7 +138,6 @@ function filterNavByFeatures(items: NavEntry[], has: (key: string) => boolean): 
           const key = PATH_TO_FEATURE[leaf.path];
           return !key || has(key);
         });
-        // Collapse the group entirely if every item got filtered out.
         return keptItems.length ? { ...entry, items: keptItems } : null;
       }
       const key = PATH_TO_FEATURE[entry.path];
@@ -164,8 +146,6 @@ function filterNavByFeatures(items: NavEntry[], has: (key: string) => boolean): 
     .filter((e): e is NavEntry => e !== null);
 }
 
-// Role-based grouped navigation. Top-level entries are either direct links
-// or dropdown groups that collapse related destinations.
 const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
   switch (role) {
     case "ADMIN":
@@ -191,7 +171,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/therapy-rooms", label: "Therapy Rooms", icon: DoorOpen },
             { path: "/treatment-packages", label: "Packages", icon: Package },
             { path: "/group-sessions", label: "Group Sessions", icon: Users },
-            { path: "/therapist-match", label: "Match Therapist", icon: Sparkles },
             { path: "/clinical-photos", label: "Clinical Photos", icon: Camera },
           ],
         },
@@ -203,7 +182,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/staff-activity", label: "Staff Activity", icon: Users },
             { path: "/performance-scorecards", label: "Scorecards", icon: ClipboardCheck },
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays },
-            { path: "/skill-matrix", label: "Skill Matrix", icon: Shield },
+            { path: "/skill-matrix", label: "Skill Matrix & Match", icon: Shield },
           ],
         },
         {
@@ -214,7 +193,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/pharmacy/orders", label: "Orders", icon: ShoppingCart },
             { path: "/pharmacy/inventory", label: "Inventory", icon: Package },
             { path: "/pharmacy/dispense", label: "Dispense", icon: ShoppingCart },
-            { path: "/pharmacy/history", label: "History", icon: History },
+            { path: "/pharmacy/history", label: "Dispense History", icon: History },
           ],
         },
         {
@@ -258,7 +237,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2, section: "Records" },
             { path: "/diet-prescriptions", label: "Diet Plans", icon: Salad, section: "Records" },
             { path: "/diet-packages", label: "Diet Package Reviews", icon: Salad, section: "Records" },
-            { path: "/journey-builder", label: "Journey Builder", icon: Map, section: "Records" },
+            { path: "/journey-builder", label: "Journey Builder", icon: MapIcon, section: "Records" },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText, section: "Records" },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck, section: "Records" },
             { path: "/self-exam-review", label: "Self-Exam Review", icon: ClipboardList, section: "Records" },
@@ -271,7 +250,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/therapy-rooms", label: "Therapy Rooms", icon: DoorOpen },
             { path: "/treatment-packages", label: "Packages", icon: Package },
             { path: "/group-sessions", label: "Group Sessions", icon: Users },
-            { path: "/therapist-match", label: "Match Therapist", icon: Sparkles },
             { path: "/clinical-photos", label: "Clinical Photos", icon: Camera },
           ],
         },
@@ -283,12 +261,12 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/staff-activity", label: "Staff Activity", icon: Users, section: "Staff" },
             { path: "/performance-scorecards", label: "Scorecards", icon: ClipboardCheck, section: "Staff" },
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays, section: "Staff" },
-            { path: "/skill-matrix", label: "Skill Matrix", icon: Shield, section: "Staff" },
+            { path: "/skill-matrix", label: "Skill Matrix & Match", icon: Shield, section: "Staff" },
             { path: "/pharmacy", label: "Pharmacy Dashboard", icon: Stethoscope, section: "Pharmacy" },
             { path: "/pharmacy/orders", label: "Orders", icon: ShoppingCart, section: "Pharmacy" },
             { path: "/pharmacy/inventory", label: "Inventory", icon: Package, section: "Pharmacy" },
             { path: "/pharmacy/dispense", label: "Dispense", icon: ShoppingCart, section: "Pharmacy" },
-            { path: "/pharmacy/history", label: "History", icon: History, section: "Pharmacy" },
+            { path: "/pharmacy/history", label: "Dispense History", icon: History, section: "Pharmacy" },
             { path: "/resource-sharing", label: "Resource Sharing", icon: ArrowRightLeft, section: "Operations" },
             { path: "/centralized-inventory", label: "Inventory HQ", icon: Package, section: "Operations" },
             { path: "/announcements", label: "Announcements", icon: Megaphone, section: "Operations" },
@@ -298,10 +276,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/critical-journey", label: "Critical Journey", icon: HeartPulse, section: "Operations" },
           ],
         },
-        // Admin doctor supervises the gamification program without
-        // participating — all oversight surfaces are included here so they
-        // have full visibility into XP, challenges, rewards, leaderboards,
-        // and achievements of the clinicians they manage.
         {
           label: "Engagement",
           icon: Trophy,
@@ -324,6 +298,31 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           ],
         },
       ];
+    case "BRANCH_ADMIN":
+      return [
+        { path: "/branch-admin", label: "Dashboard", icon: Stethoscope },
+        { path: "/branch-admin/staff", label: "Staff Directory", icon: Users },
+        {
+          label: "Patients",
+          icon: User,
+          items: [
+            { path: "/assign-patient", label: "Assign Patient", icon: User },
+            { path: "/manage-users", label: "View Users", icon: Users },
+          ],
+        },
+        {
+          label: "Operations",
+          icon: Briefcase,
+          items: [
+            { path: "/attendance", label: "Attendance", icon: ClipboardCheck },
+            { path: "/branch-admin/scorecards", label: "Scorecards", icon: Trophy },
+            { path: "/branch-admin/skill-matrix", label: "Skill Matrix", icon: Shield },
+            { path: "/staff-schedule", label: "Schedule", icon: CalendarDays },
+          ],
+        },
+        { path: "/chat", label: "Chat", icon: MessageSquare },
+        { path: "/staff-chat", label: "Team Chat", icon: Users },
+      ];
     case "DOCTOR":
       return [
         { path: "/doctor", label: "Dashboard", icon: User },
@@ -335,11 +334,10 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
             { path: "/diet-prescriptions", label: "Diet Plans", icon: Salad },
             { path: "/diet-packages", label: "Diet Packages", icon: Salad },
-            { path: "/journey-builder", label: "Journey Builder", icon: Map },
+            { path: "/journey-builder", label: "Journey Builder", icon: MapIcon },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck },
             { path: "/self-exam-review", label: "Self-Exam Review", icon: ClipboardList },
-            { path: "/message-templates", label: "Message Templates", icon: MessageSquare },
           ],
         },
         {
@@ -348,7 +346,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/clinical-photos", label: "Clinical Photos", icon: Camera },
             { path: "/treatment-packages", label: "Packages", icon: Package },
-            { path: "/therapist-match", label: "Match Therapist", icon: Sparkles },
+            { path: "/skill-matrix", label: "Therapist Match", icon: Sparkles },
             { path: "/group-sessions", label: "Group Sessions", icon: Users },
           ],
         },
@@ -372,8 +370,11 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           ],
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
+        // Patient + team chats are surfaced as tabs inside `/chat`, so the
+        // doctor sidebar carries only one entry. The /staff-chat route is
+        // still mounted (and reachable from the in-page tab strip) for
+        // direct deep links from notifications.
         { path: "/chat", label: "Chat", icon: MessageSquare },
-        { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
     case "THERAPIST":
       return [
@@ -385,7 +386,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
             { path: "/diet-packages", label: "Diet Packages", icon: Salad },
-            { path: "/journey-builder", label: "Journey Builder", icon: Map },
+            { path: "/journey-builder", label: "Journey Builder", icon: MapIcon },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck },
           ],
@@ -442,15 +443,11 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           label: "Engagement",
           icon: Trophy,
           items: [
-            { path: "/health-quests", label: "Quests", icon: Map },
+            { path: "/health-quests", label: "Quests", icon: MapIcon },
             { path: "/health-avatar", label: "My Companion", icon: Sprout },
             { path: "/social-proof", label: "Streaks", icon: Flame },
-            { path: "/health-content", label: "Content Library", icon: Lock },
           ],
         },
-        { path: "/announcements", label: "Announcements", icon: Megaphone },
-        { path: "/contact-clinics", label: "Contact Clinics", icon: Phone },
-        { path: "/chat", label: "Chat", icon: MessageSquare },
       ];
     case "PHARMACIST":
       return [
@@ -458,7 +455,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         { path: "/pharmacy/orders", label: "Manage Orders", icon: ShoppingCart },
         { path: "/pharmacy/inventory", label: "Inventory", icon: Package },
         { path: "/pharmacy/dispense", label: "Dispense", icon: ShoppingCart },
-        { path: "/pharmacy/history", label: "History", icon: History },
+        { path: "/pharmacy/history", label: "Dispense History", icon: History },
         { path: "/chat", label: "Chat", icon: MessageSquare },
         { path: "/staff-chat", label: "Team Chat", icon: Users },
       ];
@@ -467,19 +464,114 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
   }
 };
 
-/**
- * Desktop nav dropdown that opens on hover with a short grace period so the
- * user can move from the trigger to the menu without it closing. Click still
- * works (Radix flips `open` via `onOpenChange`, which we mirror to state).
- */
-function HoverNavGroup({
+// ─────────────────────────────────────────────────────────────────────────────
+// Adaptive overflow: measures the available width of the nav row and decides
+// how many top-level entries can render visibly. Anything that doesn't fit is
+// returned as `overflow` so it can be rendered behind a "More" dropdown — this
+// replaces the old horizontal-scroll fallback, which felt cramped and made the
+// overflowed entries effectively invisible.
+// ─────────────────────────────────────────────────────────────────────────────
+function useOverflowSplit(items: NavEntry[]): {
+  containerRef: React.RefObject<HTMLDivElement>;
+  ghostRef: React.RefObject<HTMLDivElement>;
+  visibleCount: number;
+} {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(items.length);
+
+  // Re-measure when the item set changes (role switch, feature flag toggle).
+  const itemsKey = useMemo(
+    () => items.map((e) => (isGroup(e) ? `g:${e.label}` : `l:${e.path}`)).join("|"),
+    [items],
+  );
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const ghost = ghostRef.current;
+    if (!container || !ghost) return;
+
+    const GAP = 4;          // matches `gap-1` between items
+    const MORE_BTN_WIDTH = 92; // approximate width reserved for the "More ▾" trigger
+
+    const measure = () => {
+      const containerWidth = container.clientWidth;
+      if (containerWidth === 0) return;
+      const children = Array.from(ghost.children) as HTMLElement[];
+      if (children.length === 0) return;
+
+      // First pass: can everything fit without reserving space for "More"?
+      let total = 0;
+      for (let i = 0; i < children.length; i++) {
+        total += children[i].getBoundingClientRect().width + (i > 0 ? GAP : 0);
+      }
+      if (total <= containerWidth) {
+        setVisibleCount(items.length);
+        return;
+      }
+
+      // Second pass: reserve room for the "More" trigger and pack what fits.
+      const budget = containerWidth - MORE_BTN_WIDTH;
+      let used = 0;
+      let count = 0;
+      for (let i = 0; i < children.length; i++) {
+        const w = children[i].getBoundingClientRect().width + (i > 0 ? GAP : 0);
+        if (used + w > budget) break;
+        used += w;
+        count++;
+      }
+      setVisibleCount(Math.max(0, count));
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [items.length, itemsKey]);
+
+  return { containerRef, ghostRef, visibleCount };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Direct-link nav pill. Underline accent + soft tint = unmistakable active
+// state without shouting at the user.
+// ─────────────────────────────────────────────────────────────────────────────
+function NavLinkPill({ entry, pathname }: { entry: NavLeaf; pathname: string }) {
+  const Icon = entry.icon;
+  const isActive = pathMatchesNav(pathname, entry.path);
+  return (
+    <Link
+      to={entry.path}
+      className={cn(
+        "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        isActive
+          ? "bg-primary/10 text-primary font-semibold after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-primary after:rounded-full"
+          : "text-muted-foreground hover:text-foreground hover:bg-secondary/60",
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span>{entry.label}</span>
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group dropdown: click-to-toggle (primary) with hover-to-open as enhancement
+// (with a 150ms grace period so users can travel from trigger to menu without
+// it closing). Mega-menu lays items out as a column-grouped list — sections
+// become column captions, items render full-width inside their column for
+// clean scannability.
+// ─────────────────────────────────────────────────────────────────────────────
+function NavGroupDropdown({
   entry,
-  active,
   pathname,
+  triggerClassName,
+  showLabel = true,
 }: {
   entry: NavGroup;
-  active: boolean;
   pathname: string;
+  triggerClassName?: string;
+  showLabel?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -490,7 +582,7 @@ function HoverNavGroup({
       closeTimer.current = null;
     }
   };
-  const openNow = () => {
+  const openOnHover = () => {
     cancelClose();
     setOpen(true);
   };
@@ -500,80 +592,245 @@ function HoverNavGroup({
   };
 
   const GroupIcon = entry.icon;
-
-  // Pick the single best-matching leaf inside this group so prefix-matched
-  // parents don't light up alongside their children (e.g. "/pharmacy" stays
-  // dim when the user is on "/pharmacy/orders"). The trigger surfaces that
-  // leaf's label so it's obvious which section-child you're in without
-  // opening the dropdown.
+  const active = entry.items.some((item) => pathMatchesNav(pathname, item.path));
   const activeLeafPath = bestMatchingPath(pathname, entry.items.map((i) => i.path));
   const activeLeaf = entry.items.find((i) => i.path === activeLeafPath) ?? null;
+
+  // Bucket items by section. Items without a section land in "" which renders
+  // without a caption.
+  const sections = useMemo(() => {
+    const buckets = new Map<string, NavLeaf[]>();
+    for (const item of entry.items) {
+      const key = item.section ?? "";
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(item);
+    }
+    return Array.from(buckets.entries());
+  }, [entry.items]);
+
+  // Two columns when there are >= 2 sections OR > 6 items in a single section.
+  const useTwoColumns =
+    sections.length >= 2 || (sections[0]?.[1].length ?? 0) > 6;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger
-        onPointerEnter={openNow}
+        onPointerEnter={openOnHover}
         onPointerLeave={closeSoon}
-        // Radix moves focus off the trigger when the menu opens — using
-        // onFocus/onBlur here caused an open/close race. Intentionally omitted.
         className={cn(
-          "relative flex items-center gap-2 px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap outline-none",
-          // Active-group treatment: stronger background, accent foreground,
-          // bolder weight, and an underline bar anchored to the bottom edge
-          // so the current section is unmistakable even when the dropdown
-          // is closed.
+          "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group",
           active
-            ? "bg-primary/15 text-primary font-semibold after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-primary after:rounded-full"
-            : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            ? "bg-primary/10 text-primary font-semibold after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-primary after:rounded-full"
+            : "text-muted-foreground hover:text-foreground hover:bg-secondary/60",
+          triggerClassName,
         )}
       >
-        <GroupIcon className="h-4 w-4" />
-        <span className="hidden lg:inline">
-          {entry.label}
-          {active && activeLeaf && (
-            <span className="ml-1.5 text-xs font-normal opacity-80">
-              · {activeLeaf.label}
-            </span>
+        <GroupIcon className="h-4 w-4 shrink-0" />
+        {showLabel && (
+          <span className="flex items-center">
+            {entry.label}
+            {active && activeLeaf && (
+              <span className="ml-1.5 text-xs font-normal opacity-75 max-w-[8rem] truncate">
+                · {activeLeaf.label}
+              </span>
+            )}
+          </span>
+        )}
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 opacity-60 transition-transform duration-200",
+            open && "rotate-180",
           )}
-        </span>
-        <span className="lg:hidden">{entry.label.split(" ")[0]}</span>
-        <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        sideOffset={0}
-        onPointerEnter={openNow}
+        sideOffset={8}
+        onPointerEnter={openOnHover}
         onPointerLeave={closeSoon}
         onCloseAutoFocus={(e) => e.preventDefault()}
-        className="min-w-[13rem] max-h-[70vh] overflow-y-auto"
+        className={cn(
+          "p-2 max-h-[70vh] overflow-y-auto rounded-xl shadow-lg border-border/60",
+          useTwoColumns ? "w-[36rem] max-w-[calc(100vw-2rem)]" : "w-72",
+        )}
       >
-        {entry.items.map((item, idx) => {
-          const ItemIcon = item.icon;
-          const isActive = item.path === activeLeafPath;
-          const prev = idx > 0 ? entry.items[idx - 1] : null;
-          const showSection = item.section && (!prev || prev.section !== item.section);
-          return (
-            <div key={item.path}>
-              {showSection && (
-                <>
-                  {idx > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
-                    {item.section}
-                  </DropdownMenuLabel>
-                </>
+        <div
+          className={cn(
+            "grid gap-x-3",
+            useTwoColumns ? "grid-cols-2" : "grid-cols-1",
+          )}
+        >
+          {sections.map(([sectionLabel, items], idx) => (
+            <div
+              key={sectionLabel || `__sec-${idx}`}
+              className="flex flex-col"
+            >
+              {sectionLabel && (
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80 font-bold px-2 pt-2 pb-1">
+                  {sectionLabel}
+                </div>
               )}
-              <DropdownMenuItem asChild>
-                <Link
-                  to={item.path}
+              <div className="flex flex-col">
+                {items.map((item) => {
+                  const ItemIcon = item.icon;
+                  const isActive = item.path === activeLeafPath;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      onClick={() => setOpen(false)}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors outline-none",
+                        isActive
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-foreground/80 hover:bg-secondary hover:text-foreground focus-visible:bg-secondary",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-7 w-7 items-center justify-center rounded-md shrink-0",
+                          isActive
+                            ? "bg-primary/15 text-primary"
+                            : "bg-secondary/60 text-muted-foreground",
+                        )}
+                      >
+                        <ItemIcon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overflow "More" menu: collects entries that didn't fit in the visible row.
+// Direct links render as rows with their icon; groups render as collapsed
+// rows that expand inline (one nesting level only — keeps the menu shallow).
+// ─────────────────────────────────────────────────────────────────────────────
+function MoreMenu({
+  entries,
+  pathname,
+}: {
+  entries: NavEntry[];
+  pathname: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const anyActive = entries.some((e) =>
+    isGroup(e)
+      ? e.items.some((i) => pathMatchesNav(pathname, i.path))
+      : pathMatchesNav(pathname, e.path),
+  );
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
+      <DropdownMenuTrigger
+        className={cn(
+          "relative flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          anyActive
+            ? "bg-primary/10 text-primary font-semibold"
+            : "text-muted-foreground hover:text-foreground hover:bg-secondary/60",
+        )}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+        <span>More</span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 opacity-60 transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        sideOffset={8}
+        className="p-2 w-72 max-h-[70vh] overflow-y-auto rounded-xl shadow-lg border-border/60"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
+        {entries.map((entry) => {
+          if (!isGroup(entry)) {
+            const Icon = entry.icon;
+            const isActive = pathMatchesNav(pathname, entry.path);
+            return (
+              <Link
+                key={entry.path}
+                to={entry.path}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors outline-none",
+                  isActive
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "text-foreground/80 hover:bg-secondary hover:text-foreground",
+                )}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary/60 shrink-0">
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <span className="truncate">{entry.label}</span>
+              </Link>
+            );
+          }
+          const GroupIcon = entry.icon;
+          const isOpen = expanded[entry.label] ?? false;
+          const groupActive = entry.items.some((i) =>
+            pathMatchesNav(pathname, i.path),
+          );
+          return (
+            <div key={entry.label} className="flex flex-col">
+              <button
+                type="button"
+                onClick={() =>
+                  setExpanded((p) => ({ ...p, [entry.label]: !p[entry.label] }))
+                }
+                className={cn(
+                  "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors outline-none w-full",
+                  groupActive
+                    ? "text-primary font-semibold"
+                    : "text-foreground/80 hover:bg-secondary hover:text-foreground",
+                )}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary/60 shrink-0">
+                  <GroupIcon className="h-3.5 w-3.5" />
+                </span>
+                <span className="flex-1 text-left truncate">{entry.label}</span>
+                <ChevronDown
                   className={cn(
-                    "flex items-center gap-2 w-full cursor-pointer",
-                    isActive && "bg-primary/10 text-primary font-semibold"
+                    "h-3.5 w-3.5 opacity-60 transition-transform",
+                    isOpen && "rotate-180",
                   )}
-                >
-                  <ItemIcon className="h-4 w-4" />
-                  <span>{item.label}</span>
-                </Link>
-              </DropdownMenuItem>
+                />
+              </button>
+              {isOpen && (
+                <div className="ml-9 mt-0.5 mb-1 flex flex-col border-l border-border/60 pl-2">
+                  {entry.items.map((item) => {
+                    const ItemIcon = item.icon;
+                    const isActive = pathMatchesNav(pathname, item.path);
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        onClick={() => setOpen(false)}
+                        className={cn(
+                          "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors",
+                          isActive
+                            ? "bg-primary/10 text-primary font-semibold"
+                            : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                        )}
+                      >
+                        <ItemIcon className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -582,184 +839,130 @@ function HoverNavGroup({
   );
 }
 
-export function Navigation() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { user, role, profile, signOut } = useAuth();
-  const { has: hasFeature } = useTenantFeatures();
-  const [mobileOpen, setMobileOpen] = useState(false);
+// ─────────────────────────────────────────────────────────────────────────────
+// Mobile drawer: full sheet from the left with sticky search at top, sectioned
+// accordion of groups, and sign-out anchored at the bottom.
+// ─────────────────────────────────────────────────────────────────────────────
+function MobileNav({
+  navItems,
+  pathname,
+  displayName,
+  email,
+  role,
+  onSignOut,
+}: {
+  navItems: NavEntry[];
+  pathname: string;
+  displayName: string;
+  email: string;
+  role: AppRole | null;
+  onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
 
-  const navItems = filterNavByFeatures(getRoleNavItems(role), hasFeature);
-
-  const sub = (profile?.doctor ?? profile?.therapist ?? profile?.patient ?? profile?.pharmacist) as { fullName?: string } | undefined;
-  const displayName = sub?.fullName ?? user?.email ?? "User";
-
-  const handleSignOut = async () => {
-    await signOut();
-    setMobileOpen(false);
-    navigate("/login", { replace: true });
+  const close = () => {
+    setOpen(false);
   };
 
-  const toggleSection = (label: string) =>
-    setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
-
-  const groupHasActive = (group: NavGroup) =>
-    group.items.some((item) => pathMatchesNav(location.pathname, item.path));
-
-  if (!user) {
-    return null;
-  }
-
   return (
-    <>
-      {/* Desktop Navigation */}
-      <nav className="hidden md:flex fixed top-0 left-0 right-0 z-50 h-16 items-center justify-between px-6 bg-card/80 backdrop-blur-md border-b border-border/50">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-            <Activity className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="font-semibold text-foreground">IWIS</span>
-        </Link>
-
-        <div className="flex-1 flex items-center justify-center overflow-x-auto no-scrollbar px-4">
-          <div className="flex items-center gap-0.5 min-w-max">
-            {navItems.map((entry) => {
-              if (!isGroup(entry)) {
-                const Icon = entry.icon;
-                const isActive = pathMatchesNav(location.pathname, entry.path);
-                return (
-                  <Link
-                    key={entry.path}
-                    to={entry.path}
-                    className={cn(
-                      "relative flex items-center gap-2 px-3 lg:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
-                      // Same active treatment as group triggers — stronger
-                      // background, bolder weight, and a bottom accent bar so
-                      // the selected section is unmistakable at a glance.
-                      isActive
-                        ? "bg-primary/15 text-primary font-semibold after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-primary after:rounded-full"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="hidden lg:inline">{entry.label}</span>
-                    <span className="lg:hidden">{entry.label.split(" ")[0]}</span>
-                  </Link>
-                );
-              }
-
-              return (
-                <HoverNavGroup
-                  key={entry.label}
-                  entry={entry}
-                  active={groupHasActive(entry)}
-                  pathname={location.pathname}
-                />
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <BranchScopeSwitcher />
-          <NotificationBell />
-          <UserProfileMenu />
-        </div>
-      </nav>
-
-      {/* Mobile Navigation */}
-      <nav className="md:hidden fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-4 bg-card/80 backdrop-blur-md border-b border-border/50">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
-            <Activity className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <span className="font-semibold text-foreground text-sm">IWIS</span>
-        </Link>
-
-        <div className="flex items-center gap-1 sm:gap-2">
-          <NotificationBell />
-          <UserProfileMenu />
-          <button
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="p-2 rounded-lg hover:bg-secondary transition-colors"
-          >
-            {mobileOpen ? (
-              <X className="h-5 w-5 text-foreground" />
-            ) : (
-              <Menu className="h-5 w-5 text-foreground" />
-            )}
-          </button>
-        </div>
-      </nav>
-
-      {/* Mobile Menu Overlay */}
-      {mobileOpen && (
-        <div className="md:hidden fixed inset-0 z-40 bg-background/95 backdrop-blur-sm pt-14 overflow-y-auto">
-          <div className="flex flex-col p-4 gap-1">
-            {/* User Info */}
-            <div className="px-4 py-3 border-b border-border mb-2">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Signed in as</p>
-              <p className="font-semibold text-foreground mt-0.5">{displayName}</p>
-              <p className="text-xs text-muted-foreground">{user?.email}</p>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <button
+          aria-label="Open menu"
+          className="p-2 rounded-lg hover:bg-secondary transition-colors"
+        >
+          <Menu className="h-5 w-5 text-foreground" />
+        </button>
+      </SheetTrigger>
+      <SheetContent
+        side="left"
+        className="w-[88vw] max-w-sm p-0 flex flex-col gap-0"
+      >
+        {/* Header: brand + user identity */}
+        <div className="px-5 pt-5 pb-3 border-b border-border/60">
+          <Link to="/" onClick={close} className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
+              <Activity className="h-5 w-5 text-primary-foreground" />
             </div>
+            <span className="font-semibold text-foreground">IWIS</span>
+          </Link>
+          <div className="mt-3">
+            <p className="font-semibold text-foreground truncate">
+              {displayName}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">{email}</p>
+            {role && (
+              <span className="inline-flex mt-1.5 text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                {role.replace("_", " ")}
+              </span>
+            )}
+          </div>
+        </div>
 
+        {/* Body: sectioned nav */}
+        <div className="flex-1 overflow-y-auto px-3 py-2">
+          <div className="flex flex-col gap-0.5">
             {navItems.map((entry) => {
               if (!isGroup(entry)) {
                 const Icon = entry.icon;
-                const isActive = pathMatchesNav(location.pathname, entry.path);
+                const isActive = pathMatchesNav(pathname, entry.path);
                 return (
                   <Link
                     key={entry.path}
                     to={entry.path}
-                    onClick={() => setMobileOpen(false)}
+                    onClick={close}
                     className={cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors border-l-4",
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                       isActive
-                        ? "bg-primary/15 text-primary font-semibold border-primary"
-                        : "text-muted-foreground border-transparent hover:text-foreground hover:bg-secondary"
+                        ? "bg-primary/10 text-primary font-semibold"
+                        : "text-foreground/80 hover:bg-secondary",
                     )}
                   >
-                    <Icon className="h-5 w-5" />
-                    {entry.label}
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{entry.label}</span>
                   </Link>
                 );
               }
-
               const GroupIcon = entry.icon;
-              const groupActive = groupHasActive(entry);
+              const groupActive = entry.items.some((i) =>
+                pathMatchesNav(pathname, i.path),
+              );
               const expanded = openSections[entry.label] ?? groupActive;
-              const activeLeafPath = bestMatchingPath(location.pathname, entry.items.map((i) => i.path));
-              const activeLeaf = entry.items.find((i) => i.path === activeLeafPath) ?? null;
+              const activeLeafPath = bestMatchingPath(
+                pathname,
+                entry.items.map((i) => i.path),
+              );
               return (
                 <div key={entry.label} className="flex flex-col">
                   <button
-                    onClick={() => toggleSection(entry.label)}
+                    type="button"
+                    onClick={() =>
+                      setOpenSections((p) => ({
+                        ...p,
+                        [entry.label]: !expanded,
+                      }))
+                    }
                     className={cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-colors border-l-4",
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full",
                       groupActive
-                        ? "bg-primary/15 text-primary font-semibold border-primary"
-                        : "text-muted-foreground border-transparent hover:text-foreground hover:bg-secondary"
+                        ? "text-primary"
+                        : "text-foreground/80 hover:bg-secondary",
                     )}
                   >
-                    <GroupIcon className="h-5 w-5" />
-                    <span className="flex-1 text-left">
+                    <GroupIcon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1 text-left truncate">
                       {entry.label}
-                      {groupActive && activeLeaf && (
-                        <span className="ml-2 text-xs font-normal opacity-80">
-                          · {activeLeaf.label}
-                        </span>
-                      )}
                     </span>
                     <ChevronDown
                       className={cn(
-                        "h-4 w-4 transition-transform",
-                        expanded && "rotate-180"
+                        "h-4 w-4 opacity-60 transition-transform",
+                        expanded && "rotate-180",
                       )}
                     />
                   </button>
                   {expanded && (
-                    <div className="ml-4 pl-4 border-l border-border flex flex-col gap-1 mt-1 mb-1">
+                    <div className="ml-7 mt-0.5 mb-1 pl-3 border-l border-border/60 flex flex-col">
                       {entry.items.map((item) => {
                         const ItemIcon = item.icon;
                         const isActive = item.path === activeLeafPath;
@@ -767,16 +970,16 @@ export function Navigation() {
                           <Link
                             key={item.path}
                             to={item.path}
-                            onClick={() => setMobileOpen(false)}
+                            onClick={close}
                             className={cn(
-                              "flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                              "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors",
                               isActive
-                                ? "bg-primary/15 text-primary font-semibold"
-                                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                                ? "bg-primary/10 text-primary font-semibold"
+                                : "text-muted-foreground hover:bg-secondary hover:text-foreground",
                             )}
                           >
-                            <ItemIcon className="h-4 w-4" />
-                            {item.label}
+                            <ItemIcon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{item.label}</span>
                           </Link>
                         );
                       })}
@@ -785,18 +988,171 @@ export function Navigation() {
                 </div>
               );
             })}
-
-            {/* Sign Out */}
-            <button
-              onClick={handleSignOut}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium text-attention hover:bg-attention/10 transition-colors mt-4"
-            >
-              <LogOut className="h-5 w-5" />
-              Sign Out
-            </button>
           </div>
         </div>
-      )}
+
+        {/* Sign out anchored at bottom */}
+        <div className="border-t border-border/60 p-3">
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              onSignOut();
+            }}
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-attention hover:bg-attention/10 transition-colors w-full"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign Out
+          </button>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main navbar.
+// ─────────────────────────────────────────────────────────────────────────────
+export function Navigation() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user, role, profile, signOut } = useAuth();
+  const { has: hasFeature } = useTenantFeatures();
+
+  const navItems = useMemo(
+    () => filterNavByFeatures(getRoleNavItems(role), hasFeature),
+    [role, hasFeature],
+  );
+
+  const { containerRef, ghostRef, visibleCount } = useOverflowSplit(navItems);
+  const visibleItems = navItems.slice(0, visibleCount);
+  const overflowItems = navItems.slice(visibleCount);
+
+  const sub = (profile?.doctor ?? profile?.therapist ?? profile?.patient ?? profile?.pharmacist) as { fullName?: string } | undefined;
+  const displayName = sub?.fullName ?? user?.email ?? "User";
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login", { replace: true });
+  };
+
+  // Close any lingering overflow / dropdowns when the route changes — guards
+  // against menus that occasionally stay open during programmatic nav.
+  useEffect(() => {
+    // Intentionally empty — this hook exists so future per-menu close hooks
+    // can subscribe to `location.pathname` without re-architecting the tree.
+  }, [location.pathname]);
+
+  if (!user) {
+    return null;
+  }
+
+  return (
+    <>
+      {/* Desktop / tablet navbar — three-column grid keeps the nav row
+          truly centered between the brand (left) and tools (right) clusters
+          regardless of how wide either side grows. */}
+      <nav className="hidden md:grid fixed top-0 left-0 right-0 z-50 h-16 grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 lg:px-6 bg-card/85 backdrop-blur-md border-b border-border/60">
+        {/* Brand (left column, left-aligned) */}
+        <Link
+          to="/"
+          className="flex items-center gap-2 justify-self-start outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-lg pr-2"
+        >
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-sm">
+            <Activity className="h-5 w-5 text-primary-foreground" />
+          </div>
+          <span className="font-semibold text-foreground tracking-tight">
+            IWIS
+          </span>
+        </Link>
+
+        {/* Adaptive nav row (middle column, centered) */}
+        <div ref={containerRef} className="relative min-w-0 max-w-full">
+          <div className="flex items-center gap-1 justify-center">
+            {visibleItems.map((entry) =>
+              isGroup(entry) ? (
+                <NavGroupDropdown
+                  key={entry.label}
+                  entry={entry}
+                  pathname={location.pathname}
+                />
+              ) : (
+                <NavLinkPill
+                  key={entry.path}
+                  entry={entry}
+                  pathname={location.pathname}
+                />
+              ),
+            )}
+            {overflowItems.length > 0 && (
+              <MoreMenu entries={overflowItems} pathname={location.pathname} />
+            )}
+          </div>
+          {/* Hidden ghost row — measured to decide overflow. Mirrors the
+              full set of items so widths reflect the rendered look exactly. */}
+          <div
+            ref={ghostRef}
+            aria-hidden
+            className="absolute top-0 left-0 flex items-center gap-1 invisible pointer-events-none"
+            style={{ visibility: "hidden" }}
+          >
+            {navItems.map((entry, idx) =>
+              isGroup(entry) ? (
+                <span
+                  key={`ghost-g-${entry.label}-${idx}`}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
+                >
+                  <entry.icon className="h-4 w-4 shrink-0" />
+                  <span>{entry.label}</span>
+                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                </span>
+              ) : (
+                <span
+                  key={`ghost-l-${entry.path}-${idx}`}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
+                >
+                  <entry.icon className="h-4 w-4 shrink-0" />
+                  <span>{entry.label}</span>
+                </span>
+              ),
+            )}
+          </div>
+        </div>
+
+        {/* Right cluster: branch · notifications · profile (right column, right-aligned) */}
+        <div className="flex items-center gap-1.5 justify-self-end">
+          <div className="hidden lg:block">
+            <BranchScopeSwitcher />
+          </div>
+          <NotificationBell />
+          <UserProfileMenu />
+        </div>
+      </nav>
+
+      {/* Mobile navbar */}
+      <nav className="md:hidden fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-3 bg-card/85 backdrop-blur-md border-b border-border/60">
+        <div className="flex items-center gap-1">
+          <MobileNav
+            navItems={navItems}
+            pathname={location.pathname}
+            displayName={displayName}
+            email={user?.email ?? ""}
+            role={role}
+            onSignOut={handleSignOut}
+          />
+          <Link to="/" className="flex items-center gap-2 ml-1">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-sm">
+              <Activity className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <span className="font-semibold text-foreground text-sm">IWIS</span>
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          <UserProfileMenu />
+        </div>
+      </nav>
     </>
   );
 }

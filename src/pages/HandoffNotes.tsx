@@ -18,8 +18,21 @@ import {
   Clock, Wand2, AlertTriangle, AlertCircle, Info, Circle, Send, Pencil, Sparkles,
 } from "lucide-react";
 import { communicationApi } from "@/services/communication.service";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import type { HandoffNoteEntry } from "@/types";
+import { PatientPicker, type PatientLite } from "@/components/clinical/PatientPicker";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+
+interface ClinicianLite {
+  id: string;       // User.id (used as toClinicianId)
+  fullName: string | null;
+  email?: string | null;
+  role: string;
+  specialization?: string | null;
+  branchId?: string | null;
+  branchName?: string | null;
+}
 
 const URGENCY_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   Critical: { label: "Critical", color: "bg-red-100 text-red-700 border-red-200", icon: AlertTriangle },
@@ -47,7 +60,7 @@ interface MedicationRow {
 }
 
 export default function HandoffNotes() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [activeTab, setActiveTab] = useState("received");
   const [received, setReceived] = useState<HandoffNoteEntry[]>([]);
   const [sent, setSent] = useState<HandoffNoteEntry[]>([]);
@@ -55,6 +68,11 @@ export default function HandoffNotes() {
   const [loadingSent, setLoadingSent] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+
+  // Lookup lists for the form dropdowns. Pulled once when the dialog opens.
+  const [patients, setPatients] = useState<PatientLite[]>([]);
+  const [clinicians, setClinicians] = useState<ClinicianLite[]>([]);
+  const [branchOptions, setBranchOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Form state
   const [patientId, setPatientId] = useState("");
@@ -73,10 +91,50 @@ export default function HandoffNotes() {
   const [editingDraft, setEditingDraft] = useState<HandoffNoteEntry | null>(null);
   const [sendAfterSave, setSendAfterSave] = useState(false);
 
+  // Resolve the selected patient's display name from the loaded list. Used
+  // both in the auto-populate badge and in the read-only confirmation label.
+  const selectedPatient = patients.find((p) => p.id === patientId) ?? null;
+  const selectedPatientName = selectedPatient?.fullName ?? null;
+
   useEffect(() => {
     loadReceived();
     loadSent();
   }, []);
+
+  // Pre-load patient/clinician/branch lookups on first dialog open. Cached
+  // in component state so reopening doesn't refetch.
+  useEffect(() => {
+    if (!formOpen) return;
+    if (patients.length === 0) {
+      apiClient.get<PatientLite[]>("/api/user/list-patients")
+        .then(({ data }) => setPatients(Array.isArray(data) ? data : []))
+        .catch(() => setPatients([]));
+    }
+    if (clinicians.length === 0) {
+      Promise.all([
+        apiClient.get<any[]>("/api/user/list-doctors").catch(() => ({ data: [] as any[] })),
+        apiClient.get<any[]>("/api/user/list-therapists").catch(() => ({ data: [] as any[] })),
+      ]).then(([docs, therapists]) => {
+        const norm = (raw: any[], roleLabel: string): ClinicianLite[] =>
+          (Array.isArray(raw) ? raw : []).map((r) => ({
+            id: r.userId || r.user?.id || r.id,
+            fullName: r.fullName ?? r.user?.fullName ?? null,
+            email: r.email ?? r.user?.email ?? null,
+            role: r.user?.role || roleLabel,
+            specialization: r.specialization ?? null,
+            branchId: r.branchId ?? r.user?.branchId ?? null,
+            branchName: r.branch?.name ?? r.user?.branch?.name ?? null,
+          })).filter((c) => c.id && c.id !== user?.id); // exclude self
+        const combined = [...norm(docs.data, "DOCTOR"), ...norm(therapists.data, "THERAPIST")];
+        setClinicians(combined);
+      });
+    }
+    if (branchOptions.length === 0) {
+      apiClient.get<{ id: string; name: string }[]>("/api/branches")
+        .then(({ data }) => setBranchOptions(Array.isArray(data) ? data : []))
+        .catch(() => setBranchOptions([]));
+    }
+  }, [formOpen, patients.length, clinicians.length, branchOptions.length, user?.id]);
 
   const loadReceived = async () => {
     try {
@@ -105,6 +163,14 @@ export default function HandoffNotes() {
   const handleCreate = async () => {
     if (!patientId.trim() || !summary.trim()) {
       toast.error("Patient and summary are required");
+      return;
+    }
+    // SENT handoffs need somewhere to go — either a specific clinician or a
+    // branch fan-out. DRAFTs are allowed to be addressless. We treat the
+    // top-level "Create Handoff" path as SENT, mirroring the API default.
+    const goingLive = !editingDraft || sendAfterSave;
+    if (goingLive && !toClinicianId.trim() && !toBranchId.trim()) {
+      toast.error("Pick a receiving clinician or branch before sending");
       return;
     }
     try {
@@ -464,12 +530,26 @@ export default function HandoffNotes() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Patient ID *</Label>
-                    <Input
-                      placeholder="Patient ID"
+                    <Label>Patient *</Label>
+                    <PatientPicker
                       value={patientId}
-                      onChange={(e) => setPatientId(e.target.value)}
+                      onChange={setPatientId}
+                      patients={patients}
+                      placeholder="Search patient by name or phone…"
                     />
+                    {/* Confirmation echo: shows the resolved patient name as
+                        soon as one is picked or auto-populated, so clinicians
+                        no longer have to read raw IDs. */}
+                    {patientId && selectedPatientName && (
+                      <p className="text-xs text-muted-foreground ml-1">
+                        Patient: <span className="font-medium text-foreground">{selectedPatientName}</span>
+                      </p>
+                    )}
+                    {patientId && !selectedPatientName && (
+                      <p className="text-xs text-amber-600 ml-1">
+                        Patient ID set, but the matching record could not be loaded — refresh and retry if needed.
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Urgency</Label>
@@ -490,19 +570,46 @@ export default function HandoffNotes() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Receiving Clinician (optional)</Label>
-                    <Input
-                      placeholder="Clinician ID"
+                    <SearchableSelect
                       value={toClinicianId}
-                      onChange={(e) => setToClinicianId(e.target.value)}
+                      onChange={setToClinicianId}
+                      placeholder="Pick a doctor or therapist"
+                      searchPlaceholder="Search clinicians…"
+                      items={clinicians.map((c) => {
+                        const roleLabel = c.role === "DOCTOR"
+                          ? "Doctor"
+                          : c.role === "ADMIN_DOCTOR"
+                            ? "Admin Doctor"
+                            : c.role === "THERAPIST" ? "Therapist" : c.role;
+                        const subBits = [
+                          roleLabel,
+                          c.specialization || null,
+                          c.branchName || null,
+                        ].filter(Boolean) as string[];
+                        return {
+                          value: c.id,
+                          label: c.fullName || c.email || "Unnamed clinician",
+                          sub: subBits.join(" · ") || undefined,
+                        };
+                      })}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Receiving Branch (optional)</Label>
-                    <Input
-                      placeholder="Branch ID"
-                      value={toBranchId}
-                      onChange={(e) => setToBranchId(e.target.value)}
-                    />
+                    <Select
+                      value={toBranchId || undefined}
+                      onValueChange={(v) => setToBranchId(v === "__none__" ? "" : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="No specific branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No specific branch</SelectItem>
+                        {branchOptions.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

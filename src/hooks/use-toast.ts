@@ -137,6 +137,24 @@ type Toast = Omit<ToasterToast, "id">;
 function toast({ ...props }: Toast) {
   const id = genId();
 
+  // Mirror every legacy useToast({ title, variant }) call into the global
+  // centered NotifyHost so the corner toast and the modal stay in sync
+  // even before all callers migrate to the new API.
+  try {
+    const titleStr = typeof props.title === "string" ? props.title : props.title ? String(props.title) : "";
+    const descStr  = typeof props.description === "string" ? props.description : props.description ? String(props.description) : undefined;
+    const variant: "success" | "error" | "info" | "warning" =
+      props.variant === "destructive" ? "error" : "info";
+    window.dispatchEvent(new CustomEvent("app:notify", {
+      detail: {
+        id: `legacy_${id}`,
+        variant,
+        title: titleStr || (variant === "error" ? "Error" : "Heads up"),
+        description: descStr,
+      },
+    }));
+  } catch { /* SSR / no window */ }
+
   const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",

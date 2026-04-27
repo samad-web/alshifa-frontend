@@ -18,6 +18,8 @@ import {
   MessageTemplateCategory,
   StandardPlaceholder,
 } from "@/services/messaging.service";
+import { useConfirm } from "@/components/common/ConfirmDialog";
+import { AppLayout } from "@/components/layout/app-layout";
 
 const CATEGORIES: { key: MessageTemplateCategory; label: string }[] = [
   { key: "DAILY_CHECKIN", label: "Daily Check-in" },
@@ -48,6 +50,7 @@ export default function MessageTemplates() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => { refresh(); }, []);
 
@@ -122,7 +125,13 @@ export default function MessageTemplates() {
   }
 
   async function remove(tpl: MessageTemplate) {
-    if (!confirm(`Delete template "${tpl.name}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete "${tpl.name}"?`,
+      description: "This template cannot be recovered. Active reminders that reference it will fall back to the default copy.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await messageTemplateService.remove(tpl.id);
       toast.success("Deleted");
@@ -138,8 +147,9 @@ export default function MessageTemplates() {
   );
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-6xl">
-      <div className="flex items-center justify-between mb-4">
+    <AppLayout>
+      <div className="container mx-auto px-4 py-6 max-w-6xl">
+        <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Message Templates</h1>
           <p className="text-sm text-muted-foreground">
@@ -280,6 +290,8 @@ export default function MessageTemplates() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      {confirmDialog}
+      </div>
+    </AppLayout>
   );
 }

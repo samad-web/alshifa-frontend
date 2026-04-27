@@ -225,6 +225,26 @@ export const communicationApi = {
     return { summaries: list, total: data.pagination?.total ?? list.length };
   },
 
+  // Doctor view — visit summaries authored by the calling clinician.
+  async getMyVisitSummaries(params?: { page?: number; limit?: number }): Promise<{ summaries: VisitSummaryEntry[]; total: number }> {
+    type Shape = { summaries: VisitSummaryEntry[]; total: number } | { data: VisitSummaryEntry[]; pagination?: { total?: number } };
+    const { data } = await apiClient.get<Shape>('/api/visit-summary/mine', params);
+    if ('summaries' in data) return data;
+    const list = data.data ?? [];
+    return { summaries: list, total: data.pagination?.total ?? list.length };
+  },
+
+  // Patient view — visit summaries belonging to the calling patient. The
+  // backend resolves User.id → Patient.id so we don't need to know the
+  // Patient record id on the client.
+  async getMySharedVisitSummaries(params?: { page?: number; limit?: number }): Promise<{ summaries: VisitSummaryEntry[]; total: number }> {
+    type Shape = { summaries: VisitSummaryEntry[]; total: number } | { data: VisitSummaryEntry[]; pagination?: { total?: number } };
+    const { data } = await apiClient.get<Shape>('/api/visit-summary/me', params);
+    if ('summaries' in data) return data;
+    const list = data.data ?? [];
+    return { summaries: list, total: data.pagination?.total ?? list.length };
+  },
+
   async sendSummaryToPatient(summaryId: string): Promise<VisitSummaryEntry> {
     const { data } = await apiClient.post<VisitSummaryEntry>(`/api/visit-summary/${summaryId}/send`, {});
     return data;

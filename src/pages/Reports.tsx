@@ -65,7 +65,9 @@ export default function Reports() {
 
           <Tabs defaultValue="appointments" className="space-y-6">
             <div className="overflow-x-auto pb-2 -mx-2 px-2 no-scrollbar">
-              <TabsList className={`flex w-max md:grid md:w-full md:grid-cols-${isAdmin ? '5' : '4'} gap-1 bg-transparent md:bg-muted p-0 md:p-1`}>
+              {/* Tab count is dynamic — non-admins lose Doctor Performance + Branches
+                  since the backend gates those endpoints to ADMIN / ADMIN_DOCTOR. */}
+              <TabsList className={`flex w-max md:grid md:w-full md:grid-cols-${isAdmin ? '5' : '3'} gap-1 bg-transparent md:bg-muted p-0 md:p-1`}>
                 <TabsTrigger value="appointments" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground border md:border-0 rounded-xl px-4 py-2 text-xs font-bold whitespace-nowrap">
                   <BarChart3 className="h-3.5 w-3.5 mr-2" />
                   Appointments
@@ -74,10 +76,12 @@ export default function Reports() {
                   <Users className="h-3.5 w-3.5 mr-2" />
                   Patient Progress
                 </TabsTrigger>
-                <TabsTrigger value="doctors" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground border md:border-0 rounded-xl px-4 py-2 text-xs font-bold whitespace-nowrap">
-                  <TrendingUp className="h-3.5 w-3.5 mr-2" />
-                  Doctor Performance
-                </TabsTrigger>
+                {isAdmin && (
+                  <TabsTrigger value="doctors" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground border md:border-0 rounded-xl px-4 py-2 text-xs font-bold whitespace-nowrap">
+                    <TrendingUp className="h-3.5 w-3.5 mr-2" />
+                    Doctor Performance
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="prescriptions" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground border md:border-0 rounded-xl px-4 py-2 text-xs font-bold whitespace-nowrap">
                   <FileText className="h-3.5 w-3.5 mr-2" />
                   Prescriptions
@@ -142,30 +146,32 @@ export default function Reports() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="doctors" className="space-y-4">
-              <Card className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-primary/10 rounded-2xl">
-                      <TrendingUp className="h-6 w-6 text-primary" />
+            {isAdmin && (
+              <TabsContent value="doctors" className="space-y-4">
+                <Card className="p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-primary/10 rounded-2xl">
+                        <TrendingUp className="h-6 w-6 text-primary" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-bold">Doctor Performance Analytics</h2>
+                        <p className="text-sm text-muted-foreground">Appointment completion rates and prescription volumes</p>
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-xl font-bold">Doctor Performance Analytics</h2>
-                      <p className="text-sm text-muted-foreground">Appointment completion rates and prescription volumes</p>
-                    </div>
+                    <Button
+                      onClick={() => handleExport('doctor-performance', 'pdf')}
+                      disabled={loading}
+                      className="gap-2"
+                    >
+                      <Download className="h-4 w-4" />
+                      Export PDF
+                    </Button>
                   </div>
-                  <Button
-                    onClick={() => handleExport('doctor-performance', 'pdf')}
-                    disabled={loading}
-                    className="gap-2"
-                  >
-                    <Download className="h-4 w-4" />
-                    Export PDF
-                  </Button>
-                </div>
-                <DoctorPerformanceChart branchId={branchIdParam} />
-              </Card>
-            </TabsContent>
+                  <DoctorPerformanceChart branchId={branchIdParam} />
+                </Card>
+              </TabsContent>
+            )}
 
             <TabsContent value="prescriptions" className="space-y-4">
               <Card className="p-6">

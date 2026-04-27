@@ -76,7 +76,8 @@ export function AppointmentCard({
           <div>
             <div className="font-medium text-sm">{clinicianName}</div>
             <div className="text-xs text-muted-foreground">
-              {appointmentDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              {/* DD/MM/YYYY app-wide format. Weekday prefix kept for at-a-glance scanning. */}
+              {appointmentDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
               {' at '}
               {appointmentDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
             </div>

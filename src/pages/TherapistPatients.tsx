@@ -41,9 +41,12 @@ export default function TherapistPatients() {
     const fetchPatients = async () => {
         try {
             const { data } = await apiClient.get<any[]>('/api/user/assigned-patients');
-            setPatients(data);
+            setPatients(Array.isArray(data) ? data : []);
         } catch (error) {
+            // Surface the failure so the empty roster isn't mistaken for
+            // "no patients assigned" — that mismatch was the original bug.
             console.error("Failed to fetch patients:", error);
+            setPatients([]);
         } finally {
             setLoading(false);
         }

@@ -73,7 +73,7 @@ export default function PharmacyHistory() {
         <AppLayout>
             <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
                 <PageHeader
-                    title="Dispensing History"
+                    title="Dispense History"
                     subtitle="View all past medication dispensing records"
                 />
 

@@ -19,6 +19,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { InlinePatientPicker } from "@/components/clinical/InlinePatientPicker";
 import { apiClient } from "@/lib/api-client";
 
 type RxStatusFilter = "ALL" | "ACTIVE" | "DISCONTINUED" | "OUT_OF_SUPPLY";
@@ -32,8 +33,6 @@ export default function PrescriptionManagement() {
     const [showModal, setShowModal] = useState(false);
     const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
     const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
-    const [prescriptionSearchQuery, setPrescriptionSearchQuery] = useState("");
-    const [prescriptionBranchFilter, setPrescriptionBranchFilter] = useState("all");
 
     // Prescription-list filters (apply to the per-patient list once a patient is picked)
     const [rxQuery, setRxQuery] = useState("");
@@ -268,17 +267,6 @@ export default function PrescriptionManagement() {
 
     const selectedPatientData = patients.find((p) => p.id === selectedPatient);
 
-    // Client-side filter: branch classification + text search applied to the already-fetched list
-    const filteredPatients = patients.filter((p: any) => {
-        const q = prescriptionSearchQuery.toLowerCase();
-        const matchesSearch = !q ||
-            (p.fullName  || "").toLowerCase().includes(q) ||
-            (p.patientId || "").toLowerCase().includes(q) ||
-            (p.email     || "").toLowerCase().includes(q);
-        const matchesBranch = prescriptionBranchFilter === "all" || p.branchId === prescriptionBranchFilter;
-        return matchesSearch && matchesBranch;
-    });
-
     return (
         <AppLayout>
             <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
@@ -287,50 +275,24 @@ export default function PrescriptionManagement() {
                     subtitle="Upload, view, and download patient prescriptions"
                 />
 
-                {/* Patient Selection */}
+                {/* Patient Selection — live inline search. Typing filters the
+                    list of matched patients directly underneath the input;
+                    clicking a row selects them. No second dropdown step. */}
                 <Panel title="Select Patient" subtitle="Choose a patient to manage their prescriptions">
-                    {/* Branch + Search Filter — augments the existing patient dropdown without changing layout */}
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                        <input
-                            type="text"
-                            placeholder="Search by name, patient ID, or email..."
-                            value={prescriptionSearchQuery}
-                            onChange={(e) => setPrescriptionSearchQuery(e.target.value)}
-                            className="flex-1 min-w-[160px] h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        />
-                        <SearchableSelect
-                            value={prescriptionBranchFilter}
-                            onChange={setPrescriptionBranchFilter}
-                            placeholder="All branches"
-                            searchPlaceholder="Search branches…"
-                            className="w-[180px] shrink-0"
-                            items={[
-                                { value: "all", label: "All branches" },
-                                ...branches.map((b) => ({ value: b.id, label: b.name })),
-                            ]}
-                        />
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="flex-1">
-                            <SearchableSelect
-                                value={selectedPatient}
-                                onChange={setSelectedPatient}
-                                placeholder="Select a patient..."
-                                searchPlaceholder="Search patients by name or email…"
-                                items={filteredPatients.map((patient: any) => ({
-                                    value: patient.id,
-                                    label: patient.fullName || patient.email || patient.id,
-                                    keywords: [patient.email || "", patient.phoneNumber || ""],
-                                }))}
-                            />
-                        </div>
-                        {selectedPatient && (
+                    <InlinePatientPicker
+                        patients={patients}
+                        selectedId={selectedPatient}
+                        onSelect={setSelectedPatient}
+                        branches={branches}
+                    />
+                    {selectedPatient && (
+                        <div className="flex justify-end mt-3">
                             <Button onClick={() => setShowModal(true)} className="gap-2">
                                 <FilePlus2 className="w-4 h-4" />
                                 Add Prescription
                             </Button>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </Panel>
 
                 {/* Add Prescription Form */}

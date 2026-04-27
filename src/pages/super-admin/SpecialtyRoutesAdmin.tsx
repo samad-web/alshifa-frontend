@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Save, Trash2, Tag } from "lucide-react";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 interface Draft {
   specialty: string;
@@ -30,6 +31,7 @@ export default function SpecialtyRoutesAdmin() {
   const [saving, setSaving] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [newDraft, setNewDraft] = useState<Draft>(EMPTY_DRAFT);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const reload = () => {
     setLoading(true);
@@ -92,7 +94,13 @@ export default function SpecialtyRoutesAdmin() {
   };
 
   const deleteRow = async (id: string, specialty: string) => {
-    if (!confirm(`Delete route "${specialty}"? Triage will fall back to in-code routing for its tags.`)) return;
+    const ok = await confirm({
+      title: `Delete route "${specialty}"?`,
+      description: "Triage will fall back to in-code routing for the tags this route currently owns.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       await superAdminApi.deleteSpecialtyRoute(id);
@@ -250,6 +258,7 @@ export default function SpecialtyRoutesAdmin() {
           </div>
         </CardContent>
       </Card>
+      {confirmDialog}
     </div>
   );
 }

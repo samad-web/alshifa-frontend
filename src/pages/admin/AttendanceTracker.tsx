@@ -28,6 +28,8 @@ import {
   CheckCircle, XCircle, Users, Home, PlaneTakeoff, RefreshCw, Pencil, Plus, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/common/ConfirmDialog";
+import { useBranchScope } from "@/hooks/useBranchScope";
 
 const statusColors: Record<AttendanceStatus, string> = {
   PRESENT: "bg-green-500",
@@ -66,9 +68,18 @@ function workloadTint(total: number) {
 }
 
 export default function AttendanceTracker({ embedded = false }: { embedded?: boolean } = {}) {
-  const { role } = useAuth();
+  const { role, profile } = useAuth();
   const { branches } = useBranches();
-  const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  // Branch is read from the global navbar selector. We fall back to the
+  // first branch in the user's list when the navbar is set to "All branches"
+  // because the per-branch attendance views require a concrete branchId.
+  const { branchIdParam } = useBranchScope();
+  const isBranchAdmin = role === "BRANCH_ADMIN";
+  // BRANCH_ADMIN shares the admin view (set attendance, view branch list, etc.)
+  // — the difference is they have no personal clock-in/out card and they're
+  // pinned to their JWT branchId rather than picking from the navbar.
+  const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR" || isBranchAdmin;
 
   const [stats, setStats] = useState<AttendanceStats | null>(null);
   const [branchAttendance, setBranchAttendance] = useState<StaffAttendanceEntry[]>([]);
@@ -107,6 +118,15 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
   const [calMonth, setCalMonth] = useState(now.getMonth()); // 0-indexed
 
   const fetchMyData = useCallback(async () => {
+    // BRANCH_ADMIN has no Doctor/Therapist profile, so the personal stats
+    // and calendar endpoints don't apply — skip them and let the branch
+    // tab populate instead.
+    if (isBranchAdmin) {
+      setStats(null);
+      setCalendar(null);
+      setLoading(false);
+      return;
+    }
     try {
       const startDate = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-01`;
       const daysInMonth = getDaysInMonth(calYear, calMonth);
@@ -122,7 +142,7 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
     } finally {
       setLoading(false);
     }
-  }, [calYear, calMonth]);
+  }, [calYear, calMonth, isBranchAdmin]);
 
   useEffect(() => {
     fetchMyData();
@@ -147,14 +167,15 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
     refreshBranchData();
   }, [isAdmin, refreshBranchData]);
 
-  // Roster — doctors + therapists for the selected branch. Used by the
-  // "Add Attendance" dialog when admin creates a record for someone who
-  // hasn't clocked in yet.
+  // Roster — doctors + therapists for the active branch. Used by the
+  // "Set Attendance" dialog when admin creates a record for someone who
+  // hasn't clocked in yet. Pulls the branch-scoped list endpoints so the
+  // dropdown can never be polluted with staff from a different branch.
   useEffect(() => {
-    if (!isAdmin || !branchId) return;
+    if (!isAdmin || !branchId) { setRoster([]); return; }
     Promise.all([
-      apiClient.get<any[]>('/api/user/list-doctors'),
-      apiClient.get<any[]>('/api/user/list-therapists'),
+      apiClient.get<any[]>('/api/user/list-doctors', { branchId }),
+      apiClient.get<any[]>('/api/user/list-therapists', { branchId }),
     ]).then(([{ data: docs }, { data: thers }]) => {
       const rows = [
         ...docs.map((d: any) => ({
@@ -169,16 +190,32 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
           branchId: t.user?.branchId || t.branchId,
           type: 'Therapist' as const,
         })),
-      ].filter((r) => r.id && r.branchId === branchId);
+      ]
+        // Prefer rows that belong to the active branch, but keep rows whose
+        // branchId is missing (some legacy records carry no branchId on the
+        // profile row even when the user is assigned). Without this fallback
+        // the dropdown silently went empty.
+        .filter((r) => r.id && (!r.branchId || r.branchId === branchId));
       setRoster(rows);
     }).catch(() => setRoster([]));
   }, [isAdmin, branchId]);
 
+  // Sync branch from the navbar scope. Falls back to first branch when
+  // "All branches" is active so the per-branch views always have a target.
+  // BRANCH_ADMIN is hard-pinned to their own JWT branchId — they have no
+  // navbar switcher, and the backend would reject a different branch anyway.
   useEffect(() => {
-    if (isAdmin && (branches as any[]).length > 0 && !branchId) {
+    if (isBranchAdmin) {
+      const ownBranch = profile?.branchId ?? null;
+      if (ownBranch) setBranchId(ownBranch);
+      return;
+    }
+    if (!isAdmin) return;
+    if (branchIdParam) { setBranchId(branchIdParam); return; }
+    if ((branches as any[]).length > 0 && !branchId) {
       setBranchId((branches as any[])[0].id);
     }
-  }, [branches, isAdmin, branchId]);
+  }, [branches, isAdmin, isBranchAdmin, profile?.branchId, branchIdParam, branchId]);
 
   const handleClockIn = async () => {
     setClockingIn(true);
@@ -289,7 +326,13 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
   };
 
   const handleDeleteAttendance = async (row: StaffAttendanceEntry) => {
-    if (!confirm(`Delete attendance for ${row.fullName || row.userId.slice(0, 8)} on ${row.date.split('T')[0]}?`)) return;
+    const ok = await confirm({
+      title: "Delete attendance record?",
+      description: `Removes the attendance entry for ${row.fullName || row.userId.slice(0, 8)} on ${row.date.split('T')[0]}. The status will revert to "no record" until reconciliation runs.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await operationsApi.deleteAttendance(row.userId, row.date.split('T')[0]);
       toast.success('Attendance deleted');
@@ -318,6 +361,25 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
       { appts: 0, leaveDays: 0, wfhDays: 0 }
     );
   }, [calendar]);
+
+  // Today's record — drives the prominent "Currently clocked in" indicator
+  // and the disabled state of the Clock In / Clock Out buttons. Falls
+  // through to the active month's calendar so we don't have to issue an
+  // extra request for the same row we already loaded.
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayRecord = calendar?.days.find((d) => d.date === todayKey)?.attendance ?? null;
+  const isClockedIn = !!todayRecord?.clockIn && !todayRecord?.clockOut;
+  const isClockedOut = !!todayRecord?.clockIn && !!todayRecord?.clockOut;
+  const workedMinutes = useMemo(() => {
+    if (!todayRecord?.clockIn) return 0;
+    const end = todayRecord.clockOut ? new Date(todayRecord.clockOut).getTime() : Date.now();
+    return Math.max(0, Math.round((end - new Date(todayRecord.clockIn).getTime()) / 60000));
+  }, [todayRecord]);
+  const workedLabel = (() => {
+    const h = Math.floor(workedMinutes / 60);
+    const m = workedMinutes % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  })();
 
   const daysInMonth = getDaysInMonth(calYear, calMonth);
   const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
@@ -349,27 +411,77 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
         <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
       )}
 
-      {/* Clock In/Out */}
+      {/* Clock In/Out — prominent state indicator + buttons that respect the
+          backend rules (cannot clock in twice, cannot clock out without a
+          prior clock-in). Worked-time recomputes locally each render so the
+          counter ticks while the user is clocked in. Hidden for BRANCH_ADMIN —
+          they have no clinician profile and shouldn't be clocking themselves in. */}
+      {!isBranchAdmin && (
       <Card className="border-none shadow-sm">
-        <CardContent className="py-5 flex flex-wrap items-center gap-4">
-          <Button onClick={handleClockIn} disabled={clockingIn} className="gap-2">
-            {clockingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
-            Clock In
-          </Button>
-          <Button onClick={handleClockOut} disabled={clockingOut} variant="outline" className="gap-2">
-            {clockingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
-            Clock Out
-          </Button>
-          <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Present</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-yellow-500" /> Late</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Absent</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Half Day</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-500" /> Leave</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> WFH</span>
+        <CardContent className="py-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-3">
+              <span
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold border ${
+                  isClockedIn
+                    ? "bg-green-50 text-green-700 border-green-200"
+                    : isClockedOut
+                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                    : "bg-muted text-muted-foreground border-border"
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  isClockedIn ? "bg-green-500 animate-pulse"
+                    : isClockedOut ? "bg-blue-500"
+                    : "bg-muted-foreground/50"
+                }`} />
+                {isClockedIn
+                  ? `Clocked in at ${formatTime(todayRecord?.clockIn)} · ${workedLabel}`
+                  : isClockedOut
+                  ? `Clocked out · worked ${workedLabel}`
+                  : "Not clocked in"}
+              </span>
+              {todayRecord && (
+                <Badge variant="outline" className={statusBadgeStyles[todayRecord.status]}>
+                  {todayRecord.status.replace("_", " ")}
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleClockIn}
+                disabled={clockingIn || isClockedIn || isClockedOut}
+                className="gap-2"
+                title={isClockedIn ? "Already clocked in today" : isClockedOut ? "Already clocked out for today" : undefined}
+              >
+                {clockingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+                Clock In
+              </Button>
+              <Button
+                onClick={handleClockOut}
+                disabled={clockingOut || !isClockedIn}
+                variant="outline"
+                className="gap-2"
+                title={!isClockedIn ? "Clock in first" : undefined}
+              >
+                {clockingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                Clock Out
+              </Button>
+            </div>
+
+            <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Present</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-yellow-500" /> Late</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Absent</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Half Day</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-500" /> Leave</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> WFH</span>
+            </div>
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Stats Summary */}
       {stats && (
@@ -383,7 +495,9 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
         </div>
       )}
 
-      {/* Unified calendar — schedule + leave/WFH + attendance + workload */}
+      {/* Unified calendar — schedule + leave/WFH + attendance + workload.
+          BRANCH_ADMIN has no personal calendar to show. */}
+      {!isBranchAdmin && (
       <Card className="border-none shadow-sm">
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -464,6 +578,7 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Admin: Branch Attendance */}
       {isAdmin && (
@@ -474,44 +589,30 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Users className="w-5 h-5 text-primary" />
                   Branch Attendance
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    {(branches as any[]).find((b: any) => b.id === branchId)?.name || "—"} · switch via navbar
+                  </span>
                 </CardTitle>
                 <div className="flex items-center gap-3">
-                  <SearchableSelect
-                    value={branchId}
-                    onChange={setBranchId}
-                    placeholder="Select Branch"
-                    searchPlaceholder="Search branches…"
-                    className="w-[200px]"
-                    items={(branches as any[]).map((b: any) => ({ value: b.id, label: b.name }))}
-                  />
                   <input
                     type="date"
                     value={selectedDate}
                     onChange={e => setSelectedDate(e.target.value)}
                     className="h-10 px-3 border rounded-md text-sm bg-background"
                   />
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={openAddDialog}
-                    disabled={!branchId}
-                    className="gap-2"
-                    title="Set clock-in / clock-out for a doctor or therapist."
-                  >
-                    <Plus className="w-4 h-4" />
-                    Set Attendance
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleReconcile}
-                    disabled={reconciling || !branchId}
-                    className="gap-2"
-                    title="Convert planned leave / WFH blocks and no-show shifts into attendance rows for yesterday."
-                  >
-                    {reconciling ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    Reconcile
-                  </Button>
+                  {!isBranchAdmin && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReconcile}
+                      disabled={reconciling || !branchId}
+                      className="gap-2"
+                      title="Convert planned leave / WFH blocks and no-show shifts into attendance rows for yesterday."
+                    >
+                      {reconciling ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      Reconcile
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -693,10 +794,15 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                         const r = roster.find((x) => x.id === v);
                         setEditDialog((d) => ({ ...d, userId: v, fullName: r?.fullName || '' }));
                       }}
-                      placeholder="Select doctor or therapist"
+                      placeholder={roster.length === 0 ? "No doctors / therapists in this branch" : "Select doctor or therapist"}
                       searchPlaceholder="Search staff…"
                       items={roster.map((r) => ({ value: r.id, label: `${r.fullName} (${r.type})` }))}
                     />
+                    {roster.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Switch the branch in the navbar or assign clinicians to this branch in <span className="font-semibold">Manage Users</span>.
+                      </p>
+                    )}
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-3">
@@ -766,6 +872,7 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
           </Dialog>
         </>
       )}
+      {confirmDialog}
     </>
   );
 
@@ -777,7 +884,23 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
         <PageHeader
           title="Attendance Tracker"
           subtitle="Clock in/out, monitor punctuality, and see workload alongside planned unavailability."
-        />
+        >
+          {/* Admins land on this screen specifically to set attendance for
+              clinicians who forgot to clock in. The CTA used to live deep
+              inside the Branch Attendance card; surfacing it in the header
+              means it's the first thing the admin sees on a page open. */}
+          {isAdmin && (
+            <Button
+              onClick={openAddDialog}
+              disabled={!branchId}
+              className="gap-2"
+              title="Set clock-in / clock-out for a doctor or therapist."
+            >
+              <Plus className="w-4 h-4" />
+              Set Attendance
+            </Button>
+          )}
+        </PageHeader>
         {body}
       </div>
     </AppLayout>
