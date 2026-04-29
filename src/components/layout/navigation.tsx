@@ -42,6 +42,7 @@ import {
   ClipboardList,
   HeartPulse,
   MoreHorizontal,
+  MessageSquareHeart,
   LucideIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -113,6 +114,8 @@ const PATH_TO_FEATURE: Record<string, string> = {
   "/message-templates": "MESSAGING_TEMPLATES",
   "/reminder-settings": "MESSAGING_TEMPLATES",
   "/critical-journey":  "CRITICAL_JOURNEY_DASHBOARD",
+  // Voice Health Coach
+  "/patient/coach":  "AYURVEDIC_VOICE_COACH",
 };
 
 function pathMatchesNav(pathname: string, navPath: string): boolean {
@@ -432,6 +435,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
     case "PATIENT":
       return [
         { path: "/patient", label: "Today", icon: Home },
+        { path: "/patient/coach", label: "Health Coach", icon: MessageSquareHeart },
         { path: "/patient-portal", label: "My Records", icon: ClipboardList },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
         {
