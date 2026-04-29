@@ -19,6 +19,7 @@ import {
   AdminDashboardSummary,
 } from "@/services/dashboardSummary.service";
 import TodoPanel, { AssignedByMePanel } from "@/components/todo/TodoPanel";
+import TherapistLiveTrackingPanel from "@/components/dashboard/TherapistLiveTrackingPanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { apiClient } from "@/lib/api-client";
 import { iwisApi } from "@/services/iwis.service";
@@ -231,6 +232,9 @@ export default function AdminDashboard() {
           medium={summary.systemHealth.criticalPatientsMedium ?? 0}
           low={summary.systemHealth.criticalPatientsLow ?? 0}
         />
+
+        {/* SECTION C1 — Therapist Live Tracking (active home-therapy sessions) */}
+        <TherapistLiveTrackingPanel branchId={branchIdParam} />
 
         {/* SECTION C2 — Operational Alerts moved to popup in header. */}
 
