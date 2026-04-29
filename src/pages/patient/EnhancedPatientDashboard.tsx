@@ -42,6 +42,7 @@ import { BreathingExercise } from "@/components/wellness/BreathingExercise";
 import { VitalChart } from "@/components/vitals/VitalChart";
 import { ConsultationFeedbackPrompt } from "@/components/feedback/ConsultationFeedbackFlow";
 import { JourneyFeedbackPrompt } from "@/components/journey-feedback/JourneyFeedbackFlow";
+import { CoachWidget } from "@/features/voiceCoach";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -674,9 +675,19 @@ function VitalsTiles({
           Vitals
         </CardTitle>
         <Button
-          variant="ghost" size="sm"
+          variant="outline" size="sm"
           onClick={onOpenBreathing}
-          className="h-7 px-2 text-xs gap-1 text-primary hover:bg-primary/10"
+          className={cn(
+            "h-7 px-2.5 text-xs gap-1 rounded-full",
+            // Resting: outlined chip with primary text + soft tint, so the
+            // affordance is readable on the card surface.
+            "border-primary/30 bg-primary/5 text-primary",
+            // Hover: fill with primary and switch text to primary-foreground
+            // so the contrast is unambiguous (no clash with the ghost variant's
+            // default hover:text-accent-foreground).
+            "hover:bg-primary hover:text-primary-foreground hover:border-primary",
+            "transition-colors",
+          )}
           title="Take a guided breathing break"
         >
           <Wind className="h-3.5 w-3.5" /> Breathe
@@ -1766,6 +1777,9 @@ export default function EnhancedPatientDashboard() {
         onClose={() => setShowBreathing(false)}
         onComplete={(pattern) => toast.success(`Nice work — ${pattern} complete`)}
       />
+
+      {/* Floating Voice Health Coach widget — gated by AYURVEDIC_VOICE_COACH */}
+      <CoachWidget />
     </AppLayout>
   );
 }
