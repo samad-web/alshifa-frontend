@@ -21,6 +21,7 @@ import {
 } from "@/services/dashboardSummary.service";
 import { branchesApi } from "@/services/branches.service";
 import TodoPanel, { AssignedByMePanel } from "@/components/todo/TodoPanel";
+import TherapistLiveTrackingPanel from "@/components/dashboard/TherapistLiveTrackingPanel";
 import { useBranchScope, ALL_BRANCHES } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
 
@@ -201,6 +202,9 @@ export default function DoctorAdminDashboard() {
             </Button>
           </div>
         </section>
+
+        {/* SECTION B3 — Therapist Live Tracking (active home-therapy sessions) */}
+        <TherapistLiveTrackingPanel branchId={branchIdParam} />
 
         {/* SECTION C — Staff Overview & Workload.
             Full oversight view: clinical throughput (appts / completion /
