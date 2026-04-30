@@ -47,6 +47,7 @@ import { VitalChart } from "@/components/vitals/VitalChart";
 import { ConsultationFeedbackPrompt } from "@/components/feedback/ConsultationFeedbackFlow";
 import { JourneyFeedbackPrompt } from "@/components/journey-feedback/JourneyFeedbackFlow";
 import { CoachWidget } from "@/features/voiceCoach";
+import { PhotoReminderBanner } from "@/components/patient/PhotoReminderBanner";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1700,6 +1701,10 @@ export default function EnhancedPatientDashboard() {
           the therapist tapping Complete (Task 8). Idempotent server-side. */}
       <HomeTherapyFeedbackListener />
       <div className="container mx-auto px-4 py-5 max-w-6xl space-y-4">
+        {/* Photo reminder — appears when the patient is in an active journey
+            phase without a recent DURING photo. Self-contained: socket + REST
+            + dismissal state, including the upload modal. */}
+        <PhotoReminderBanner />
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between">
           <div>

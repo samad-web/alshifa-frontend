@@ -489,6 +489,28 @@ export function ClientBookingModal({
                                             key={staff.id}
                                             onClick={() => {
                                                 setFormData({ ...formData, doctorId: staff.id });
+                                                // Real-time availability sniff. Best-effort — failure
+                                                // here just means no toast, never blocks the booking.
+                                                const dateParam = (formData.date ?? new Date()).toISOString().slice(0, 10);
+                                                apiClient
+                                                    .get<{ hasAvailableSlots: boolean; nextAvailable: string | null }>(
+                                                        '/api/availability/check',
+                                                        { doctorId: staff.id, date: dateParam },
+                                                    )
+                                                    .then(({ data }) => {
+                                                        if (!data.hasAvailableSlots) {
+                                                            const next = data.nextAvailable
+                                                                ? new Date(data.nextAvailable).toLocaleDateString()
+                                                                : 'No upcoming slots found';
+                                                            toast.error(
+                                                                `Dr. ${staff.fullName || 'Selected'} is not available on this date. Next available: ${next}`,
+                                                            );
+                                                            // Wipe any stale slots so the time picker doesn't suggest
+                                                            // a slot the patient can't actually book.
+                                                            setAvailableSlots([]);
+                                                        }
+                                                    })
+                                                    .catch(() => { /* silent — backend will surface real errors at slot fetch */ });
                                                 nextStep();
                                             }}
                                             className={cn(

@@ -53,6 +53,9 @@ export interface TherapyRoomBooking {
 }
 
 export interface DietMealPlan {
+  // Server-assigned cuid. Optional because the create-prescription form
+  // builds DietMealPlan rows in memory before they hit the DB.
+  id?: string;
   mealTime: MealTime;
   foods: Array<{ name: string; quantity?: string; unit?: string; notes?: string }>;
   avoidFoods: Array<{ name: string; reason?: string }>;
@@ -235,6 +238,31 @@ export const iwisApi = {
     (await apiClient.post<DietPrescription>('/api/diet-prescriptions', data)).data,
   updateDiet: async (id: string, data: Partial<DietPrescription> & { meals?: DietMealPlan[] }) =>
     (await apiClient.put<DietPrescription>(`/api/diet-prescriptions/${id}`, data)).data,
+  // Smart-delete: backend returns mode 'soft' (when DietAdherenceLogs exist) or
+  // 'hard'. Caller branches on `mode` to pick the right toast copy.
+  deleteDiet: async (id: string) =>
+    (await apiClient.delete<{ mode: 'soft' | 'hard'; message: string; adherenceLogs?: number }>(
+      `/api/diet-prescriptions/${id}`,
+    )).data,
+  addDietMeal: async (
+    prescriptionId: string,
+    data: Pick<DietMealPlan, 'mealTime' | 'foods' | 'avoidFoods' | 'instructions'>,
+  ) => (await apiClient.post<DietMealPlan>(
+    `/api/diet-prescriptions/${prescriptionId}/meals`,
+    data,
+  )).data,
+  updateDietMeal: async (
+    prescriptionId: string,
+    mealId: string,
+    data: Pick<DietMealPlan, 'foods' | 'avoidFoods' | 'instructions'>,
+  ) => (await apiClient.put<DietMealPlan>(
+    `/api/diet-prescriptions/${prescriptionId}/meals/${mealId}`,
+    data,
+  )).data,
+  deleteDietMeal: async (prescriptionId: string, mealId: string) =>
+    (await apiClient.delete<{ success: true }>(
+      `/api/diet-prescriptions/${prescriptionId}/meals/${mealId}`,
+    )).data,
   getDietToday: async (id: string) =>
     (await apiClient.get<DietDailyPlan>(`/api/diet-prescriptions/${id}/today`)).data,
   logDietMeal: async (id: string, payload: { patientId: string; mealTime: MealTime; followed: boolean; notes?: string }) =>

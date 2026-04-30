@@ -29,6 +29,9 @@ import { ChatWrapper } from "@/components/chat/ChatWrapper";
 import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
 import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
 import { PatientHistoryPanel } from "@/components/consultation/PatientHistoryPanel";
+import { PainMapCard } from "@/components/patient/PainMapCard";
+import { PatientRecordReviewTracker } from "@/components/doctor/PatientRecordReviewTracker";
+import { useAuth } from "@/hooks/useAuth";
 import type { FollowUpPayload } from "@/services/followUp.service";
 import { iwisApi, type DietPackage } from "@/services/iwis.service";
 
@@ -49,6 +52,8 @@ interface PreviousPrescription {
 export default function ConsultationRoom() {
     const { appointmentId } = useParams();
     const navigate = useNavigate();
+    const { role } = useAuth();
+    const showPainMap = role === "DOCTOR" || role === "ADMIN_DOCTOR";
     const [appointment, setAppointment] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [notes, setNotes] = useState("");
@@ -207,6 +212,10 @@ export default function ConsultationRoom() {
 
     return (
         <AppLayout>
+            {/* XP tracker — fixed bottom-right chip; awards +15 XP after 60s */}
+            {appointment.patient?.id && (
+                <PatientRecordReviewTracker patientId={appointment.patient.id} />
+            )}
             <div className="h-[calc(100vh-4rem)] flex flex-col">
                 {/* Session Header */}
                 <div className="px-6 py-4 bg-card border-b border-border/50 flex items-center justify-between shrink-0">
@@ -300,6 +309,10 @@ export default function ConsultationRoom() {
 
                     {/* Right: Documentation Area */}
                     <div className="w-96 bg-card border-l border-border/50 p-6 flex flex-col space-y-6 shrink-0">
+                        {showPainMap && appointment.patient?.id && (
+                            <PainMapCard patientId={appointment.patient.id} />
+                        )}
+
                         <div className="space-y-1">
                             <h3 className="text-sm font-black text-foreground flex items-center gap-2 uppercase tracking-tight">
                                 <FileText className="w-4 h-4 text-primary" />

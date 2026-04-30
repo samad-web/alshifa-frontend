@@ -222,18 +222,14 @@ export default function DietPackagesPage() {
             if (editingId) {
                 await iwisApi.updateDietPackage(editingId, payload);
                 toast({
-                    title: isAdminAuthor ? "Package updated" : "Package resubmitted",
-                    description: isAdminAuthor
-                        ? "Changes are live immediately and can be assigned to patients."
-                        : "Your revisions have been sent to admin for re-review.",
+                    title: "Package updated",
+                    description: "Changes are live immediately and can be assigned to patients.",
                 });
             } else {
                 await iwisApi.createDietPackage(payload);
                 toast({
-                    title: isAdminAuthor ? "Package created" : "Submitted for approval",
-                    description: isAdminAuthor
-                        ? "Approved automatically — you can assign it to patients now."
-                        : "An admin or admin-doctor will review and approve it before you can assign to patients.",
+                    title: "Diet package created",
+                    description: "Ready to assign to patients — no approval needed.",
                 });
             }
             setDialogOpen(false);
@@ -380,13 +376,11 @@ export default function DietPackagesPage() {
             <div className="container max-w-6xl mx-auto px-4 py-8 space-y-8">
                 <PageHeader
                     title="Diet Packages"
-                    subtitle={isApprover
-                        ? "Review diet packages submitted by doctors and therapists. Approve to make them assignable."
-                        : "Reusable Pathya-Apathya templates. Submit for admin approval, then assign to patients."}
+                    subtitle="Reusable Pathya-Apathya templates. Create and assign to patients directly — no approval needed."
                 >
                     {isCreator && (
                         <Button onClick={openCreate}>
-                            <Plus className="w-4 h-4 mr-2" /> {isAdminAuthor ? "New Package" : "Submit for Approval"}
+                            <Plus className="w-4 h-4 mr-2" /> New Package
                         </Button>
                     )}
                 </PageHeader>
@@ -442,7 +436,7 @@ export default function DietPackagesPage() {
                                     {tab === "ALL" ? "No diet packages yet." : `No ${tab.toLowerCase()} packages.`}
                                 </p>
                                 {tab === "ALL" && isCreator && (
-                                    <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" /> Submit your first package</Button>
+                                    <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" /> Create your first package</Button>
                                 )}
                             </div>
                         );
@@ -581,11 +575,11 @@ export default function DietPackagesPage() {
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                     <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
-                            <DialogTitle>{editingId ? "Revise Diet Package" : "Submit Diet Package for Approval"}</DialogTitle>
+                            <DialogTitle>{editingId ? "Edit Diet Package" : "New Diet Package"}</DialogTitle>
                             <DialogDescription>
                                 {editingId
-                                    ? "Saving will return this package to PENDING for admin re-review."
-                                    : "Once submitted, an admin or admin-doctor will review and approve before you can assign it to patients."}
+                                    ? "Changes go live immediately for any future assignments. Existing patient prescriptions are unaffected."
+                                    : "The package is published immediately and can be assigned to patients right away."}
                             </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={submit} className="space-y-5 py-4">
@@ -665,9 +659,7 @@ export default function DietPackagesPage() {
                                 <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
                                 <Button type="submit">
                                     <Send className="w-4 h-4 mr-2" />
-                                    {isAdminAuthor
-                                        ? (editingId ? "Save Changes" : "Create Package")
-                                        : (editingId ? "Resubmit for Approval" : "Submit for Approval")}
+                                    {editingId ? "Save Changes" : "Create Package"}
                                 </Button>
                             </DialogFooter>
                         </form>

@@ -10,9 +10,10 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Progress } from '@/components/ui/progress';
-import { ChevronLeft, ChevronRight, Check, Star, Activity } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Star, Activity, AlertTriangle } from 'lucide-react';
 import { BodyMap, type PainRegion } from './BodyMap';
 import { TriageResultCard } from './TriageResultCard';
+import { TriageMediaUpload, type TriageMediaFile } from './TriageMediaUpload';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
@@ -90,6 +91,17 @@ export function TriageWizard() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
+  // Triage media (Feature 8). State lives here so the submit handler can
+  // upload after the triage session is created. Files are kept in memory only
+  // — never persisted to sessionStorage (File objects don't serialise).
+  const [triageMediaFiles, setTriageMediaFiles] = useState<TriageMediaFile[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // Derived: any region carrying the "Swelling" character → media is mandatory.
+  const hasSwelling = data.painRegions.some((r) =>
+    r.characters?.includes('Swelling') ||
+    (r as unknown as { character?: string }).character === 'Swelling'
+  );
 
   // Autosave to sessionStorage
   useEffect(() => {
@@ -106,6 +118,15 @@ export function TriageWizard() {
   };
 
   const handleSubmit = async () => {
+    // Submit-time guard: media required when swelling is reported.
+    if (hasSwelling && triageMediaFiles.length === 0) {
+      toast({
+        title: 'Media required',
+        description: 'Please upload at least one photo or video of the swollen area before submitting.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = {
@@ -132,8 +153,32 @@ export function TriageWizard() {
         ...(Object.keys(data.recentVitals).length > 0 ? { recentVitals: data.recentVitals } : {}),
       };
 
-      const res = await apiClient.post('/api/triage', payload);
-      setResult(res);
+      const res = await apiClient.post<{ id: string }>('/api/triage', payload);
+      const sessionId = res?.data?.id;
+
+      // Media uploads happen AFTER the triage session is created so each file
+      // can be linked back via triageSessionId. Sequential, not parallel — keeps
+      // memory pressure bounded for large videos and surfaces a per-file error
+      // without poisoning the rest of the batch.
+      if (sessionId && triageMediaFiles.length > 0) {
+        setUploadProgress({ done: 0, total: triageMediaFiles.length });
+        for (let i = 0; i < triageMediaFiles.length; i++) {
+          const m = triageMediaFiles[i];
+          try {
+            const fd = new FormData();
+            fd.append('file', m.file);
+            if (m.caption) fd.append('caption', m.caption);
+            await apiClient.upload(`/api/triage/${sessionId}/media`, fd);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Upload failed';
+            toast({ title: `"${m.file.name}" upload failed`, description: msg, variant: 'destructive' });
+          }
+          setUploadProgress({ done: i + 1, total: triageMediaFiles.length });
+        }
+        setUploadProgress(null);
+      }
+
+      setResult(res?.data ?? res);
       sessionStorage.removeItem(STORAGE_KEY);
       toast({ title: 'Triage submitted', description: 'Your assessment has been processed.' });
     } catch (err: any) {
@@ -503,6 +548,32 @@ export function TriageWizard() {
                   </p>
                 </div>
               )}
+
+              {/* Supporting media — required when Swelling is reported. */}
+              <div className="space-y-2">
+                <h4 className="font-medium text-sm flex items-center gap-2">
+                  {hasSwelling ? (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-rose-600" />
+                      📸 Supporting Media (Required for Swelling)
+                    </>
+                  ) : (
+                    <>📎 Supporting Media (Optional)</>
+                  )}
+                </h4>
+                <TriageMediaUpload isRequired={hasSwelling} onFilesChange={setTriageMediaFiles} />
+                {hasSwelling && triageMediaFiles.length === 0 && (
+                  <p className="text-xs text-rose-700">
+                    Please upload at least one photo or video of the swollen area before submitting.
+                  </p>
+                )}
+              </div>
+
+              {uploadProgress && (
+                <div className="text-xs text-muted-foreground">
+                  Uploading media {uploadProgress.done}/{uploadProgress.total}…
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -523,7 +594,10 @@ export function TriageWizard() {
             Continue <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         ) : (
-          <Button onClick={handleSubmit} disabled={submitting}>
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting || (hasSwelling && triageMediaFiles.length === 0)}
+          >
             {submitting ? 'Submitting...' : 'Submit Assessment'}
           </Button>
         )}
