@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { gamificationApi } from "@/services/gamification.service";
+import { BadgeHoldersModal } from "@/components/admin/BadgeHoldersModal";
 import type { GamificationAnalytics as GamAnalytics } from "@/types";
 
 // Minimal shape contracts for the auxiliary panels. The backend hasn't
@@ -52,6 +53,10 @@ export default function GamificationAnalytics() {
   const [configImpact, setConfigImpact] = useState<ConfigImpactResponse | null>(null);
   const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Click-through state for the Badge Distribution row → holders modal.
+  // The badgeDistribution rows expose `code` (not `id`); the new backend
+  // endpoint resolves either, so we pass `code` straight through.
+  const [selectedBadge, setSelectedBadge] = useState<{ code: string; name: string } | null>(null);
 
   useEffect(() => {
     // Each panel loads independently — a failure on (e.g.) anomalies must
@@ -164,6 +169,7 @@ export default function GamificationAnalytics() {
               <div className="space-y-2.5">
                 {badgeDistribution.map(badge => {
                   const maxCount = Math.max(...badgeDistribution.map(b => b.awardedCount), 1);
+                  const clickable = badge.awardedCount > 0;
                   return (
                     <div key={badge.code} className="flex items-center gap-3">
                       <div className="w-24 text-xs font-bold truncate">{badge.name}</div>
@@ -171,7 +177,17 @@ export default function GamificationAnalytics() {
                         <Progress value={(badge.awardedCount / maxCount) * 100} className="h-2" />
                       </div>
                       <div className="w-10 text-right">
-                        <Badge variant="outline" className="text-[9px]">{badge.awardedCount}</Badge>
+                        {clickable ? (
+                          <button
+                            type="button"
+                            className="text-sm font-bold text-primary underline cursor-pointer hover:text-primary/80"
+                            onClick={() => setSelectedBadge({ code: badge.code, name: badge.name })}
+                          >
+                            {badge.awardedCount}
+                          </button>
+                        ) : (
+                          <Badge variant="outline" className="text-[9px]">{badge.awardedCount}</Badge>
+                        )}
                       </div>
                     </div>
                   );
@@ -318,6 +334,13 @@ export default function GamificationAnalytics() {
           </Card>
         )}
       </div>
+
+      <BadgeHoldersModal
+        badgeId={selectedBadge?.code ?? null}
+        badgeName={selectedBadge?.name ?? null}
+        open={selectedBadge !== null}
+        onClose={() => setSelectedBadge(null)}
+      />
     </AppLayout>
   );
 }

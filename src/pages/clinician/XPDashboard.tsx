@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Star, Zap, Trophy, TrendingUp, Flame, ArrowUp,
-  Loader2, AlertCircle, Crown, Shield, Award,
+  Loader2, AlertCircle, Crown, Shield, Award, FileText,
 } from "lucide-react";
 import { clinicianGamificationApi } from "@/services/clinicianGamification.service";
 import type { ClinicianXPProfile, XPTransaction, XPLeaderboardEntry } from "@/types";
@@ -36,10 +36,29 @@ function timeAgo(dateStr: string) {
 }
 
 function actionIcon(action: string) {
-  if (action.toLowerCase().includes("consult")) return <Star className="w-4 h-4 text-yellow-500" />;
-  if (action.toLowerCase().includes("mentor")) return <Award className="w-4 h-4 text-purple-500" />;
-  if (action.toLowerCase().includes("streak")) return <Flame className="w-4 h-4 text-orange-500" />;
+  const a = action.toLowerCase();
+  if (a.includes("consult")) return <Star className="w-4 h-4 text-yellow-500" />;
+  if (a.includes("mentor"))  return <Award className="w-4 h-4 text-purple-500" />;
+  if (a.includes("streak"))  return <Flame className="w-4 h-4 text-orange-500" />;
+  if (a.includes("review"))  return <FileText className="w-4 h-4 text-primary" />;
   return <Zap className="w-4 h-4 text-primary" />;
+}
+
+// Pretty action label so the ledger doesn't show raw enum strings to clinicians.
+const ACTION_LABELS: Record<string, string> = {
+  PATIENT_REVIEW: "Patient Record Review",
+  CONSULTATION: "Consultation",
+  MENTOR_SESSION: "Mentor Session",
+  POSITIVE_FEEDBACK: "Positive Feedback",
+  PATIENT_OUTCOME: "Patient Outcome",
+  BADGE_EARNED: "Badge Earned",
+  STREAK_BONUS: "Streak Bonus",
+  ON_TIME_ARRIVAL: "On-time Arrival",
+  DIET_PACKAGE_APPROVED: "Diet Package Approved",
+  QUEST_COMPLETE: "Quest Complete",
+};
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action;
 }
 
 export default function XPDashboard() {
@@ -230,7 +249,7 @@ export default function XPDashboard() {
                           {actionIcon(tx.action)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{tx.action}</p>
+                          <p className="text-sm font-medium text-foreground truncate">{actionLabel(tx.action)}</p>
                           <p className="text-xs text-muted-foreground">{timeAgo(tx.createdAt)}</p>
                         </div>
                         <div className="flex items-center gap-1 text-sm font-bold text-green-600">

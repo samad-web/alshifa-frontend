@@ -13,8 +13,11 @@ import { cn } from "@/lib/utils";
 import {
   Activity, AlertTriangle, CheckCircle2, Users, UserPlus, Trophy, Clock,
   Stethoscope, Settings, BarChart3, BellRing, Share2, HeartPulse,
-  TrendingUp, ChevronLeft, ChevronRight,
+  TrendingUp, ChevronLeft, ChevronRight, HeartHandshake, Pill, ShieldCheck,
 } from "lucide-react";
+import { apiClient } from "@/lib/api-client";
+import { StaffOverviewCard } from "@/components/admin/StaffOverviewCard";
+import { WorkloadDistributionChart } from "@/components/admin/WorkloadDistributionChart";
 import {
   dashboardSummaryApi,
   AdminDoctorDashboardSummary,
@@ -51,6 +54,19 @@ export default function DoctorAdminDashboard() {
   // viewer back to page 1.
   const [staffPage, setStaffPage] = useState(1);
   useEffect(() => { setStaffPage(1); }, [branchId]);
+
+  // Per-role staff counts powering the click-to-expand cards section. Loaded
+  // alongside the main summary; failures fall back to zeros so a flaky
+  // endpoint never blanks the dashboard.
+  const [staffCounts, setStaffCounts] = useState<{
+    DOCTOR: number; THERAPIST: number; PHARMACIST: number; ADMIN_DOCTOR: number;
+  }>({ DOCTOR: 0, THERAPIST: 0, PHARMACIST: 0, ADMIN_DOCTOR: 0 });
+  useEffect(() => {
+    apiClient
+      .get<{ counts: typeof staffCounts }>("/api/operations/staff-overview")
+      .then(({ data }) => setStaffCounts(data.counts))
+      .catch(() => { /* leave zeros on failure */ });
+  }, [branchId]);
 
   async function loadBranches() {
     try {
@@ -205,6 +221,22 @@ export default function DoctorAdminDashboard() {
 
         {/* SECTION B3 — Therapist Live Tracking (active home-therapy sessions) */}
         <TherapistLiveTrackingPanel branchId={branchIdParam} />
+
+        {/* SECTION C0 — Click-to-expand Staff Overview cards.
+            Same surface as on /admin: 4 role tiles, each opens a side drawer
+            with the per-clinician detail list. Sits above the flat oversight
+            table below so the admin doctor can either drill in or skim. */}
+        <section className="space-y-2">
+          <h2 className="font-semibold flex items-center gap-2 text-sm text-muted-foreground uppercase tracking-wide">
+            <UserPlus className="w-4 h-4" /> Staff Overview · Click a card to drill in
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StaffOverviewCard role="DOCTOR"        label="Doctors"       count={staffCounts.DOCTOR}       icon={Stethoscope} />
+            <StaffOverviewCard role="THERAPIST"     label="Therapists"    count={staffCounts.THERAPIST}    icon={HeartHandshake} />
+            <StaffOverviewCard role="PHARMACIST"   label="Pharmacists"   count={staffCounts.PHARMACIST}   icon={Pill} />
+            <StaffOverviewCard role="ADMIN_DOCTOR"  label="Admin Doctors" count={staffCounts.ADMIN_DOCTOR} icon={ShieldCheck} />
+          </div>
+        </section>
 
         {/* SECTION C — Staff Overview & Workload.
             Full oversight view: clinical throughput (appts / completion /
@@ -472,6 +504,11 @@ export default function DoctorAdminDashboard() {
             </div>
           </div>
         </section>
+
+        {/* SECTION F1 — Monthly Workload Distribution chart. Sits inside
+            Performance Analytics so the admin doctor sees the per-week
+            breakdown right next to the throughput KPIs above. */}
+        <WorkloadDistributionChart />
 
         {/* SECTION F2 — Gamification Oversight. Admin doctor supervises the
             engagement program: leaderboard standings, level distribution

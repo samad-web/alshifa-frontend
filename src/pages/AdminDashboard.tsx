@@ -12,8 +12,11 @@ import { cn } from "@/lib/utils";
 import {
   Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift,
   Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse, Bell, RefreshCw, Loader2, Download,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Stethoscope, HeartHandshake, Pill, ShieldCheck,
+  CheckCircle2,
 } from "lucide-react";
+import { StaffOverviewCard } from "@/components/admin/StaffOverviewCard";
+import { WorkloadDistributionChart } from "@/components/admin/WorkloadDistributionChart";
 import {
   dashboardSummaryApi,
   AdminDashboardSummary,
@@ -44,6 +47,19 @@ export default function AdminDashboard() {
     iwisApi.listDietPackages({ status: "PENDING" })
       .then((list) => setPendingDietCount(Array.isArray(list) ? list.length : 0))
       .catch(() => setPendingDietCount(0));
+  }, [branchIdParam]);
+
+  // Per-role staff counts powering the "Staff Overview" cards. Fetched
+  // alongside the main summary; failures fall back to zeros so a flaky
+  // endpoint doesn't blank the whole dashboard.
+  const [staffCounts, setStaffCounts] = useState<{
+    DOCTOR: number; THERAPIST: number; PHARMACIST: number; ADMIN_DOCTOR: number;
+  }>({ DOCTOR: 0, THERAPIST: 0, PHARMACIST: 0, ADMIN_DOCTOR: 0 });
+  useEffect(() => {
+    apiClient
+      .get<{ counts: typeof staffCounts }>("/api/operations/staff-overview")
+      .then(({ data }) => setStaffCounts(data.counts))
+      .catch(() => { /* leave zeros on failure */ });
   }, [branchIdParam]);
 
   const handleExportUsers = async () => {
@@ -225,6 +241,19 @@ export default function AdminDashboard() {
           />
         </section>
 
+        {/* SECTION B2 — Staff Overview. Click a card to drill into the role. */}
+        <section className="space-y-2">
+          <h2 className="font-semibold flex items-center gap-2 text-sm text-muted-foreground uppercase tracking-wide">
+            <UserPlus className="w-4 h-4" /> Staff Overview
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StaffOverviewCard role="DOCTOR"        label="Doctors"       count={staffCounts.DOCTOR}       icon={Stethoscope} />
+            <StaffOverviewCard role="THERAPIST"     label="Therapists"    count={staffCounts.THERAPIST}    icon={HeartHandshake} />
+            <StaffOverviewCard role="PHARMACIST"    label="Pharmacists"   count={staffCounts.PHARMACIST}   icon={Pill} />
+            <StaffOverviewCard role="ADMIN_DOCTOR"  label="Admin Doctors" count={staffCounts.ADMIN_DOCTOR} icon={ShieldCheck} />
+          </div>
+        </section>
+
         {/* SECTION C — Critical Journey (patients flagged for non-adherence) */}
         <CriticalJourneySection
           total={summary.systemHealth.criticalPatients ?? 0}
@@ -280,6 +309,9 @@ export default function AdminDashboard() {
             </table>
           </div>
         </section>
+
+        {/* SECTION D2 — Monthly Workload Distribution (performance analytics) */}
+        <WorkloadDistributionChart />
 
         {/* SECTION E — Todo Panel with assignment */}
         <TodoPanel canAssign title="My Tasks" />

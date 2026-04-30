@@ -24,6 +24,7 @@ import { ErrorBoundary } from "../common/ErrorBoundary";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { BodyMap, type PainRegion } from "./BodyMap";
+import { TriageMediaUpload, type TriageMediaFile } from "./TriageMediaUpload";
 
 interface UploadedFile {
     id: string;
@@ -57,6 +58,19 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
     const [uploadedDocuments, setUploadedDocuments] = useState<UploadedFile[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const [result, setResult] = useState<any>(null);
+    // Triage media (photos/videos of the affected area). Mandatory when the
+    // patient logged "Swelling" in the body map; optional otherwise. Files
+    // are kept in memory and uploaded after the triage session is created.
+    const [mediaFiles, setMediaFiles] = useState<TriageMediaFile[]>([]);
+    const [mediaUploading, setMediaUploading] = useState<{ done: number; total: number } | null>(null);
+
+    // Derived: any region carrying the Swelling character. PainRegion stores
+    // characters as an array; we also fall back to the legacy `character` key
+    // for any older payloads still in flight.
+    const hasSwelling = formData.painRegions.some((r) =>
+        r.characters?.includes("Swelling") ||
+        (r as unknown as { character?: string }).character === "Swelling"
+    );
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -94,10 +108,16 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
     };
 
     const handleSubmit = async () => {
+        // Hard guard: the button itself is also disabled below, but defend
+        // against keyboard-submit / programmatic triggers landing here too.
+        if (hasSwelling && mediaFiles.length === 0) {
+            toast.error("Please upload at least one photo or video of the swollen area before submitting.");
+            return;
+        }
         setLoading(true);
         console.log("[Triage] Submitting form data:", formData, "Documents:", uploadedDocuments);
         try {
-            const { data } = await apiClient.post('/api/triage/submit', {
+            const { data } = await apiClient.post<{ id?: string } & Record<string, unknown>>('/api/triage/submit', {
                 ...formData,
                 painRegions: formData.painRegions,
                 painSeverity: formData.painRegions.length > 0
@@ -106,6 +126,29 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
                 documentIds: uploadedDocuments.map(d => d.id)
             });
             console.log("[Triage] Submission successful:", data);
+
+            // Sequential per-file upload to /api/triage/:sessionId/media — runs
+            // after the session is created so each Document row is linked back
+            // via triageSessionId. Per-file failure is surfaced but doesn't
+            // poison the rest of the batch or the assessment result.
+            const sessionId = data?.id as string | undefined;
+            if (sessionId && mediaFiles.length > 0) {
+                setMediaUploading({ done: 0, total: mediaFiles.length });
+                for (let i = 0; i < mediaFiles.length; i++) {
+                    const m = mediaFiles[i];
+                    try {
+                        const fd = new FormData();
+                        fd.append("file", m.file);
+                        if (m.caption) fd.append("caption", m.caption);
+                        await apiClient.upload(`/api/triage/${sessionId}/media`, fd);
+                    } catch (err) {
+                        toast.error(`"${m.file.name}" upload failed: ${err instanceof Error ? err.message : "unknown"}`);
+                    }
+                    setMediaUploading({ done: i + 1, total: mediaFiles.length });
+                }
+                setMediaUploading(null);
+            }
+
             setResult(data);
             setStep(3);
             toast.success("Assessment completed successfully.");
@@ -282,6 +325,36 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
                                     onChange={e => setFormData({ ...formData, medications: e.target.value })}
                                 />
                             </div>
+
+                            {/* Affected-area media — required when Swelling was reported,
+                                optional otherwise. Distinct from the medical-record uploader
+                                above (those are PDFs/labs; these are photos/videos of the area). */}
+                            <div className="space-y-2">
+                                <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
+                                    {hasSwelling ? (
+                                        <>
+                                            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                                            📸 Photos / Videos of Swollen Area (Required)
+                                        </>
+                                    ) : (
+                                        <>📎 Photos / Videos of Affected Area (Optional)</>
+                                    )}
+                                </Label>
+                                <TriageMediaUpload
+                                    isRequired={hasSwelling}
+                                    onFilesChange={setMediaFiles}
+                                />
+                                {hasSwelling && mediaFiles.length === 0 && (
+                                    <p className="text-xs text-rose-700 font-medium">
+                                        Please upload at least one photo or video of the swollen area before submitting.
+                                    </p>
+                                )}
+                                {mediaUploading && (
+                                    <p className="text-xs text-muted-foreground">
+                                        Uploading media {mediaUploading.done}/{mediaUploading.total}…
+                                    </p>
+                                )}
+                            </div>
                         </div>
                     )}
 
@@ -369,7 +442,14 @@ export function TriageQuestionnaire({ onComplete, onCancel }: TriageQuestionnair
                             </Button>
                             <Button
                                 onClick={step === 2 ? handleSubmit : nextStep}
-                                disabled={loading || (step === 1 && !formData.painArea)}
+                                disabled={
+                                    loading ||
+                                    (step === 1 && !formData.painArea) ||
+                                    // Swelling was reported but no media yet — block submit so
+                                    // the rose error text below the upload zone is the user's
+                                    // only path forward.
+                                    (step === 2 && hasSwelling && mediaFiles.length === 0)
+                                }
                                 className="px-5 sm:px-8 font-bold text-xs sm:text-sm"
                                 size="sm"
                             >

@@ -13,13 +13,14 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Package, Loader2, Building2, Users, Calendar, IndianRupee, Edit2, Trash2, ClipboardList } from "lucide-react";
+import { Plus, Package, Loader2, Building2, Users, Calendar, IndianRupee, ClipboardList } from "lucide-react";
 import { iwisApi, type TreatmentPackage, type PackageEnrolment } from "@/services/iwis.service";
 import { branchesApi } from "@/services/branches.service";
 import { apiClient } from "@/lib/api-client";
 import { useBranchScope } from "@/hooks/useBranchScope";
-import { useConfirm } from "@/components/common/ConfirmDialog";
+import { HoverActionCard } from "@/components/common/HoverActionCard";
 import { useAuth } from "@/hooks/useAuth";
+import { ApiClientError } from "@/lib/api-client";
 
 type ComponentRow = { type: string; description: string; quantity: number };
 
@@ -29,12 +30,18 @@ const GST_SLABS = [0, 5, 12, 18, 28] as const;
 
 export default function TreatmentPackagesPage() {
     const { toast } = useToast();
-    const { confirm, dialog: confirmDialog } = useConfirm();
+    // useConfirm() retired here — HoverActionCard now owns the delete-confirm
+    // dialog. The enrol form has its own inline UI and never needed it.
     const { role } = useAuth();
     // Package authoring is admin-only. DOCTOR can view + enrol patients but
     // not create / edit / deactivate templates. Backend enforces the same;
     // hiding the UI prevents the visible-but-403 footgun.
     const canManagePackages = role === "ADMIN" || role === "ADMIN_DOCTOR";
+    // Per-card permissions for the hover action bar. Edit is open to any
+    // clinician role; delete stays admin-only because deactivating a package
+    // affects future enrolments across the branch.
+    const canHoverEdit = role === "DOCTOR" || role === "ADMIN_DOCTOR" || role === "ADMIN";
+    const canHoverDelete = role === "ADMIN_DOCTOR" || role === "ADMIN";
     // Admins (ADMIN, ADMIN_DOCTOR) drive scope from the navbar selector —
     // when "All Branches" is picked we fan out across the hospital and show
     // a branch label on every package card. DOCTOR / THERAPIST don't see
@@ -197,55 +204,66 @@ export default function TreatmentPackagesPage() {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {packages.map((pkg) => (
-                            <Panel key={pkg.id} title={pkg.name} className="group hover:shadow-elevated transition-all">
-                                <div className="space-y-4">
-                                    {/* Branch label only matters in cross-branch mode — when
-                                        a single branch is scoped, every card belongs to it. */}
-                                    {isCrossBranch && pkg.branch?.name && (
-                                        <Badge variant="outline" className="gap-1 text-[11px]">
-                                            <Building2 className="w-3 h-3" /> {pkg.branch.name}
-                                        </Badge>
-                                    )}
-                                    {pkg.description && <p className="text-sm text-muted-foreground">{pkg.description}</p>}
-                                    <div className="grid grid-cols-3 gap-3 text-sm">
-                                        <div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-primary/70" /> {pkg.durationDays} days</div>
-                                        <div className="flex items-center gap-2"><IndianRupee className="w-4 h-4 text-primary/70" /> ₹{pkg.price.toLocaleString()}</div>
-                                        <div className="flex items-center gap-2"><Users className="w-4 h-4 text-primary/70" /> {pkg._count?.enrolments ?? 0} enrolled</div>
-                                    </div>
-                                    {pkg.components && pkg.components.length > 0 && (
-                                        <div className="space-y-1">
-                                            <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Includes</div>
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {pkg.components.map((c, i) => (
-                                                    <Badge key={i} variant="secondary" className="text-[11px]">{c.quantity}× {c.description || c.type}</Badge>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-end gap-2 pt-2">
-                                        <Button variant="outline" size="sm" onClick={() => setEnrolOpen(pkg.id)}><ClipboardList className="w-3.5 h-3.5 mr-2" /> Enrol</Button>
-                                        {canManagePackages && (
-                                            <>
-                                                <Button variant="secondary" size="sm" onClick={() => open(pkg)}><Edit2 className="w-3.5 h-3.5 mr-2" /> Edit</Button>
-                                                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                        onClick={async () => {
-                                                            const ok = await confirm({
-                                                                title: "Deactivate package?",
-                                                                description: `"${pkg.name}" will no longer be available for new enrolments. Existing enrolments are unaffected.`,
-                                                                confirmLabel: "Deactivate",
-                                                                tone: "danger",
-                                                            });
-                                                            if (!ok) return;
-                                                            await iwisApi.deactivatePackage(pkg.id);
-                                                            reload();
-                                                        }}>
-                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                </Button>
-                                            </>
+                            <HoverActionCard
+                                key={pkg.id}
+                                canEdit={canHoverEdit}
+                                canDelete={canHoverDelete}
+                                onEdit={() => open(pkg)}
+                                deleteTitle={`Delete "${pkg.name}"?`}
+                                deleteDescription="If active enrolments exist this will fail; otherwise the package is removed (or deactivated when past enrolments still reference it)."
+                                onDelete={async () => {
+                                    try {
+                                        await iwisApi.deactivatePackage(pkg.id);
+                                        toast({ title: "Package deleted" });
+                                        reload();
+                                    } catch (err) {
+                                        if (err instanceof ApiClientError && err.status === 409) {
+                                            toast({
+                                                title: "Cannot delete",
+                                                description: err.message,
+                                                variant: "destructive",
+                                            });
+                                            return;
+                                        }
+                                        toast({
+                                            title: "Delete failed",
+                                            description: err instanceof Error ? err.message : "Unknown error",
+                                            variant: "destructive",
+                                        });
+                                    }
+                                }}
+                            >
+                                <Panel title={pkg.name} className="hover:shadow-elevated transition-all">
+                                    <div className="space-y-4">
+                                        {/* Branch label only matters in cross-branch mode — when
+                                            a single branch is scoped, every card belongs to it. */}
+                                        {isCrossBranch && pkg.branch?.name && (
+                                            <Badge variant="outline" className="gap-1 text-[11px]">
+                                                <Building2 className="w-3 h-3" /> {pkg.branch.name}
+                                            </Badge>
                                         )}
+                                        {pkg.description && <p className="text-sm text-muted-foreground">{pkg.description}</p>}
+                                        <div className="grid grid-cols-3 gap-3 text-sm">
+                                            <div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-primary/70" /> {pkg.durationDays} days</div>
+                                            <div className="flex items-center gap-2"><IndianRupee className="w-4 h-4 text-primary/70" /> ₹{pkg.price.toLocaleString()}</div>
+                                            <div className="flex items-center gap-2"><Users className="w-4 h-4 text-primary/70" /> {pkg._count?.enrolments ?? 0} enrolled</div>
+                                        </div>
+                                        {pkg.components && pkg.components.length > 0 && (
+                                            <div className="space-y-1">
+                                                <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Includes</div>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {pkg.components.map((c, i) => (
+                                                        <Badge key={i} variant="secondary" className="text-[11px]">{c.quantity}× {c.description || c.type}</Badge>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-end gap-2 pt-2">
+                                            <Button variant="outline" size="sm" onClick={() => setEnrolOpen(pkg.id)}><ClipboardList className="w-3.5 h-3.5 mr-2" /> Enrol</Button>
+                                        </div>
                                     </div>
-                                </div>
-                            </Panel>
+                                </Panel>
+                            </HoverActionCard>
                         ))}
                     </div>
                 )}
@@ -401,7 +419,6 @@ export default function TreatmentPackagesPage() {
                     </DialogContent>
                 </Dialog>
 
-                {confirmDialog}
             </div>
         </AppLayout>
     );

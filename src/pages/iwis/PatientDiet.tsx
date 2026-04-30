@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Salad, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useWebSocket } from "@/contexts/WebSocketContext";
 import { iwisApi, type DietPrescription, type DietDailyPlan, type MealTime } from "@/services/iwis.service";
 import { apiClient } from "@/lib/api-client";
 
@@ -44,6 +45,23 @@ export default function PatientDietPage() {
     }, [user]);
 
     useEffect(() => { load(); }, [load]);
+
+    // Realtime: when the doctor assigns a new diet plan, the backend emits a
+    // 'diet_assigned' socket event to this patient's user room. Refetch the
+    // active plans so the new assignment appears without a page reload.
+    const { socket } = useWebSocket();
+    useEffect(() => {
+        if (!socket) return;
+        const handler = (payload: { prescriptionId: string; title: string }) => {
+            toast({
+                title: "New diet plan assigned",
+                description: `Your doctor has assigned "${payload.title}". Refreshing your plan…`,
+            });
+            load();
+        };
+        socket.on('diet_assigned', handler);
+        return () => { socket.off('diet_assigned', handler); };
+    }, [socket, load, toast]);
 
     const log = async (prescriptionId: string, mealTime: MealTime, followed: boolean) => {
         try {

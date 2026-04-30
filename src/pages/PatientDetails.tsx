@@ -20,6 +20,8 @@ import {
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { PatientLocationCard, type PatientLocationFields } from "@/components/PatientLocationCard";
+import { PainMapCard } from "@/components/patient/PainMapCard";
+import { PatientRecordReviewTracker } from "@/components/doctor/PatientRecordReviewTracker";
 
 // ── Types (loose — upstream API doesn't have strict types here) ──
 
@@ -106,6 +108,12 @@ const STATUS_COLORS: Record<string, string> = {
 // ── Tabs ────────────────────────────────────────────────────────────────
 
 function OverviewTab({ patient }: { patient: PatientData }) {
+  // Pain map is restricted to the consultation doctor + admin doctors. Backend
+  // enforces; the card silently 403s for unauthorised callers, but we also
+  // skip rendering for non-clinical roles so the UI doesn't show a wasted slot.
+  const { role } = useAuth();
+  const showPainMap = role === "DOCTOR" || role === "ADMIN_DOCTOR";
+
   // Local copy so PatientLocationCard's "Re-verify" can update the embedded
   // map without a full page refresh. Synced when the parent re-fetches.
   const [location, setLocation] = useState<PatientLocationFields>(() => ({
@@ -142,6 +150,8 @@ function OverviewTab({ patient }: { patient: PatientData }) {
         patient={location}
         onUpdated={(next) => setLocation((prev) => ({ ...prev, ...next, id: prev.id }))}
       />
+
+      {showPainMap && <PainMapCard patientId={patient.id} />}
 
       {patient.onboardingData && (
         <Card className="border-primary/20 bg-primary/5">
@@ -525,6 +535,9 @@ export default function PatientDetails() {
 
   return (
     <AppLayout>
+      {/* Headless: fires once-per-day XP award when the doctor spends ≥60s here. */}
+      <PatientRecordReviewTracker patientId={patient.id} />
+
       <div className="container mx-auto px-4 py-6 max-w-4xl">
       <div className="flex items-start justify-between mb-4">
         <div>

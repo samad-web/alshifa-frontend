@@ -13,6 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from "@/components/ui/use-toast";
 import { Plus, Salad, Loader2, Utensils, CheckCircle2, Package, AlertTriangle, Info, ChevronDown } from "lucide-react";
 import { iwisApi, type DietPrescription, type DoshaType, type DietCategory, type MealTime, type DietMealPlan, type DietPackage, type DietAssignContext } from "@/services/iwis.service";
+import { HoverActionCard } from "@/components/common/HoverActionCard";
+import { Switch } from "@/components/ui/switch";
+import { DietMealRow } from "@/components/diet/DietMealRow";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
@@ -54,7 +57,7 @@ const parseFoods = (s: string) =>
 
 export default function DietPrescriptionsPage() {
     const { toast } = useToast();
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const { branchIdParam } = useBranchScope();
     const [params] = useSearchParams();
     const patientIdParam = params.get("patientId") || "";
@@ -71,6 +74,79 @@ export default function DietPrescriptionsPage() {
     const [meals, setMeals] = useState<MealRow[]>([
         { mealTime: "BREAKFAST", foods: "", avoidFoods: "", instructions: "", frequency: 1 },
     ]);
+
+    // Edit modal — separate from the create dialog so the create flow's meal
+    // builder isn't dragged into a metadata-only edit. Meal-row editing has
+    // its own UI (Feature 2). Backend enforces the "owning doctor" check, so
+    // we gate the icons on role only.
+    const [editing, setEditing] = useState<DietPrescription | null>(null);
+    const [editForm, setEditForm] = useState({
+        title: "", doshaTarget: "VATA" as DoshaType, category: "SATTVIC" as DietCategory,
+        startDate: "", endDate: "", notes: "", isActive: true,
+    });
+    const [editSaving, setEditSaving] = useState(false);
+    const canHoverEdit = role === "DOCTOR" || role === "ADMIN_DOCTOR";
+    const canHoverDelete = canHoverEdit;
+
+    function openEdit(p: DietPrescription) {
+        setEditing(p);
+        setEditForm({
+            title: p.title,
+            doshaTarget: p.doshaTarget,
+            category: p.category,
+            startDate: p.startDate.slice(0, 10),
+            endDate: p.endDate ? p.endDate.slice(0, 10) : "",
+            notes: p.notes ?? "",
+            isActive: p.isActive,
+        });
+    }
+
+    async function submitEdit(e: React.FormEvent) {
+        e.preventDefault();
+        if (!editing) return;
+        setEditSaving(true);
+        try {
+            await iwisApi.updateDiet(editing.id, {
+                title: editForm.title,
+                doshaTarget: editForm.doshaTarget,
+                category: editForm.category,
+                startDate: editForm.startDate,
+                endDate: editForm.endDate || null,
+                notes: editForm.notes || undefined,
+                isActive: editForm.isActive,
+            });
+            toast({ title: "Prescription updated" });
+            setEditing(null);
+            const refreshed = await iwisApi.listDietForPatient(patientId);
+            setPrescriptions(refreshed);
+        } catch (err: unknown) {
+            if (err instanceof ApiClientError && err.status === 403) {
+                toast({ title: "Forbidden", description: "You can only edit your own prescriptions.", variant: "destructive" });
+            } else {
+                toast({ title: "Update failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+            }
+        } finally {
+            setEditSaving(false);
+        }
+    }
+
+    async function handleDelete(p: DietPrescription) {
+        try {
+            const result = await iwisApi.deleteDiet(p.id);
+            toast({
+                title: result.mode === 'soft' ? "Prescription deactivated" : "Prescription deleted",
+                description: result.message,
+            });
+            const refreshed = await iwisApi.listDietForPatient(patientId);
+            setPrescriptions(refreshed);
+        } catch (err: unknown) {
+            if (err instanceof ApiClientError && err.status === 403) {
+                toast({ title: "Forbidden", description: "You can only delete your own prescriptions.", variant: "destructive" });
+            } else {
+                toast({ title: "Delete failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+            }
+        }
+    }
 
     // Approved packages available as templates
     const [approvedPackages, setApprovedPackages] = useState<DietPackage[]>([]);
@@ -227,7 +303,7 @@ export default function DietPrescriptionsPage() {
                 })),
             };
             await iwisApi.createDiet(payload);
-            toast({ title: "Diet prescription created" });
+            toast({ title: "Diet plan assigned successfully", description: "The patient has been notified." });
             setDialogOpen(false);
             const refreshed = await iwisApi.listDietForPatient(patientId);
             setPrescriptions(refreshed);
@@ -295,31 +371,55 @@ export default function DietPrescriptionsPage() {
                 ) : (
                     <div className="space-y-4">
                         {prescriptions.map((p) => (
-                            <Panel key={p.id} title={p.title}>
-                                <div className="space-y-3">
-                                    <div className="flex flex-wrap gap-2">
-                                        <Badge variant="secondary">Dosha: {p.doshaTarget}</Badge>
-                                        <Badge variant="outline">{p.category}</Badge>
-                                        {p.isActive && <Badge variant="outline" className="bg-wellness/10 text-wellness border-wellness/30">Active</Badge>}
-                                    </div>
-                                    <div className="text-sm text-muted-foreground">
-                                        {fmtDate(p.startDate)} {p.endDate ? `→ ${fmtDate(p.endDate)}` : "(ongoing)"}
-                                        {p.doctor?.fullName && <> · Dr. {p.doctor.fullName}</>}
-                                    </div>
-                                    {p.meals && p.meals.length > 0 && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-border/40">
-                                            {p.meals.map((m) => (
-                                                <div key={m.mealTime} className="p-3 rounded-lg bg-secondary/5 border border-border/40">
-                                                    <div className="font-semibold text-sm mb-2">{MEAL_LABEL[m.mealTime]}</div>
-                                                    {m.foods.length > 0 && <div className="text-xs"><span className="font-bold text-wellness">Eat:</span> {m.foods.map(f => f.name).join(", ")}</div>}
-                                                    {m.avoidFoods.length > 0 && <div className="text-xs mt-1"><span className="font-bold text-destructive">Avoid:</span> {m.avoidFoods.map(f => f.name).join(", ")}</div>}
-                                                    {m.instructions && <div className="text-xs text-muted-foreground italic mt-1">{m.instructions}</div>}
-                                                </div>
-                                            ))}
+                            <HoverActionCard
+                                key={p.id}
+                                canEdit={canHoverEdit}
+                                canDelete={canHoverDelete}
+                                onEdit={() => openEdit(p)}
+                                deleteTitle={`Delete "${p.title}"?`}
+                                deleteDescription="If adherence logs reference this prescription it will be deactivated to preserve history; otherwise it's permanently removed."
+                                onDelete={() => handleDelete(p)}
+                            >
+                                <Panel title={p.title}>
+                                    <div className="space-y-3">
+                                        <div className="flex flex-wrap gap-2">
+                                            <Badge variant="secondary">Dosha: {p.doshaTarget}</Badge>
+                                            <Badge variant="outline">{p.category}</Badge>
+                                            {p.isActive && <Badge variant="outline" className="bg-wellness/10 text-wellness border-wellness/30">Active</Badge>}
                                         </div>
-                                    )}
-                                </div>
-                            </Panel>
+                                        <div className="text-sm text-muted-foreground">
+                                            {fmtDate(p.startDate)} {p.endDate ? `→ ${fmtDate(p.endDate)}` : "(ongoing)"}
+                                            {p.doctor?.fullName && <> · Dr. {p.doctor.fullName}</>}
+                                        </div>
+                                        {p.meals && p.meals.length > 0 && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-border/40">
+                                                {p.meals.map((m) => (
+                                                    <DietMealRow
+                                                        key={m.id ?? m.mealTime}
+                                                        prescriptionId={p.id}
+                                                        meal={m}
+                                                        canManage={canHoverEdit}
+                                                        onChanged={async () => {
+                                                            const refreshed = await iwisApi.listDietForPatient(patientId);
+                                                            setPrescriptions(refreshed);
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
+                                        {canHoverEdit && (
+                                            <AddMealSlotButton
+                                                prescriptionId={p.id}
+                                                existingSlots={(p.meals ?? []).map((m) => m.mealTime)}
+                                                onAdded={async () => {
+                                                    const refreshed = await iwisApi.listDietForPatient(patientId);
+                                                    setPrescriptions(refreshed);
+                                                }}
+                                            />
+                                        )}
+                                    </div>
+                                </Panel>
+                            </HoverActionCard>
                         ))}
                     </div>
                 )}
@@ -418,7 +518,7 @@ export default function DietPrescriptionsPage() {
                             </div>
                             <DialogFooter>
                                 <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
-                                <Button type="submit"><CheckCircle2 className="w-4 h-4 mr-2" /> Create Diet Plan</Button>
+                                <Button type="submit"><CheckCircle2 className="w-4 h-4 mr-2" /> Assign Diet Plan</Button>
                             </DialogFooter>
                         </form>
                     </DialogContent>
@@ -605,7 +705,145 @@ export default function DietPrescriptionsPage() {
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
+                {/* Edit prescription dialog. Meals are edited per-row inside
+                    the card (Feature 2) so this surface stays metadata-only. */}
+                <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+                    <DialogContent className="sm:max-w-[600px]">
+                        <DialogHeader>
+                            <DialogTitle>Edit Diet Prescription</DialogTitle>
+                            <DialogDescription>Update the high-level fields. Meals are edited individually from each meal row.</DialogDescription>
+                        </DialogHeader>
+                        <form onSubmit={submitEdit} className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <Label>Title</Label>
+                                <Input required value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Dosha target</Label>
+                                    <Select value={editForm.doshaTarget} onValueChange={(v) => setEditForm({ ...editForm, doshaTarget: v as DoshaType })}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>{DOSHAS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Category</Label>
+                                    <Select value={editForm.category} onValueChange={(v) => setEditForm({ ...editForm, category: v as DietCategory })}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Start date</Label>
+                                    <DatePicker value={editForm.startDate} onChange={(iso) => setEditForm({ ...editForm, startDate: iso })} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>End date (optional)</Label>
+                                    <DatePicker value={editForm.endDate} onChange={(iso) => setEditForm({ ...editForm, endDate: iso })} placeholder="No end date" fromDate={editForm.startDate ? new Date(editForm.startDate) : undefined} />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Notes</Label>
+                                <Textarea rows={3} value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Switch id="edit-active" checked={editForm.isActive} onCheckedChange={(v) => setEditForm({ ...editForm, isActive: v })} />
+                                <Label htmlFor="edit-active" className="cursor-pointer">Active</Label>
+                            </div>
+                            <DialogFooter>
+                                <Button type="button" variant="ghost" onClick={() => setEditing(null)} disabled={editSaving}>Cancel</Button>
+                                <Button type="submit" disabled={editSaving}>
+                                    {editSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                                    Save changes
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </DialogContent>
+                </Dialog>
             </div>
         </AppLayout>
+    );
+}
+
+// ── Inline helper: "+ Add Meal Slot" button + slot picker dialog ────────────
+// Lives in this file because it's only used here. Posts an empty meal at the
+// chosen MealTime; foods/avoidFoods/instructions are filled in afterwards via
+// the row's edit dialog.
+function AddMealSlotButton({
+    prescriptionId,
+    existingSlots,
+    onAdded,
+}: {
+    prescriptionId: string;
+    existingSlots: MealTime[];
+    onAdded: () => void;
+}) {
+    const { toast } = useToast();
+    const [open, setOpen] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const available = MEAL_TIMES.filter((t) => !existingSlots.includes(t));
+    const [pick, setPick] = useState<MealTime | "">(available[0] ?? "");
+
+    if (available.length === 0) return null;
+
+    async function handleAdd() {
+        if (!pick) return;
+        setSaving(true);
+        try {
+            await iwisApi.addDietMeal(prescriptionId, {
+                mealTime: pick as MealTime,
+                foods: [],
+                avoidFoods: [],
+                instructions: undefined,
+            });
+            toast({ title: "Meal slot added", description: "Open it to fill in foods and instructions." });
+            setOpen(false);
+            onAdded();
+        } catch (err: unknown) {
+            toast({
+                title: "Could not add meal",
+                description: err instanceof Error ? err.message : "Unknown error",
+                variant: "destructive",
+            });
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    return (
+        <>
+            <div className="pt-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => { setPick(available[0]); setOpen(true); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Meal Slot
+                </Button>
+            </div>
+            <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+                <DialogContent className="sm:max-w-[420px]">
+                    <DialogHeader>
+                        <DialogTitle>Add a meal slot</DialogTitle>
+                        <DialogDescription>Pick a slot. You can fill in foods and instructions immediately after.</DialogDescription>
+                    </DialogHeader>
+                    <div className="py-3 space-y-2">
+                        <Label>Meal time</Label>
+                        <Select value={pick || undefined} onValueChange={(v) => setPick(v as MealTime)}>
+                            <SelectTrigger><SelectValue placeholder="Select a slot" /></SelectTrigger>
+                            <SelectContent>
+                                {available.map((t) => <SelectItem key={t} value={t}>{MEAL_LABEL[t]}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
+                        <Button onClick={handleAdd} disabled={saving || !pick}>
+                            {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Add slot
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }

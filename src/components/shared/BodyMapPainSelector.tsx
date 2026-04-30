@@ -3,7 +3,7 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, Zap, Flame, Heart, Waves, Hand, Snowflake, X, ChevronDown } from 'lucide-react';
+import { RotateCcw, Zap, Flame, Heart, Waves, Hand, Snowflake, Droplets, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -48,6 +48,10 @@ const PAIN_CHARACTERS = [
   { label: 'Cramping', icon: Hand },
   { label: 'Numbness', icon: Snowflake },
   { label: 'Tingling', icon: Zap },
+  // Swelling: clinically important in Ayurveda (oedema / inflammation
+  // assessment). Triggers mandatory media upload (Feature 8) at the
+  // wizard level when any region carries this character.
+  { label: 'Swelling', icon: Droplets },
 ];
 
 const DURATIONS = ['Just started', 'Hours', 'Days', 'Weeks', 'Months', 'Over a year'];

@@ -48,6 +48,13 @@ interface Conversation {
     messages: Message[];
 }
 
+interface ConsultationDoctor {
+    id: string;
+    name: string | null;
+    specialization: string | null;
+    profilePhoto: string | null;
+}
+
 export default function Chat() {
     const { t } = useTranslation();
     const { isConnected, socket } = useWebSocket();
@@ -55,9 +62,44 @@ export default function Chat() {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
     const [loading, setLoading] = useState(true);
+    // Patient-only: the assigned consultation doctor (if any) drives the
+    // entire chat experience for patients — no conversation picker, just
+    // a single thread with this doctor.
+    const [consultationDoctor, setConsultationDoctor] = useState<ConsultationDoctor | null>(null);
+    const [doctorResolved, setDoctorResolved] = useState(false);
 
     useEffect(() => {
         const init = async () => {
+            // Patient-specific path: resolve the consultation doctor first;
+            // auto-create the conversation; auto-select it. There is no other
+            // chat surface for patients — therapists and pharmacists are out
+            // of scope per the chat-scoping rule.
+            if (role === 'PATIENT') {
+                try {
+                    const { data } = await apiClient.get<{ doctor: ConsultationDoctor | null }>(
+                        '/api/chat/my-doctor',
+                    );
+                    setConsultationDoctor(data.doctor);
+                    if (data.doctor) {
+                        // Best-effort ensure the conversation row exists, then
+                        // load the (single-row) conversation list and select it.
+                        try {
+                            await apiClient.post('/api/chat/conversation', { doctorId: data.doctor.id });
+                        } catch { /* getOrCreate is idempotent; backend may report it already exists */ }
+                        const list = await fetchConversations();
+                        if (list && list.length > 0) setSelectedConv(list[0]);
+                    } else {
+                        setLoading(false);
+                    }
+                } catch {
+                    setLoading(false);
+                } finally {
+                    setDoctorResolved(true);
+                }
+                return;
+            }
+
+            // Clinician / staff path — existing behaviour preserved.
             const conversations = await fetchConversations();
 
             const params = new URLSearchParams(window.location.search);
@@ -90,7 +132,8 @@ export default function Chat() {
             }
         };
         init();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [role]);
 
     useEffect(() => {
         if (!socket) return;
@@ -146,6 +189,68 @@ export default function Chat() {
         }
         return conv.patient.fullName || "Patient";
     };
+
+    // ── Patient layout: single-thread, banner-led, no provider picker ──────
+    if (role === 'PATIENT') {
+        return (
+            <AppLayout>
+                <div className="flex h-[calc(100vh-4rem)] bg-background overflow-hidden">
+                    <div className="flex-1 flex flex-col bg-secondary/5 text-foreground">
+                        {!doctorResolved || loading ? (
+                            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                                Loading your chat…
+                            </div>
+                        ) : !consultationDoctor ? (
+                            <div className="flex-1 flex items-center justify-center p-8 text-center">
+                                <div className="space-y-6 max-w-sm">
+                                    <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-primary/5 border border-primary/10">
+                                        <Activity className="h-12 w-12 text-primary/40" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h2 className="text-xl font-bold">No active consultation yet</h2>
+                                        <p className="text-sm text-muted-foreground">
+                                            You don't have an active consultation assigned yet. Book an appointment to chat with your doctor.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : selectedConv ? (
+                            <ChatWindow
+                                conversationId={selectedConv.id}
+                                header={
+                                    <div className="h-16 border-b bg-card/50 backdrop-blur-md px-4 flex items-center gap-3 z-10 shrink-0">
+                                        <Avatar className="h-10 w-10">
+                                            {consultationDoctor.profilePhoto && (
+                                                <AvatarImage src={consultationDoctor.profilePhoto} />
+                                            )}
+                                            <AvatarFallback className="bg-primary/5 text-primary"><User /></AvatarFallback>
+                                        </Avatar>
+                                        <div>
+                                            <h2 className="font-bold text-sm leading-tight">
+                                                Chat with Dr. {consultationDoctor.name || 'your doctor'}
+                                            </h2>
+                                            {consultationDoctor.specialization && (
+                                                <span className="text-[11px] text-muted-foreground">
+                                                    {consultationDoctor.specialization}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <span className="ml-auto text-[10px] text-wellness font-bold">
+                                            {isConnected ? 'Online' : 'Offline'}
+                                        </span>
+                                    </div>
+                                }
+                            />
+                        ) : (
+                            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                                Setting up your conversation…
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </AppLayout>
+        );
+    }
 
     return (
         <AppLayout>
