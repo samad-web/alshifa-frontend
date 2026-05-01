@@ -131,7 +131,9 @@ function isTokenExpired(token: string): boolean {
 // sessions. Now a refresh in progress is shared by all callers.
 let inFlightRefresh: Promise<boolean> | null = null;
 
-async function refreshAccessTokenShared(apiBase: string): Promise<boolean> {
+// Exported so api-client.ts can call it on 401 to attempt a transparent
+// retry before clearing tokens and bouncing the user to /login.
+export async function refreshAccessTokenShared(apiBase: string): Promise<boolean> {
   if (inFlightRefresh) return inFlightRefresh;
   inFlightRefresh = (async () => {
     const { refreshToken } = getStoredTokens();
