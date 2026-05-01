@@ -59,7 +59,7 @@ export interface TherapistProfile {
   id: string;
   userId: string;
   fullName?: string | null;
-  specialization?: string | null;
+  gender?: string | null;
   qualification?: string | null;
   yearsExperience?: number | null;
   profilePhoto?: string | null;
@@ -275,7 +275,10 @@ export interface LeaderboardEntry {
   calculationDate: string;
   // Joined
   fullName?: string;
+  // Doctors carry specialization, therapists carry gender. Both optional —
+  // backend only sets the field that applies to the participant's role.
   specialization?: string;
+  gender?: string;
 }
 
 export interface LeaderboardConfig {

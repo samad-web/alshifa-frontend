@@ -91,7 +91,7 @@ export default function ForgotPassword() {
                   autoComplete="email"
                   spellCheck={false}
                   inputMode="email"
-                  placeholder="you@alshifa.com"
+                  placeholder="you@iwis.com"
                   value={email}
                   onChange={(e) => { setEmail(stripLeadingSpaces(e.target.value)); setEmailIssue(null); }}
                   onBlur={() => setEmail((v) => stripEdgeSpaces(v))}

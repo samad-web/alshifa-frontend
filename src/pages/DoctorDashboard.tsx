@@ -31,6 +31,7 @@ import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api-client";
 import { AlertsPopup } from "@/components/common/AlertsPopup";
+import { XPAwardToast } from "@/components/XPAwardToast";
 
 // ── Queue helpers ────────────────────────────────────────────────────────
 
@@ -214,6 +215,8 @@ export default function DoctorDashboard() {
 
   return (
     <AppLayout>
+      {/* Centered XP popup — fires when patient feedback awards XP. */}
+      <XPAwardToast />
       <PageTransition className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* SECTION A — Header / Greeting */}
         <header className="flex items-start justify-between flex-wrap gap-3">

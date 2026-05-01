@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -459,10 +460,9 @@ function DoctorView({ userId }: { userId: string }) {
                 <Label className="flex items-center gap-1.5">
                   <Calendar className="h-4 w-4" /> Follow-up Date
                 </Label>
-                <Input
-                  type="date"
+                <DatePicker
                   value={followUpDate}
-                  onChange={(e) => setFollowUpDate(e.target.value)}
+                  onChange={(iso) => setFollowUpDate(iso)}
                 />
               </div>
 

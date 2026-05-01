@@ -37,6 +37,10 @@ import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
 import { selfExamService, type SelfExamSubmission } from "@/services/selfExam.service";
 import { communicationApi } from "@/services/communication.service";
 import type { AnnouncementEntry } from "@/types";
+import { FeedbackPromptListener } from "@/components/FeedbackModal";
+import { HomeTherapyFeedbackListener } from "@/components/HomeTherapyFeedbackListener";
+import { PatientLocationCard, type PatientLocationFields } from "@/components/PatientLocationCard";
+import { formatDate } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
 import { BreathingExercise } from "@/components/wellness/BreathingExercise";
 import { VitalChart } from "@/components/vitals/VitalChart";
@@ -835,6 +839,11 @@ const PHASE_COLORS: Record<DashboardJourneyPhase["status"], string> = {
 
 function TreatmentJourneyCard({ journey }: { journey: DashboardSummary["journey"] }) {
   if (!journey) return null;
+  // Sum all per-phase durationDays. The header header pull `phaseHeader`
+  // gives us the active-phase day count; downstream phases are projected as
+  // upcoming (0%) and upstream phases as complete (100%).
+  const totalDays = journey.phases.reduce((s, p) => s + (p.durationDays || 0), 0);
+  const activeIdx = journey.phases.findIndex((p) => p.status === "ACTIVE");
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -842,8 +851,18 @@ function TreatmentJourneyCard({ journey }: { journey: DashboardSummary["journey"
           <Heart className="h-4 w-4 text-primary" />
           {journey.title}
         </CardTitle>
+        <div className="flex items-center justify-between gap-2 flex-wrap mt-1">
+          <p className="text-xs text-muted-foreground">
+            Total Journey Duration: <span className="font-bold text-foreground">{totalDays} {totalDays === 1 ? "day" : "days"}</span>
+          </p>
+          {journey.targetDate && (
+            <p className="text-xs text-muted-foreground">
+              Target End Date: <span className="font-bold text-foreground">{formatDate(journey.targetDate)}</span>
+            </p>
+          )}
+        </div>
       </CardHeader>
-      <CardContent className="pt-0 space-y-3">
+      <CardContent className="pt-0 space-y-4">
         {journey.phaseHeader && (
           <div className="flex items-center justify-between">
             <div>
@@ -858,14 +877,46 @@ function TreatmentJourneyCard({ journey }: { journey: DashboardSummary["journey"
             </div>
           </div>
         )}
-        <div className="flex gap-1.5">
-          {journey.phases.map((p) => (
-            <div key={p.id} className="flex-1" title={`${p.name} · ${p.status}`}>
-              <div className={cn("h-2 rounded-full", PHASE_COLORS[p.status])} />
-              <p className="text-[10px] text-muted-foreground mt-1 truncate">{p.name}</p>
-            </div>
-          ))}
+
+        {/* Per-phase rows — name, duration label, day-of-X countdown, fill bar */}
+        <div className="space-y-2">
+          {journey.phases.map((p, idx) => {
+            // Active phase uses live currentDay; previous phases render as 100%; later phases 0%.
+            let day = 0, status: "active" | "done" | "upcoming" = "upcoming";
+            if (p.status === "COMPLETED") {
+              day = p.durationDays;
+              status = "done";
+            } else if (p.status === "ACTIVE") {
+              day = Math.max(0, Math.min(p.durationDays, journey.phaseHeader?.currentDay ?? 0));
+              status = "active";
+            } else if (idx < activeIdx) {
+              day = p.durationDays;
+              status = "done";
+            }
+            const pct = p.durationDays > 0 ? Math.round((day / p.durationDays) * 100) : 0;
+            return (
+              <div key={p.id} className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium truncate">{p.name}</p>
+                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                    {p.durationDays} days
+                    {status === "active" && ` · Day ${day} of ${p.durationDays}`}
+                    {status === "done"   && " · Complete"}
+                    {status === "upcoming" && idx === activeIdx + 1 && " · Up next"}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full transition-all",
+                      status === "done" ? "bg-emerald-500" : status === "active" ? "bg-primary" : "bg-muted")}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
+
         {journey.milestones.length > 0 && (
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {journey.milestones.map((m) => (
@@ -1630,6 +1681,13 @@ export default function EnhancedPatientDashboard() {
 
   return (
     <AppLayout>
+      {/* Socket-driven rating-flow modal — listens for feedback_request /
+          journey_feedback_request and queues prompts so only one is shown
+          at a time. Renders nothing until an event arrives. */}
+      <FeedbackPromptListener />
+      {/* Home-therapy session-complete feedback prompt — fires within ~2s of
+          the therapist tapping Complete (Task 8). Idempotent server-side. */}
+      <HomeTherapyFeedbackListener />
       <div className="container mx-auto px-4 py-5 max-w-6xl space-y-4">
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between">
@@ -1652,6 +1710,41 @@ export default function EnhancedPatientDashboard() {
 
         {/* ── Smart Banner ───────────────────────────────────────────── */}
         <SmartBanner banner={data.banner} onAction={dispatch} />
+
+        {/* ── Home Address prompt — feature-gates Home Therapy referrals ──
+            Shown when the patient has no Address Line 1 on file. CTA jumps
+            straight to the Profile page where the PatientLocationCard
+            handles the actual edit + geocode. Disappears the moment the
+            address is saved. */}
+        {(() => {
+          const p = (profile as { patient?: PatientLocationFields } | null)?.patient;
+          const needsAddress = !!p && !(p.addressLine1 ?? "").trim();
+          if (!needsAddress) return null;
+          return (
+            <div
+              role="alert"
+              className="rounded-2xl border-2 border-amber-300/70 bg-amber-50/80 dark:bg-amber-950/30 p-4 flex items-start gap-3"
+            >
+              <MapPin className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold leading-tight text-amber-900 dark:text-amber-100">
+                  Add your home address
+                </p>
+                <p className="text-sm text-amber-800/90 dark:text-amber-200/90 mt-0.5">
+                  Required so your doctor can refer you for at-home therapy sessions.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => navigate("/profile")}
+                className="shrink-0 gap-2"
+              >
+                Add address
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          );
+        })()}
 
         {/* ── Post-consultation feedback prompt (4-question flow) ───── */}
         <ConsultationFeedbackPrompt />

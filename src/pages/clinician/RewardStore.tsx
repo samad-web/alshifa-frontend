@@ -53,13 +53,20 @@ export default function RewardStore() {
   useEffect(() => {
     async function load() {
       try {
-        // Admins curate the catalogue but don't participate, so XP profile
-        // and personal redemptions don't apply — calling those clinician-only
-        // endpoints as ADMIN/ADMIN_DOCTOR would 403 and poison the Promise.all,
-        // which is what was producing the "Failed to load" error on this page.
+        // Admins curate the catalogue but don't participate. The XP profile
+        // and personal-redemption endpoints are clinician-only and will 403
+        // for admin viewers, so we branch the load:
+        //   - Admins fetch the catalogue + the cross-user PENDING queue
+        //     (powers the "Process Redemptions" panel below).
+        //   - Participants fetch the catalogue + their own redemptions +
+        //     their XP balance.
         if (isAdmin) {
-          const r = await clinicianGamificationApi.getAvailableRewards();
+          const [r, queue] = await Promise.all([
+            clinicianGamificationApi.getAvailableRewards(),
+            clinicianGamificationApi.listAllRedemptions({ status: 'PENDING', limit: 50 }),
+          ]);
           setRewards(r);
+          setRedemptions(queue.redemptions);
         } else {
           const [r, rd, p] = await Promise.all([
             clinicianGamificationApi.getAvailableRewards(),
@@ -330,8 +337,9 @@ export default function RewardStore() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>ID</TableHead>
+                      <TableHead>Requested By</TableHead>
                       <TableHead>Reward</TableHead>
+                      <TableHead>Points</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
@@ -341,8 +349,16 @@ export default function RewardStore() {
                       .filter((r) => r.status === "PENDING")
                       .map((r) => (
                         <TableRow key={r.id}>
-                          <TableCell className="text-xs text-muted-foreground font-mono">{r.id.slice(0, 8)}</TableCell>
+                          <TableCell>
+                            <div className="text-sm font-medium">
+                              {(r as any).user?.fullName ?? (r as any).user?.email ?? "—"}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              {(r as any).user?.role ?? ""}
+                            </div>
+                          </TableCell>
                           <TableCell className="font-medium">{r.reward.name}</TableCell>
+                          <TableCell>{r.pointsSpent}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="bg-yellow-100 text-yellow-800">PENDING</Badge>
                           </TableCell>

@@ -5,7 +5,7 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/common/input";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Search, Plus, Trash2, ShoppingCart, Loader2, CheckCircle2, X, User, AlertTriangle } from "lucide-react";
+import { Search, Plus, Trash2, ShoppingCart, Loader2, CheckCircle2, X, User, AlertTriangle, Stethoscope, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
@@ -16,12 +16,19 @@ export default function PharmacyDispense() {
     const [medicines, setMedicines] = useState([]);
     const [selectedPatientId, setSelectedPatientId] = useState("");
     const [patientSearch, setPatientSearch] = useState("");
+    const [medicineSearch, setMedicineSearch] = useState("");
     const [branches, setBranches] = useState<any[]>([]);
     const [dispenseBranchFilter, setDispenseBranchFilter] = useState("all");
     const [cart, setCart] = useState<any[]>([]);
     const [submitting, setSubmitting] = useState(false);
     const [success, setSuccess] = useState(false);
     const [patientsLoading, setPatientsLoading] = useState(true);
+    // Active prescriptions for the selected patient — driven by
+    // /api/prescriptions/search?patientId=…&status=ACTIVE so the pharmacist
+    // sees what the doctor prescribed before they start hunting through
+    // the medicine catalogue.
+    const [prescriptions, setPrescriptions] = useState<any[]>([]);
+    const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
 
     useEffect(() => {
         // Fetch patients
@@ -48,6 +55,34 @@ export default function PharmacyDispense() {
             .catch(() => {});
     }, []);
 
+    // Pull the selected patient's active prescriptions whenever the
+    // selection changes. The backend already scopes by the pharmacist's
+    // branch and status=ACTIVE drops anything discontinued.
+    useEffect(() => {
+        if (!selectedPatientId) {
+            setPrescriptions([]);
+            return;
+        }
+        let cancelled = false;
+        setPrescriptionsLoading(true);
+        apiClient
+            .get<any>('/api/prescriptions/search', {
+                patientId: selectedPatientId,
+                status: 'ACTIVE',
+                limit: '50',
+            })
+            .then(({ data }) => {
+                if (cancelled) return;
+                const rows = Array.isArray(data?.prescriptions)
+                    ? data.prescriptions
+                    : Array.isArray(data) ? data : [];
+                setPrescriptions(rows);
+            })
+            .catch(() => { if (!cancelled) setPrescriptions([]); })
+            .finally(() => { if (!cancelled) setPrescriptionsLoading(false); });
+        return () => { cancelled = true; };
+    }, [selectedPatientId]);
+
     // Live patient-search results. Match against full name, phone,
     // patientId (the human-friendly external id), and email so the
     // pharmacist can find anyone the receptionist might key in.
@@ -64,6 +99,18 @@ export default function PharmacyDispense() {
     }), [patients, patientSearch, dispenseBranchFilter]);
 
     const selectedPatient: any = patients.find((p: any) => p.id === selectedPatientId) ?? null;
+
+    // Live medicine search — name, brand, and genericName so the pharmacist
+    // can find a drug whether they remember the trade name or the molecule.
+    const filteredMedicines = useMemo(() => {
+        const q = medicineSearch.trim().toLowerCase();
+        if (!q) return medicines;
+        return medicines.filter((m: any) =>
+            (m.name?.toLowerCase() || "").includes(q)
+            || (m.brand?.toLowerCase() || "").includes(q)
+            || (m.genericName?.toLowerCase() || "").includes(q),
+        );
+    }, [medicines, medicineSearch]);
 
     const addToCart = (medicine: any) => {
         // Basic stock check
@@ -116,6 +163,38 @@ export default function PharmacyDispense() {
 
     const removeFromCart = (id: string) => {
         setCart(cart.filter(item => item.medicineId !== id));
+    };
+
+    // Try to resolve a prescription row to a stocked Medicine in the
+    // current branch's catalogue. Direct medicineId match wins; otherwise
+    // we fuzzy-match on medicationName so free-text prescriptions still
+    // dispense when the pharmacy stocks the same drug under a different
+    // FK. Returns null when no match is found — the row then renders as
+    // informational only.
+    const resolveMedicineForPrescription = (rx: any): any | null => {
+        if (!rx) return null;
+        if (rx.medicineId) {
+            const direct = medicines.find((m: any) => m.id === rx.medicineId);
+            if (direct) return direct;
+        }
+        const name = (rx.medicationName || "").trim().toLowerCase();
+        if (!name) return null;
+        return (
+            medicines.find((m: any) => (m.name || "").toLowerCase() === name) ||
+            medicines.find((m: any) => (m.name || "").toLowerCase().includes(name)) ||
+            null
+        );
+    };
+
+    const addPrescriptionToCart = (rx: any) => {
+        const medicine = resolveMedicineForPrescription(rx);
+        if (!medicine) {
+            toast.error(
+                `${rx.medicationName} isn't in your branch's catalogue. Search and add manually below.`,
+            );
+            return;
+        }
+        addToCart(medicine);
     };
 
     const handleDispense = async () => {
@@ -287,9 +366,126 @@ export default function PharmacyDispense() {
                             </div>
                         </Panel>
 
+                        {selectedPatient && (
+                            <Panel
+                                title="Doctor's Prescriptions"
+                                subtitle="Active prescriptions written for this patient"
+                            >
+                                {prescriptionsLoading ? (
+                                    <div className="flex items-center gap-2 p-3 rounded-lg border border-dashed border-border/60 text-sm text-muted-foreground">
+                                        <Loader2 className="w-4 h-4 animate-spin" /> Loading prescriptions…
+                                    </div>
+                                ) : prescriptions.length === 0 ? (
+                                    <div className="p-4 rounded-lg border border-dashed border-border/60 text-sm text-muted-foreground text-center">
+                                        No active prescriptions on file for this patient. Add medicines manually below.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {prescriptions.map((rx: any) => {
+                                            const matched = resolveMedicineForPrescription(rx);
+                                            const inCart = matched
+                                                ? cart.some((i) => i.medicineId === matched.id)
+                                                : false;
+                                            const prescriber =
+                                                rx.doctor?.fullName ||
+                                                rx.therapist?.fullName ||
+                                                rx.doctor?.user?.email ||
+                                                rx.therapist?.user?.email ||
+                                                "Clinician";
+                                            const namePrefix = rx.doctor ? "Dr. " : "";
+                                            return (
+                                                <div
+                                                    key={rx.id}
+                                                    className="p-3 rounded-xl border bg-card flex items-start justify-between gap-3"
+                                                >
+                                                    <div className="min-w-0 space-y-1">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <FileText className="w-3.5 h-3.5 text-primary shrink-0" />
+                                                            <span className="font-bold text-sm">
+                                                                {rx.medicationName}
+                                                            </span>
+                                                            {!matched && (
+                                                                <span className="text-[10px] uppercase tracking-wide font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">
+                                                                    Not stocked
+                                                                </span>
+                                                            )}
+                                                            {matched && matched.totalStock <= 0 && (
+                                                                <span className="text-[10px] uppercase tracking-wide font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200">
+                                                                    Out of stock
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {[rx.dosage, rx.frequency, rx.duration]
+                                                                .filter(Boolean)
+                                                                .join(" · ")}
+                                                        </div>
+                                                        <div className="text-[11px] text-muted-foreground/80 flex items-center gap-1">
+                                                            <Stethoscope className="w-3 h-3" />
+                                                            {namePrefix}{prescriber}
+                                                            {rx.createdAt && (
+                                                                <>
+                                                                    <span aria-hidden className="opacity-60">·</span>
+                                                                    <span>{formatDate(rx.createdAt)}</span>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                        {rx.notes && (
+                                                            <div className="text-[11px] text-muted-foreground/80 italic">
+                                                                {rx.notes}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <Button
+                                                        size="sm"
+                                                        variant={inCart ? "secondary" : "outline"}
+                                                        onClick={() => addPrescriptionToCart(rx)}
+                                                        disabled={
+                                                            !matched || matched.totalStock <= 0
+                                                        }
+                                                        className="shrink-0"
+                                                    >
+                                                        <Plus className="w-3.5 h-3.5 mr-1" />
+                                                        {inCart ? "Add another" : "Add"}
+                                                    </Button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </Panel>
+                        )}
+
                         <Panel title="Step 2: Add Medicines" subtitle="Search and add drugs to the dispense list">
+                            <div className="space-y-4">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Search medicine by name, brand, or generic…"
+                                        className="pl-10 pr-10"
+                                        value={medicineSearch}
+                                        onChange={(e) => setMedicineSearch(e.target.value)}
+                                    />
+                                    {medicineSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setMedicineSearch("")}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            aria-label="Clear medicine search"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
+                                {filteredMedicines.length === 0 ? (
+                                    <div className="p-6 rounded-lg border border-dashed border-border/60 text-sm text-muted-foreground text-center">
+                                        {medicineSearch
+                                            ? `No medicines match "${medicineSearch}"`
+                                            : "No medicines available"}
+                                    </div>
+                                ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {medicines.map((med: any) => {
+                                {filteredMedicines.map((med: any) => {
                                     // Pick the earliest non-zero batch to surface its batch number
                                     // and expiry on the card. Drives the amber/red expiry chip below.
                                     const stocks: Array<{ batchNumber?: string; expiryDate?: string; quantity?: number }> = Array.isArray(med.stocks) ? med.stocks : [];
@@ -341,6 +537,8 @@ export default function PharmacyDispense() {
                                     </div>
                                     );
                                 })}
+                            </div>
+                                )}
                             </div>
                         </Panel>
                     </div>

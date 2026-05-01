@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,6 +19,7 @@ import {
   ReminderDeliveryLog,
 } from "@/services/messaging.service";
 import { useConfirm } from "@/components/common/ConfirmDialog";
+import { AppLayout } from "@/components/layout/app-layout";
 
 const CHANNELS: DeliveryChannel[] = ["WHATSAPP", "IN_APP"];
 
@@ -91,10 +93,15 @@ export default function ReminderSettings() {
   }
 
   if (!setting) {
-    return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
+    return (
+      <AppLayout>
+        <div className="p-8 text-sm text-muted-foreground">Loading…</div>
+      </AppLayout>
+    );
   }
 
   return (
+    <AppLayout>
     <div className="container mx-auto px-4 py-6 max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -122,10 +129,9 @@ export default function ReminderSettings() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="flex items-center gap-2"><Clock className="w-4 h-4" /> Time (HH:MM, 24h)</Label>
-              <Input
-                type="time"
+              <TimePicker
                 value={setting.dailyReminderTime}
-                onChange={(e) => setSetting({ ...setting, dailyReminderTime: e.target.value })}
+                onChange={(hhmm) => setSetting({ ...setting, dailyReminderTime: hhmm })}
               />
               <p className="text-xs text-muted-foreground mt-1">Evaluated in the hospital timezone.</p>
             </div>
@@ -234,5 +240,6 @@ export default function ReminderSettings() {
       </Card>
       {confirmDialog}
     </div>
+    </AppLayout>
   );
 }

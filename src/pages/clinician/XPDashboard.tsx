@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 import { clinicianGamificationApi } from "@/services/clinicianGamification.service";
 import type { ClinicianXPProfile, XPTransaction, XPLeaderboardEntry } from "@/types";
+import { XPAwardToast } from "@/components/XPAwardToast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FeedbackInbox } from "@/components/FeedbackInbox";
 
 const LEVEL_TIERS = [
   { level: 1, title: "Intern", icon: Shield },
@@ -49,20 +52,24 @@ export default function XPDashboard() {
 
   useEffect(() => {
     async function load() {
-      try {
-        const [p, h, lb] = await Promise.all([
-          clinicianGamificationApi.getXPProfile(),
-          clinicianGamificationApi.getXPHistory({ limit: 10 }),
-          clinicianGamificationApi.getXPLeaderboard({ limit: 5 }),
-        ]);
-        setProfile(p);
-        setHistory(h.transactions);
-        setLeaderboard(lb);
-      } catch {
-        setError("Failed to load XP data");
-      } finally {
-        setLoading(false);
+      // Profile is the headline panel — its failure should surface to the
+      // user. History + leaderboard fail independently and just show
+      // empty-state without dragging the rest of the page down.
+      const [pR, hR, lbR] = await Promise.allSettled([
+        clinicianGamificationApi.getXPProfile(),
+        clinicianGamificationApi.getXPHistory({ limit: 10 }),
+        clinicianGamificationApi.getXPLeaderboard({ limit: 5 }),
+      ]);
+      if (pR.status === 'fulfilled') setProfile(pR.value);
+      else {
+        console.warn('[XPDashboard] profile failed', pR.reason);
+        setError('Failed to load XP profile');
       }
+      if (hR.status === 'fulfilled') setHistory(hR.value.transactions);
+      else console.warn('[XPDashboard] history failed', hR.reason);
+      if (lbR.status === 'fulfilled') setLeaderboard(lbR.value);
+      else console.warn('[XPDashboard] leaderboard failed', lbR.reason);
+      setLoading(false);
     }
     load();
   }, []);
@@ -94,9 +101,16 @@ export default function XPDashboard() {
 
   return (
     <AppLayout>
+      <XPAwardToast />
       <div className="container max-w-7xl mx-auto px-4 py-8 space-y-8">
         <PageHeader title="XP Dashboard" subtitle="Track your experience, level up, and compete" />
 
+      <Tabs defaultValue="xp" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="xp">XP Overview</TabsTrigger>
+          <TabsTrigger value="feedback">Patient Feedback</TabsTrigger>
+        </TabsList>
+        <TabsContent value="xp" className="space-y-8">
         {/* ── Hero Section ──────────────────────────────────────────── */}
         <Card className="bg-gradient-to-br from-primary/10 via-background to-primary/5 border-primary/20">
           <CardContent className="py-8">
@@ -287,6 +301,12 @@ export default function XPDashboard() {
             </Card>
           </div>
         </div>
+        </TabsContent>
+
+        <TabsContent value="feedback">
+          <FeedbackInbox />
+        </TabsContent>
+      </Tabs>
       </div>
     </AppLayout>
   );

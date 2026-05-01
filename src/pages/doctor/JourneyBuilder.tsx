@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -281,7 +282,7 @@ export default function JourneyBuilder() {
             </div>
             <div className="space-y-2">
               <Label>Target Date</Label>
-              <Input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
+              <DatePicker value={targetDate} onChange={(iso) => setTargetDate(iso)} />
             </div>
           </div>
         </CardContent>
@@ -325,13 +326,13 @@ export default function JourneyBuilder() {
                     {Object.keys(PHASE_COLORS).map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => movePhase(pi, 'up')} disabled={pi === 0}>
+                <Button variant="ghost" size="icon" aria-label="Move phase up" className="h-8 w-8" onClick={() => movePhase(pi, 'up')} disabled={pi === 0}>
                   <ChevronUp className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => movePhase(pi, 'down')} disabled={pi === phases.length - 1}>
+                <Button variant="ghost" size="icon" aria-label="Move phase down" className="h-8 w-8" onClick={() => movePhase(pi, 'down')} disabled={pi === phases.length - 1}>
                   <ChevronDown className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removePhase(pi)}>
+                <Button variant="ghost" size="icon" aria-label="Delete phase" className="h-8 w-8 text-destructive" onClick={() => removePhase(pi)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -349,7 +350,7 @@ export default function JourneyBuilder() {
                     </Select>
                     <Input className="flex-1 h-8 text-xs" value={task.title} onChange={e => updateTask(pi, ti, { title: e.target.value })} placeholder="Task title" />
                     <Input className="w-24 h-8 text-xs" value={task.frequency} onChange={e => updateTask(pi, ti, { frequency: e.target.value })} placeholder="Frequency" />
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeTask(pi, ti)}>
+                    <Button variant="ghost" size="icon" aria-label="Delete task" className="h-8 w-8 text-destructive" onClick={() => removeTask(pi, ti)}>
                       <Trash2 className="h-3 w-3" />
                     </Button>
                   </div>
@@ -377,12 +378,12 @@ export default function JourneyBuilder() {
                 updated[i] = { ...updated[i], title: e.target.value };
                 setMilestones(updated);
               }} placeholder="e.g. First week pain-free" />
-              <Input type="date" className="w-36 h-8 text-xs" value={m.targetDate} onChange={e => {
+              <DatePicker className="w-36 h-8 text-xs" value={m.targetDate} onChange={(iso) => {
                 const updated = [...milestones];
-                updated[i] = { ...updated[i], targetDate: e.target.value };
+                updated[i] = { ...updated[i], targetDate: iso };
                 setMilestones(updated);
               }} />
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setMilestones(prev => prev.filter((_, j) => j !== i))}>
+              <Button variant="ghost" size="icon" aria-label="Delete milestone" className="h-8 w-8 text-destructive" onClick={() => setMilestones(prev => prev.filter((_, j) => j !== i))}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </div>

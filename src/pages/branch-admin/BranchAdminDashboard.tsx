@@ -8,24 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { apiClient } from "@/lib/api-client";
 import { operationsApi } from "@/services/operations.service";
+import { useBranchStaff, type BranchStaffRow } from "@/hooks/useBranchStaff";
 import type { AttendanceStatus, StaffAttendanceEntry } from "@/types";
 import {
-  Users, Building2, ClipboardCheck, Trophy, Shield, CalendarDays, UserPlus,
-  Stethoscope, Heart, LogIn, LogOut, Loader2, Mail,
+  Users, Building2, ClipboardCheck, Trophy, CalendarDays, UserPlus,
+  Stethoscope, Heart, LogIn, LogOut, Loader2, Mail, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
-interface EmployeeRow {
-  userId: string;
-  fullName: string;
-  email: string;
-  role: "DOCTOR" | "THERAPIST";
-  profilePhoto: string | null;
-  specialization: string | null;
+// EmployeeRow extends BranchStaffRow with today's attendance attached.
+type EmployeeRow = BranchStaffRow & {
   attendance: StaffAttendanceEntry | null;
-}
+};
 
 const statusBadgeStyles: Record<AttendanceStatus, string> = {
   PRESENT:  "bg-green-100 text-green-800 border-green-300",
@@ -63,81 +58,82 @@ export default function BranchAdminDashboard() {
   const branchId = profile?.branchId ?? null;
   const branchName = profile?.branch?.name || "your branch";
 
-  const [employees, setEmployees] = useState<EmployeeRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [search, setSearch] = useState("");
+  const [attendance, setAttendance] = useState<StaffAttendanceEntry[]>([]);
+  const [attendanceRefreshKey, setAttendanceRefreshKey] = useState(0);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
+  // Roster comes from the shared useBranchStaff hook so this page, the
+  // staff directory, and the attendance tracker stay aligned on the row
+  // shape.
+  const { staff, loading: staffLoading, error: staffError, refresh: refreshStaff } = useBranchStaff(branchId);
+
+  // Today's attendance for the branch — fetched separately and joined to
+  // staff rows below. A failure here just leaves rows without attendance,
+  // it does not blank out the employee list.
   useEffect(() => {
-    if (!branchId) { setLoading(false); return; }
+    if (!branchId) return;
     let cancelled = false;
-    async function load() {
-      setLoading(true);
-      try {
-        const [docsRes, thersRes, attendance] = await Promise.all([
-          apiClient.get<any[]>("/api/user/list-doctors",    { branchId }),
-          apiClient.get<any[]>("/api/user/list-therapists", { branchId }),
-          operationsApi.getBranchAttendance(branchId!, { date: today }).catch(() => [] as StaffAttendanceEntry[]),
-        ]);
-        if (cancelled) return;
-
-        const attendanceByUser = new Map<string, StaffAttendanceEntry>();
-        for (const a of attendance || []) attendanceByUser.set(a.userId, a);
-
-        const docRows: EmployeeRow[] = (docsRes.data || []).map((d: any) => ({
-          userId: d.userId ?? d.user?.id ?? "",
-          fullName: d.fullName ?? d.user?.email ?? "Doctor",
-          email: d.email ?? d.user?.email ?? "",
-          role: "DOCTOR",
-          profilePhoto: d.profilePhoto ?? null,
-          specialization: d.specialization ?? null,
-          attendance: attendanceByUser.get(d.userId ?? d.user?.id ?? "") ?? null,
-        }));
-        const therRows: EmployeeRow[] = (thersRes.data || []).map((t: any) => ({
-          userId: t.userId ?? t.user?.id ?? "",
-          fullName: t.fullName ?? t.user?.email ?? "Therapist",
-          email: t.email ?? t.user?.email ?? "",
-          role: "THERAPIST",
-          profilePhoto: t.profilePhoto ?? null,
-          specialization: t.specialization ?? null,
-          attendance: attendanceByUser.get(t.userId ?? t.user?.id ?? "") ?? null,
-        }));
-        setEmployees([...docRows, ...therRows].filter((r) => r.userId));
-      } catch {
-        toast.error("Failed to load employees");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
+    operationsApi.getBranchAttendance(branchId, { date: today })
+      .then((rows) => { if (!cancelled) setAttendance(rows || []); })
+      .catch(() => { if (!cancelled) setAttendance([]); });
     return () => { cancelled = true; };
-  }, [branchId, today, refreshKey]);
+  }, [branchId, today, attendanceRefreshKey]);
+
+  useEffect(() => {
+    if (staffError) toast.error('Failed to load employees');
+  }, [staffError]);
+
+  const employees: EmployeeRow[] = useMemo(() => {
+    const attendanceByUser = new Map<string, StaffAttendanceEntry>();
+    for (const a of attendance) if (a.userId) attendanceByUser.set(a.userId, a);
+    return staff
+      .filter((s) => !!s.userId)
+      .map((s) => ({ ...s, attendance: attendanceByUser.get(s.userId!) ?? null }));
+  }, [staff, attendance]);
+
+  const loading = staffLoading;
+  const refresh = () => {
+    refreshStaff();
+    setAttendanceRefreshKey((k) => k + 1);
+  };
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return employees;
     return employees.filter((e) =>
-      e.fullName.toLowerCase().includes(term)
-      || e.email.toLowerCase().includes(term)
-      || (e.specialization || "").toLowerCase().includes(term),
+      (e.fullName ?? "").toLowerCase().includes(term)
+      || (e.email ?? "").toLowerCase().includes(term)
+      || (e.specialization ?? "").toLowerCase().includes(term),
     );
   }, [employees, search]);
+
+  // Pagination — page resets to 1 whenever the search term or roster size
+  // changes so the user never lands on a stale empty page.
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [search, employees.length]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedEmployees = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length);
 
   // System time clock-in via the admin-override endpoint. Safer than the
   // self-service /clock-in route since the BRANCH_ADMIN isn't the staff
   // member — we're recording attendance on their behalf at "now".
   const handleMarkIn = async (row: EmployeeRow) => {
+    if (!row.userId) return;
     setBusyUserId(row.userId);
     try {
       await operationsApi.setAttendance(row.userId, {
         date: today,
         clockIn: nowHHmm(),
       });
-      toast.success(`Marked in: ${row.fullName}`);
-      setRefreshKey((k) => k + 1);
+      toast.success(`Marked in: ${row.fullName ?? ''}`);
+      refresh();
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Failed to mark in");
     } finally {
@@ -146,7 +142,7 @@ export default function BranchAdminDashboard() {
   };
 
   const handleMarkOut = async (row: EmployeeRow) => {
-    if (!row.attendance?.clockIn) return;
+    if (!row.attendance?.clockIn || !row.userId) return;
     setBusyUserId(row.userId);
     try {
       // setAttendance treats missing clockIn as a clear, so we must echo the
@@ -156,8 +152,8 @@ export default function BranchAdminDashboard() {
         clockIn: isoToHHmm(row.attendance.clockIn),
         clockOut: nowHHmm(),
       });
-      toast.success(`Marked out: ${row.fullName}`);
-      setRefreshKey((k) => k + 1);
+      toast.success(`Marked out: ${row.fullName ?? ''}`);
+      refresh();
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Failed to mark out");
     } finally {
@@ -170,7 +166,6 @@ export default function BranchAdminDashboard() {
     { to: "/assign-patient",           label: "Assign Patient",    description: "Pair patients with clinicians in your branch",   icon: UserPlus },
     { to: "/attendance",               label: "Attendance",        description: "Set and review staff attendance",                icon: ClipboardCheck },
     { to: "/branch-admin/scorecards",  label: "Performance",       description: "Branch-level scorecards (read-only)",            icon: Trophy },
-    { to: "/branch-admin/skill-matrix",label: "Skill Matrix",      description: "Therapist Ayurvedic skills (read-only)",         icon: Shield },
     { to: "/staff-schedule",           label: "Schedule",          description: "Weekly availability across the branch",          icon: CalendarDays },
   ];
 
@@ -255,23 +250,24 @@ export default function BranchAdminDashboard() {
               </p>
             ) : (
               <ul className="divide-y">
-                {filtered.map((row) => {
+                {pagedEmployees.map((row) => {
                   const Icon = row.role === "DOCTOR" ? Stethoscope : Heart;
                   const att = row.attendance;
                   const isClockedIn = !!att?.clockIn && !att?.clockOut;
                   const isClockedOut = !!att?.clockIn && !!att?.clockOut;
-                  const isBusy = busyUserId === row.userId;
+                  const isBusy = !!row.userId && busyUserId === row.userId;
+                  const displayName = row.fullName ?? row.email ?? "Unnamed";
 
                   return (
-                    <li key={row.userId} className="py-3 flex flex-wrap items-center gap-3">
+                    <li key={row.userId ?? row.profileId} className="py-3 flex flex-wrap items-center gap-3">
                       <Avatar className="h-10 w-10 shrink-0">
-                        {row.profilePhoto && <AvatarImage src={row.profilePhoto} alt={row.fullName} />}
-                        <AvatarFallback>{initials(row.fullName)}</AvatarFallback>
+                        {row.profilePhoto && <AvatarImage src={row.profilePhoto} alt={displayName} />}
+                        <AvatarFallback>{initials(displayName)}</AvatarFallback>
                       </Avatar>
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm truncate">{row.fullName}</span>
+                          <span className="font-medium text-sm truncate">{displayName}</span>
                           <Badge variant="outline" className="gap-1 text-[10px]">
                             <Icon className="w-3 h-3" />
                             {row.role === "DOCTOR" ? "Doctor" : "Therapist"}
@@ -327,6 +323,36 @@ export default function BranchAdminDashboard() {
                   );
                 })}
               </ul>
+            )}
+            {filtered.length > PAGE_SIZE && (
+              <div className="pt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  Showing {rangeStart}–{rangeEnd} of {filtered.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage <= 1}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <span className="px-2 tabular-nums">Page {safePage} of {totalPages}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage >= totalPages}
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
             )}
             <div className="pt-4 flex justify-end">
               <Link to="/attendance">

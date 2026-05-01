@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/lib/api-client";
 import { useBranchScope } from "@/hooks/useBranchScope";
@@ -249,11 +250,11 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
                             <div className="grid grid-cols-2 gap-2">
                                 <div className="space-y-2">
                                     <Label>Start Time</Label>
-                                    <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+                                    <TimePicker value={startTime} onChange={(hhmm) => setStartTime(hhmm)} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>End Time</Label>
-                                    <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+                                    <TimePicker value={endTime} onChange={(hhmm) => setEndTime(hhmm)} />
                                 </div>
                             </div>
 
@@ -328,7 +329,7 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
                                                     </p>
                                                 </div>
                                             </div>
-                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(slot.id)}>
+                                            <Button variant="ghost" size="icon" aria-label="Delete blocked slot" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(slot.id)}>
                                                 <Trash2 className="w-4 h-4" />
                                             </Button>
                                         </div>

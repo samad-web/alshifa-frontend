@@ -20,7 +20,7 @@ import { operationsApi } from "@/services/operations.service";
 import type { CentralizedInventoryItem, StockTransferEntry, TransferStatus } from "@/types";
 import {
   Loader2, Package, ArrowRightLeft, AlertTriangle, CheckCircle, PackageCheck,
-  Pill, Warehouse,
+  Pill, Warehouse, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { toast } from "sonner";
@@ -57,19 +57,22 @@ export default function CentralizedInventory() {
   const [submitting, setSubmitting] = useState(false);
 
   const fetchData = async () => {
-    try {
-      setError(null);
-      const [inv, txs] = await Promise.all([
-        operationsApi.getCentralizedInventory(),
-        operationsApi.getTransfers(),
-      ]);
-      setInventory(inv);
-      setTransfers(txs);
-    } catch {
+    setError(null);
+    // Settle independently so a transfers-listing failure doesn't blank
+    // out the inventory grid (and vice-versa). Both surfaces fall back to
+    // empty state if their fetch rejects, with the failure logged.
+    const [invR, txR] = await Promise.allSettled([
+      operationsApi.getCentralizedInventory(),
+      operationsApi.getTransfers(),
+    ]);
+    if (invR.status === 'fulfilled') setInventory(invR.value);
+    else console.warn('[CentralizedInventory] inventory failed', invR.reason);
+    if (txR.status === 'fulfilled') setTransfers(txR.value);
+    else console.warn('[CentralizedInventory] transfers failed', txR.reason);
+    if (invR.status === 'rejected' && txR.status === 'rejected') {
       setError("Failed to load inventory data");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -103,6 +106,20 @@ export default function CentralizedInventory() {
         (item.medicine as any).genericName?.toLowerCase().includes(search.toLowerCase())
       )
     : scopedInventory;
+
+  // Pagination — page snaps back to 1 whenever the search term or branch
+  // scope changes so the user never lands on a stale empty page.
+  const INVENTORY_PAGE_SIZE = 10;
+  const [inventoryPage, setInventoryPage] = useState(1);
+  useEffect(() => { setInventoryPage(1); }, [search, branchIdParam]);
+  const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventory.length / INVENTORY_PAGE_SIZE));
+  const inventorySafePage = Math.min(inventoryPage, inventoryTotalPages);
+  const pagedInventory = filteredInventory.slice(
+    (inventorySafePage - 1) * INVENTORY_PAGE_SIZE,
+    inventorySafePage * INVENTORY_PAGE_SIZE,
+  );
+  const inventoryRangeStart = filteredInventory.length === 0 ? 0 : (inventorySafePage - 1) * INVENTORY_PAGE_SIZE + 1;
+  const inventoryRangeEnd = Math.min(inventorySafePage * INVENTORY_PAGE_SIZE, filteredInventory.length);
 
   const lowStockCount = scopedInventory.reduce(
     (acc, item) => acc + item.branches.filter(b => b.totalQty < LOW_STOCK_THRESHOLD && b.totalQty > 0).length,
@@ -208,56 +225,87 @@ export default function CentralizedInventory() {
           <StatCard title="Expiring Items" value={expiringCount} icon={Package} variant="risk" />
         </div>
 
-        {/* Recent Transfers — surfaced ABOVE the full stock grid so admins
-            and pharmacists see the latest transfer activity without
-            scrolling. Capped to the last 10 by createdAt; the full
-            transfer table follows the inventory grid below. */}
+        {/* Transfer Requests — surfaced ABOVE the medicine stock grid so
+            admins can review and act on transfer activity (approve, mark
+            received) without scrolling past the full inventory. Newest
+            first by createdAt. */}
         <Card className="border-none shadow-sm overflow-hidden border-l-4 border-l-primary">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <ArrowRightLeft className="w-5 h-5 text-primary" />
-              Recent Transfers
+              Transfer Requests
               <Badge variant="outline" className="ml-2 text-[10px] font-normal">
-                Last {Math.min(scopedTransfers.length, 10)}
+                {scopedTransfers.length}
               </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             {scopedTransfers.length === 0 ? (
-              <p className="text-sm text-muted-foreground italic text-center py-4">
-                No transfer activity yet.
-              </p>
+              <div className="text-center py-12">
+                <ArrowRightLeft className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">No transfer requests yet</p>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Medicine</TableHead>
                       <TableHead>From</TableHead>
                       <TableHead>To</TableHead>
-                      <TableHead>Medicine</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Date</TableHead>
+                      <TableHead>Notes</TableHead>
+                      {isAdmin && <TableHead>Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {[...scopedTransfers]
                       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                      .slice(0, 10)
-                      .map((tx) => {
+                      .map(tx => {
                         const cfg = transferStatusBadge[tx.status];
                         return (
-                          <TableRow key={`recent-${tx.id}`}>
+                          <TableRow key={tx.id}>
+                            <TableCell className="font-medium">
+                              {(tx.medicine as any)?.name || tx.medicineId.slice(0, 8)}
+                            </TableCell>
+                            <TableCell>{tx.fromBranch?.name || "--"}</TableCell>
+                            <TableCell>{tx.toBranch?.name || "--"}</TableCell>
+                            <TableCell className="text-right font-semibold">{tx.quantity}</TableCell>
                             <TableCell>
                               <Badge variant="outline" className={cfg.className}>{cfg.label}</Badge>
                             </TableCell>
-                            <TableCell className="text-xs">{tx.fromBranch?.name || "--"}</TableCell>
-                            <TableCell className="text-xs">{tx.toBranch?.name || "--"}</TableCell>
-                            <TableCell className="font-medium text-sm">
-                              {(tx.medicine as any)?.name || tx.medicineId.slice(0, 8)}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold">{tx.quantity}</TableCell>
                             <TableCell className="text-xs">{formatDate(tx.createdAt)}</TableCell>
+                            <TableCell className="max-w-[120px] truncate text-xs">{tx.notes || "--"}</TableCell>
+                            {isAdmin && (
+                              <TableCell>
+                                <div className="flex items-center gap-1">
+                                  {tx.status === "PENDING" && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                      onClick={() => handleApprove(tx.id)}
+                                      title="Approve"
+                                    >
+                                      <CheckCircle className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                  {(tx.status === "APPROVED" || tx.status === "IN_TRANSIT") && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                      onClick={() => handleReceive(tx.id)}
+                                      title="Mark Received"
+                                    >
+                                      <PackageCheck className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            )}
                           </TableRow>
                         );
                       })}
@@ -305,7 +353,7 @@ export default function CentralizedInventory() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredInventory.map(item => {
+                    {pagedInventory.map(item => {
                       const med = item.medicine as any;
                       return (
                         <TableRow key={med.id}>
@@ -346,87 +394,34 @@ export default function CentralizedInventory() {
                 </Table>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Transfer Requests */}
-        <Card className="border-none shadow-sm overflow-hidden">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <ArrowRightLeft className="w-5 h-5 text-muted-foreground" />
-              Transfer Requests
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {scopedTransfers.length === 0 ? (
-              <div className="text-center py-12">
-                <ArrowRightLeft className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">No transfer requests yet</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Medicine</TableHead>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Notes</TableHead>
-                      {isAdmin && <TableHead>Actions</TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {scopedTransfers.map(tx => {
-                      const cfg = transferStatusBadge[tx.status];
-                      return (
-                        <TableRow key={tx.id}>
-                          <TableCell className="font-medium">
-                            {(tx.medicine as any)?.name || tx.medicineId.slice(0, 8)}
-                          </TableCell>
-                          <TableCell>{tx.fromBranch?.name || "--"}</TableCell>
-                          <TableCell>{tx.toBranch?.name || "--"}</TableCell>
-                          <TableCell className="text-right font-semibold">{tx.quantity}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={cfg.className}>{cfg.label}</Badge>
-                          </TableCell>
-                          <TableCell className="text-xs">{formatDate(tx.createdAt)}</TableCell>
-                          <TableCell className="max-w-[120px] truncate text-xs">{tx.notes || "--"}</TableCell>
-                          {isAdmin && (
-                            <TableCell>
-                              <div className="flex items-center gap-1">
-                                {tx.status === "PENDING" && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                    onClick={() => handleApprove(tx.id)}
-                                    title="Approve"
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                  </Button>
-                                )}
-                                {(tx.status === "APPROVED" || tx.status === "IN_TRANSIT") && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                    onClick={() => handleReceive(tx.id)}
-                                    title="Mark Received"
-                                  >
-                                    <PackageCheck className="w-4 h-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+            {filteredInventory.length > INVENTORY_PAGE_SIZE && (
+              <div className="pt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  Showing {inventoryRangeStart}–{inventoryRangeEnd} of {filteredInventory.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setInventoryPage((p) => Math.max(1, p - 1))}
+                    disabled={inventorySafePage <= 1}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <span className="px-2 tabular-nums">Page {inventorySafePage} of {inventoryTotalPages}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setInventoryPage((p) => Math.min(inventoryTotalPages, p + 1))}
+                    disabled={inventorySafePage >= inventoryTotalPages}
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

@@ -10,7 +10,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { UserPlus, ShieldCheck, Mail, Lock, Loader2, ArrowLeft, Building2, Phone, Cake, Briefcase, GraduationCap, Clock, Check, X, Sparkles, BadgeCheck, History, Stethoscope, Copy } from "lucide-react";
+import { UserPlus, ShieldCheck, Mail, Lock, Loader2, ArrowLeft, Building2, Phone, Cake, Briefcase, GraduationCap, Clock, Check, X, Sparkles, BadgeCheck, History, Stethoscope, Copy, Home, MapPin, User } from "lucide-react";
 import { sanitizeName, sanitizePhone, isValidPhone, isValidEmail, checkPassword, isPasswordAcceptable, stripLeadingSpaces, stripEdgeSpaces } from "@/lib/input-validators";
 import { useBranches } from "@/hooks/useBranches";
 import { apiClient } from "@/lib/api-client";
@@ -90,6 +90,15 @@ interface FormState {
   patientType: "" | "NEW" | "RETURNING";
   previousDoctorName: string;
   previousDoctorDetails: string;
+  // Home Therapy: patient address & dedicated contacts. Geocoded server-side
+  // on save so the live-map / route engine has coordinates immediately.
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  primaryPhone: string;
+  alternativePhone: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -99,6 +108,8 @@ const EMPTY_FORM: FormState = {
   registrationNumber: "",
   initialSkills: [],
   patientType: "", previousDoctorName: "", previousDoctorDetails: "",
+  addressLine1: "", addressLine2: "", city: "", state: "", pincode: "",
+  primaryPhone: "", alternativePhone: "",
 };
 
 const PROFICIENCY_LEVELS: { value: Proficiency; label: string; tone: string; tip: string }[] = [
@@ -138,7 +149,7 @@ const REQUIRED_BY_ROLE: Record<Role, (keyof FormState)[]> = {
   PATIENT:       ["dob", "gender", "phoneNumber", "patientType"],
   DOCTOR:        ["specialization", "qualification", "yearsExperience", "registrationNumber"],
   ADMIN_DOCTOR:  ["specialization", "qualification", "yearsExperience", "registrationNumber"],
-  THERAPIST:     ["specialization", "qualification", "yearsExperience", "registrationNumber"],
+  THERAPIST:     ["gender", "qualification", "yearsExperience", "registrationNumber"],
   PHARMACIST:    ["qualification", "yearsExperience"],
   ADMIN:         [],
   // BRANCH_ADMIN is a flat User pinned to a single branch — no profile
@@ -246,19 +257,31 @@ export default function CreateUser() {
           previousDoctorDetails: form.previousDoctorDetails.trim() || null,
         };
       }
+      // Home Therapy: address & contacts (geocoded server-side)
+      if (form.addressLine1.trim()) p.addressLine1 = form.addressLine1.trim();
+      if (form.addressLine2.trim()) p.addressLine2 = form.addressLine2.trim();
+      if (form.city.trim())         p.city = form.city.trim();
+      if (form.state.trim())        p.state = form.state.trim();
+      if (form.pincode.trim())      p.pincode = form.pincode.trim();
+      if (form.primaryPhone.trim())     p.primaryPhone = form.primaryPhone.trim();
+      if (form.alternativePhone.trim()) p.alternativePhone = form.alternativePhone.trim();
     }
     if (["DOCTOR", "ADMIN_DOCTOR", "THERAPIST"].includes(form.role)) {
-      if (form.specialization) p.specialization = form.specialization;
+      // Doctors and admin-doctors send specialization (free text).
+      // Therapists send gender (MALE / FEMALE) instead — specialization
+      // was dropped from the Therapist model.
+      if (form.role === "THERAPIST") {
+        if (form.gender) p.gender = form.gender;
+      } else if (form.specialization) {
+        p.specialization = form.specialization;
+      }
       if (form.qualification)  p.qualification = form.qualification;
       if (form.yearsExperience !== "") p.yearsExperience = Number(form.yearsExperience);
       if (form.clinic) p.clinic = form.clinic;
       if (form.registrationNumber.trim()) p.registrationNumber = form.registrationNumber.trim();
     }
     if (form.role === "THERAPIST" && form.initialSkills.length > 0) {
-      // Exclude the primary specialization — the backend auto-adds it as CERTIFIED.
-      // Each entry includes the admin-chosen proficiency.
       p.initialSkills = form.initialSkills
-        .filter((s) => s.skill !== form.specialization)
         .map((s) => ({ skill: s.skill, proficiency: s.proficiency }));
     }
     if (form.role === "PHARMACIST") {
@@ -367,10 +390,10 @@ export default function CreateUser() {
                     </>)}
                     {isClinician && (<>
                       <li>• Certificate / registration number</li>
-                      <li>• Specialization{form.role === "THERAPIST" && " (Ayurvedic therapy)"}</li>
+                      <li>• {form.role === "THERAPIST" ? "Gender (Male / Female)" : "Specialization"}</li>
                       <li>• Qualification</li>
                       <li>• Years of experience</li>
-                      {form.role === "THERAPIST" && <li>• Additional skills (optional)</li>}
+                      {form.role === "THERAPIST" && <li>• Skills (optional)</li>}
                     </>)}
                     {isPharmacist && (<>
                       <li>• Qualification</li>
@@ -624,6 +647,114 @@ export default function CreateUser() {
                           </div>
                         )}
                       </div>
+
+                      {/* Home Therapy Details — address & dedicated contact
+                          numbers used for at-home therapy referrals. The
+                          address is geocoded server-side on save so the
+                          live-tracking map and route distances work
+                          immediately. */}
+                      <div className="pt-2 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <Home className="w-4 h-4 text-primary" />
+                          <h4 className="text-base font-bold text-foreground">Home Therapy Details</h4>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground -mt-2 ml-1">
+                          Optional at intake. Required before a doctor can refer this patient for at-home therapy.
+                        </p>
+                        <div className="space-y-2">
+                          <Label htmlFor="addressLine1" className="flex items-center gap-2">
+                            <MapPin className="w-3.5 h-3.5 text-muted-foreground" /> Address Line 1
+                          </Label>
+                          <Input
+                            id="addressLine1"
+                            name="addressLine1"
+                            placeholder="Flat / House No., Building, Street"
+                            value={form.addressLine1}
+                            onChange={(e) => setForm({ ...form, addressLine1: e.target.value })}
+                            maxLength={200}
+                            className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="addressLine2">Address Line 2 (optional)</Label>
+                          <Input
+                            id="addressLine2"
+                            name="addressLine2"
+                            placeholder="Area, Landmark"
+                            value={form.addressLine2}
+                            onChange={(e) => setForm({ ...form, addressLine2: e.target.value })}
+                            maxLength={200}
+                            className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div className="space-y-2">
+                            <Label htmlFor="city">City</Label>
+                            <Input
+                              id="city"
+                              name="city"
+                              placeholder="e.g. Chennai"
+                              value={form.city}
+                              onChange={(e) => setForm({ ...form, city: e.target.value })}
+                              maxLength={100}
+                              className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="state">State</Label>
+                            <Input
+                              id="state"
+                              name="state"
+                              placeholder="e.g. Tamil Nadu"
+                              value={form.state}
+                              onChange={(e) => setForm({ ...form, state: e.target.value })}
+                              maxLength={100}
+                              className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="pincode">Pincode</Label>
+                            <Input
+                              id="pincode"
+                              name="pincode"
+                              placeholder="6-digit"
+                              inputMode="numeric"
+                              value={form.pincode}
+                              onChange={(e) => setForm({ ...form, pincode: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                              maxLength={6}
+                              className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <Label htmlFor="primaryPhone" className="flex items-center gap-2">
+                              <Phone className="w-3.5 h-3.5 text-muted-foreground" /> Home Therapy Contact
+                            </Label>
+                            <Input
+                              id="primaryPhone"
+                              name="primaryPhone"
+                              type="tel"
+                              placeholder="Primary number for therapist coordination"
+                              value={form.primaryPhone}
+                              onChange={(e) => setForm({ ...form, primaryPhone: sanitizePhone(e.target.value) })}
+                              className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="alternativePhone">Alternative Phone (optional)</Label>
+                            <Input
+                              id="alternativePhone"
+                              name="alternativePhone"
+                              type="tel"
+                              placeholder="Family member / secondary contact"
+                              value={form.alternativePhone}
+                              onChange={(e) => setForm({ ...form, alternativePhone: sanitizePhone(e.target.value) })}
+                              className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -651,27 +782,33 @@ export default function CreateUser() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
-                          <Label htmlFor="specialization" className="flex items-center gap-2">
-                            <Briefcase className="w-3.5 h-3.5 text-muted-foreground" /> Specialization <span className="text-attention">*</span>
-                          </Label>
                           {form.role === "THERAPIST" ? (
-                            <Select
-                              value={form.specialization}
-                              onValueChange={(val) => setForm({ ...form, specialization: val })}
-                            >
-                              <SelectTrigger className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl">
-                                <SelectValue placeholder="Pick an Ayurvedic specialization" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {AYURVEDIC_SKILLS.map((s) => (
-                                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <>
+                              <Label htmlFor="gender" className="flex items-center gap-2">
+                                <User className="w-3.5 h-3.5 text-muted-foreground" /> Gender <span className="text-attention">*</span>
+                              </Label>
+                              <Select
+                                value={form.gender}
+                                onValueChange={(val) => setForm({ ...form, gender: val })}
+                              >
+                                <SelectTrigger className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl">
+                                  <SelectValue placeholder="Select gender" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="MALE">Male</SelectItem>
+                                  <SelectItem value="FEMALE">Female</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </>
                           ) : (
-                            <Input id="specialization" name="specialization" placeholder="e.g. Orthopaedics"
-                              value={form.specialization} onChange={handleChange} required
-                              className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl" />
+                            <>
+                              <Label htmlFor="specialization" className="flex items-center gap-2">
+                                <Briefcase className="w-3.5 h-3.5 text-muted-foreground" /> Specialization <span className="text-attention">*</span>
+                              </Label>
+                              <Input id="specialization" name="specialization" placeholder="e.g. Orthopaedics"
+                                value={form.specialization} onChange={handleChange} required
+                                className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl" />
+                            </>
                           )}
                         </div>
                         <div className="space-y-2">
@@ -694,7 +831,7 @@ export default function CreateUser() {
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="clinic">Clinic / Practice (optional)</Label>
-                          <Input id="clinic" name="clinic" placeholder="e.g. Al Shifa Main Clinic"
+                          <Input id="clinic" name="clinic" placeholder="e.g. IWIS Main Clinic"
                             value={form.clinic} onChange={handleChange}
                             className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl" />
                         </div>
@@ -709,17 +846,14 @@ export default function CreateUser() {
                         <div className="space-y-4 pt-4 border-t border-border/40">
                           <div className="space-y-1">
                             <Label className="flex items-center gap-2">
-                              <Sparkles className="w-3.5 h-3.5 text-muted-foreground" /> Additional Skills & Proficiency (optional)
+                              <Sparkles className="w-3.5 h-3.5 text-muted-foreground" /> Skills & Proficiency (optional)
                             </Label>
                             <p className="text-xs text-muted-foreground">
-                              Pick each Ayurvedic therapy this therapist can perform and the proficiency level. Their primary
-                              specialization (<span className="font-semibold">{AYURVEDIC_SKILLS.find((s) => s.value === form.specialization)?.label || "—"}</span>)
-                              is automatically registered as <span className="font-semibold text-wellness">Certified</span>.
+                              Pick each Ayurvedic therapy this therapist can perform and the proficiency level. These seed the skill matrix used for therapist-skill matching.
                             </p>
                           </div>
                           <div className="space-y-2">
                             {AYURVEDIC_SKILLS
-                              .filter((s) => s.value !== form.specialization)
                               .map((s) => {
                                 const entry = form.initialSkills.find((x) => x.skill === s.value);
                                 const isSelected = !!entry;

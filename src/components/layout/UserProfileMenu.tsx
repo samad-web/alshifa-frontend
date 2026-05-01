@@ -63,6 +63,9 @@ function getProfilePhoto(profile: any, role: AppRole | null): string | null {
   if (role === "PHARMACIST") {
     return profile.pharmacist?.profilePhoto ?? null;
   }
+  if (role === "PATIENT") {
+    return profile.patient?.profilePhoto ?? null;
+  }
   return null;
 }
 

@@ -5,6 +5,7 @@ import { Panel } from "@/components/ui/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { MapPin, Phone, Mail, Plus, Trash2, Edit2, Building2, Loader2, AlertCircle, CheckCircle2, BedDouble, DoorOpen, Clock, Activity } from "lucide-react";
@@ -423,13 +424,13 @@ export default function BranchManagement() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="operatingHoursFrom" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Opens</Label>
-                                        <Input id="operatingHoursFrom" type="time" value={formData.operatingHoursFrom}
-                                            onChange={(e) => setFormData({ ...formData, operatingHoursFrom: e.target.value })} />
+                                        <TimePicker id="operatingHoursFrom" value={formData.operatingHoursFrom}
+                                            onChange={(hhmm) => setFormData({ ...formData, operatingHoursFrom: hhmm })} />
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="operatingHoursTo" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Closes</Label>
-                                        <Input id="operatingHoursTo" type="time" value={formData.operatingHoursTo}
-                                            onChange={(e) => setFormData({ ...formData, operatingHoursTo: e.target.value })} />
+                                        <TimePicker id="operatingHoursTo" value={formData.operatingHoursTo}
+                                            onChange={(hhmm) => setFormData({ ...formData, operatingHoursTo: hhmm })} />
                                     </div>
                                 </div>
                             </div>

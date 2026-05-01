@@ -659,6 +659,7 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                aria-label="Edit attendance"
                                 className="h-8 w-8"
                                 onClick={() => openEditDialog(a)}
                                 title="Edit clock-in / clock-out"
@@ -668,6 +669,7 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                aria-label="Delete attendance"
                                 className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                                 onClick={() => handleDeleteAttendance(a)}
                                 title="Delete attendance record"

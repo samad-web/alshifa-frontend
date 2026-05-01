@@ -8,6 +8,38 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { gamificationApi } from "@/services/gamification.service";
 import type { GamificationAnalytics as GamAnalytics } from "@/types";
+
+// Minimal shape contracts for the auxiliary panels. The backend hasn't
+// formalised these into shared types yet — these are the *fields actually
+// read by the JSX below*, kept narrow on purpose so a casual edit doesn't
+// silently start reading new untyped fields. Promote to /types/index.ts
+// when the response shape stabilises on the server.
+interface CorrelationBucket {
+  scoreRange: string;
+  avgJourneySuccessRate: number;
+  clinicianCount: number;
+}
+type CorrelationResponse = CorrelationBucket[] | null;
+
+interface ConfigImpactResponse {
+  hasComparison?: boolean;
+  before?: { avgScore: number; participants: number } | null;
+  after?:  { avgScore: number; participants: number } | null;
+  delta?:  number | null;
+  [k: string]: unknown;
+}
+
+interface AnomalyEntry {
+  id: string;
+  type?: string;
+  severity?: string;
+  reason?: string;
+  detectedAt?: string;
+  patientId?: string;
+  patientName?: string;
+  [k: string]: unknown;
+}
+interface AnomaliesResponse { anomalies: AnomalyEntry[]; total: number }
 import {
   Activity, Award, BarChart3, CheckCircle, Flame, ShieldAlert,
   TrendingUp, Users, Zap, Trophy, Target, AlertTriangle
@@ -16,25 +48,35 @@ import {
 export default function GamificationAnalytics() {
   const { role } = useAuth();
   const [data, setData] = useState<GamAnalytics | null>(null);
-  const [correlation, setCorrelation] = useState<any>(null);
-  const [configImpact, setConfigImpact] = useState<any>(null);
-  const [anomalies, setAnomalies] = useState<{ anomalies: any[]; total: number } | null>(null);
+  const [correlation, setCorrelation] = useState<CorrelationResponse>(null);
+  const [configImpact, setConfigImpact] = useState<ConfigImpactResponse | null>(null);
+  const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
+    // Each panel loads independently — a failure on (e.g.) anomalies must
+    // not poison the analytics grid. Promise.allSettled keeps each panel
+    // separately recoverable; failures are logged so the surface area
+    // doesn't go quiet.
+    Promise.allSettled([
       gamificationApi.getAnalytics(),
       gamificationApi.getOutcomeCorrelation(),
       gamificationApi.getConfigImpact(),
-      gamificationApi.getAnomalies({ limit: 10 })
+      gamificationApi.getAnomalies({ limit: 10 }),
     ])
-      .then(([analytics, corr, impact, anom]) => {
-        setData(analytics);
-        setCorrelation(corr);
-        setConfigImpact(impact);
-        setAnomalies(anom);
+      .then(([analyticsR, corrR, impactR, anomR]) => {
+        if (analyticsR.status === 'fulfilled') setData(analyticsR.value);
+        else console.warn('[GamificationAnalytics] analytics failed', analyticsR.reason);
+
+        if (corrR.status === 'fulfilled') setCorrelation(corrR.value);
+        else console.warn('[GamificationAnalytics] correlation failed', corrR.reason);
+
+        if (impactR.status === 'fulfilled') setConfigImpact(impactR.value);
+        else console.warn('[GamificationAnalytics] config impact failed', impactR.reason);
+
+        if (anomR.status === 'fulfilled') setAnomalies(anomR.value);
+        else console.warn('[GamificationAnalytics] anomalies failed', anomR.reason);
       })
-      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
@@ -150,7 +192,7 @@ export default function GamificationAnalytics() {
             <CardContent>
               {Array.isArray(correlation) && correlation.length > 0 ? (
                 <div className="space-y-3">
-                  {correlation.map((bucket: any) => (
+                  {correlation.map((bucket) => (
                     <div key={bucket.scoreRange} className="flex items-center gap-3">
                       <div className="w-28 text-xs font-bold">{bucket.scoreRange}</div>
                       <div className="flex-1 flex items-center gap-2">
@@ -248,7 +290,7 @@ export default function GamificationAnalytics() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {anomalies.anomalies.map((a: any) => (
+                {anomalies.anomalies.map((a) => (
                   <div key={a.id} className="flex items-center justify-between p-3 rounded-lg bg-attention/5 border border-attention/20">
                     <div>
                       <p className="text-xs font-bold">{a.anomalyType}</p>
@@ -262,7 +304,7 @@ export default function GamificationAnalytics() {
                         await gamificationApi.resolveAnomaly(a.id);
                         setAnomalies(prev => prev ? {
                           ...prev,
-                          anomalies: prev.anomalies.filter((x: any) => x.id !== a.id),
+                          anomalies: prev.anomalies.filter((x) => x.id !== a.id),
                           total: prev.total - 1
                         } : null);
                       }}

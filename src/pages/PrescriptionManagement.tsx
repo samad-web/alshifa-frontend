@@ -19,6 +19,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { DatePicker } from "@/components/ui/date-picker";
 import { InlinePatientPicker } from "@/components/clinical/InlinePatientPicker";
 import { apiClient } from "@/lib/api-client";
 
@@ -513,20 +514,18 @@ export default function PrescriptionManagement() {
                                     <div className="grid grid-cols-2 gap-3">
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">From</label>
-                                            <input
-                                                type="date"
+                                            <DatePicker
                                                 value={rxDateFrom}
-                                                onChange={(e) => setRxDateFrom(e.target.value)}
-                                                className="w-full h-9 rounded-md border bg-background px-3 text-sm"
+                                                onChange={(iso) => setRxDateFrom(iso)}
+                                                className="h-9"
                                             />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">To</label>
-                                            <input
-                                                type="date"
+                                            <DatePicker
                                                 value={rxDateTo}
-                                                onChange={(e) => setRxDateTo(e.target.value)}
-                                                className="w-full h-9 rounded-md border bg-background px-3 text-sm"
+                                                onChange={(iso) => setRxDateTo(iso)}
+                                                className="h-9"
                                             />
                                         </div>
                                     </div>
