@@ -24,6 +24,8 @@ import {
 } from "@/services/communication.service";
 import type { Prescription, VisitSummaryEntry } from "@/types";
 import { cn } from "@/lib/utils";
+import { FeedbackPromptListener } from "@/components/FeedbackModal";
+import { HomeTherapyFeedbackListener } from "@/components/HomeTherapyFeedbackListener";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -443,6 +445,8 @@ function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
 export default function PatientPortal() {
   return (
     <AppLayout>
+      <FeedbackPromptListener />
+      <HomeTherapyFeedbackListener />
       <div className="container mx-auto px-4 py-6 max-w-5xl">
         <PageHeader
           title="My Records"

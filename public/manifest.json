@@ -1,7 +1,7 @@
 {
-    "name": "Al-Shifa Ayush Wellness",
-    "short_name": "Al-Shifa",
-    "description": "Your Ayush Wellness Companion",
+    "name": "IWIS",
+    "short_name": "IWIS",
+    "description": "IWIS Healthcare Platform",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#ffffff",

@@ -1,4 +1,14 @@
 import { useEffect, useState } from "react";
+import {
+  Dialog as PermissionDialog,
+  DialogContent as PermissionDialogContent,
+  DialogHeader as PermissionDialogHeader,
+  DialogTitle as PermissionDialogTitle,
+  DialogDescription as PermissionDialogDescription,
+  DialogFooter as PermissionDialogFooter,
+} from "@/components/ui/dialog";
+import { MapPin } from "lucide-react";
+import { useLocationBroadcast } from "@/hooks/useLocationBroadcast";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { StatCard } from "@/components/ui/stat-card";
@@ -24,6 +34,9 @@ import TodoPanel from "@/components/todo/TodoPanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
 import { SelfExamBundlePanel, urgencyBadge } from "@/components/dashboard/SelfExamBundlePanel";
+import HomeTherapyTodayPanel from "@/components/dashboard/HomeTherapyTodayPanel";
+import { TherapistCompleteSessionModal } from "@/components/HomeTherapySessionFeedback";
+import type { HomeTherapySession } from "@/services/homeTherapy.service";
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -44,6 +57,31 @@ export default function TherapistDashboard() {
   // session cards. Mirrors the doctor dashboard pattern so the therapist sees
   // the same depth of context before approving a session.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // Active home-therapy session: GPS broadcast is bound to this. The
+  // HomeTherapyTodayPanel reports the active sessionId via callback, and
+  // the useLocationBroadcast hook watches the device GPS and POSTs each
+  // fix to /api/home-therapy/sessions/:id/location-ping.
+  const [activeHomeSessionId, setActiveHomeSessionId] = useState<string | null>(null);
+  // Session targeted by the "Complete Session" modal. The therapist
+  // confirms in step 1, the backend marks the session COMPLETED, then
+  // step 2 collects feedback. Setting null closes the modal.
+  const [completeTarget, setCompleteTarget] = useState<HomeTherapySession | null>(null);
+  const [homeRefreshKey, setHomeRefreshKey] = useState(0);
+  const { permissionState, requestPermission } = useLocationBroadcast({
+    active: !!activeHomeSessionId,
+    sessionId: activeHomeSessionId,
+  });
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  // Surface the modal automatically when the therapist marks a session
+  // en-route but the browser has denied location access.
+  useEffect(() => {
+    if (activeHomeSessionId && (permissionState === "denied" || permissionState === "unsupported")) {
+      setShowPermissionModal(true);
+    } else {
+      setShowPermissionModal(false);
+    }
+  }, [activeHomeSessionId, permissionState]);
 
   async function refresh() {
     setLoading(true);
@@ -160,6 +198,49 @@ export default function TherapistDashboard() {
             )}
           </div>
         </section>
+
+        {/* SECTION C2 — Today's Home Therapy.
+            Listed sessions come from the home-therapy approval flow (admin
+            schedules them after a doctor's referral). The panel handles
+            the full Depart → Arrived → In Session → Completed lifecycle.
+            On Complete, Task 8's feedback modal will be triggered via the
+            `onCompleteSession` callback (TODO once Task 8 lands). */}
+        <HomeTherapyTodayPanel
+          key={homeRefreshKey}
+          onActiveSessionChange={setActiveHomeSessionId}
+          onCompleteSession={(s) => setCompleteTarget(s)}
+        />
+
+        {/* Therapist completion + feedback modal (Task 8). On submit we
+            bump the panel's key to force a refresh — the next-session
+            card in the modal already pre-fetched the next stop, but the
+            schedule list also needs to reflect the COMPLETED status. */}
+        <TherapistCompleteSessionModal
+          session={completeTarget}
+          onClose={() => setCompleteTarget(null)}
+          onComplete={() => setHomeRefreshKey((k) => k + 1)}
+        />
+
+        {/* Permission modal — surfaces when GPS is needed but denied. */}
+        <PermissionDialog open={showPermissionModal} onOpenChange={setShowPermissionModal}>
+          <PermissionDialogContent>
+            <PermissionDialogHeader>
+              <PermissionDialogTitle className="flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-primary" />
+                Enable Location Access
+              </PermissionDialogTitle>
+              <PermissionDialogDescription>
+                Location access is required for home therapy sessions. Please enable location in your browser settings, then click "I've enabled it" to retry.
+              </PermissionDialogDescription>
+            </PermissionDialogHeader>
+            <PermissionDialogFooter>
+              <Button variant="outline" onClick={() => setShowPermissionModal(false)}>Dismiss</Button>
+              <Button onClick={() => { requestPermission(); setShowPermissionModal(false); }}>
+                I've enabled it
+              </Button>
+            </PermissionDialogFooter>
+          </PermissionDialogContent>
+        </PermissionDialog>
 
         {/* SECTION D — Exercise Prescription Tracker */}
         <section className="rounded-xl border bg-card shadow-card overflow-hidden">

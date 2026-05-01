@@ -5,6 +5,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,7 @@ import {
   Languages, FileText, BadgeCheck,
 } from "lucide-react";
 import { sanitizeName, sanitizePhone, stripEdgeSpaces } from "@/lib/input-validators";
+import { PatientLocationCard, type PatientLocationFields } from "@/components/PatientLocationCard";
 
 const MAX_PHOTO_MB = 5;
 const BIO_MAX = 1000;
@@ -28,7 +30,11 @@ const LANGUAGES_MAX = 10;
 type ClinicianProfile = {
   id: string;
   fullName: string | null;
-  specialization: string | null;
+  // Doctor.specialization remains; Therapist.specialization was dropped in
+  // favour of gender. Both fields are optional on this shared profile shape
+  // — only one is ever populated per role.
+  specialization?: string | null;
+  gender?: string | null;
   qualification: string | null;
   yearsExperience: number | null;
   clinic: string | null;
@@ -121,7 +127,7 @@ function Row({ icon: Icon, label, value }: { icon: any; label: string; value: Re
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { role } = useAuth();
+  const { role, refreshProfile } = useAuth();
 
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -178,6 +184,7 @@ export default function ProfilePage() {
       fd.append("file", file);
       const { data } = await apiClient.upload<{ url: string; user: MeResponse }>("/api/user/me/photo", fd);
       setMe(data.user);
+      await refreshProfile();
       toast({ title: "Profile photo updated" });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
@@ -191,6 +198,7 @@ export default function ProfilePage() {
     try {
       const { data } = await apiClient.patch<MeResponse>("/api/user/me", { profilePhoto: null });
       setMe(data);
+      await refreshProfile();
       toast({ title: "Profile photo removed" });
     } catch (err: any) {
       toast({ title: "Remove failed", description: err.message, variant: "destructive" });
@@ -291,8 +299,12 @@ export default function ProfilePage() {
     | null;
 
   const subtitle = clinicianData
-    ? [clinicianData.specialization, clinicianData.yearsExperience ? `${clinicianData.yearsExperience} yrs exp` : null]
-        .filter(Boolean).join(" • ")
+    ? [
+        // Therapists surface gender in the subtitle (where doctors surface
+        // specialization) since their specialization field was dropped.
+        me.role === "THERAPIST" ? clinicianData.gender : clinicianData.specialization,
+        clinicianData.yearsExperience ? `${clinicianData.yearsExperience} yrs exp` : null,
+      ].filter(Boolean).join(" • ")
     : pharmacistData
       ? [pharmacistData.qualification, pharmacistData.yearsExperience ? `${pharmacistData.yearsExperience} yrs exp` : null]
           .filter(Boolean).join(" • ")
@@ -422,8 +434,8 @@ export default function ProfilePage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="dob">Date of birth</Label>
-                      <Input id="dob" type="date" value={buf.dob}
-                             onChange={(e) => setBuf({ ...buf, dob: e.target.value })} />
+                      <DatePicker id="dob" value={buf.dob ?? ''}
+                             onChange={(iso) => setBuf({ ...buf, dob: iso })} />
                     </div>
                     <div>
                       <Label htmlFor="gender">Gender</Label>
@@ -468,16 +480,33 @@ export default function ProfilePage() {
           </Card>
         )}
 
+        {/* Home Therapy Location — patient self-service. Lets the patient
+            add or correct their home address; the backend re-runs the
+            geocode so the live-tracking map and route distances stay
+            current. Verified status surfaces here too. */}
+        {isPatient && me.patient && (
+          <PatientLocationCard
+            patient={me.patient as unknown as PatientLocationFields}
+            mode="self"
+          />
+        )}
+
         {isClinician && clinicianData && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Clinical credentials</CardTitle>
               <CardDescription>
-                Specialization, qualification, experience, and registration are managed by an administrator. You can update your clinic below.
+                {me.role === "THERAPIST"
+                  ? "Gender, qualification, experience, and registration are managed by an administrator. You can update your clinic below."
+                  : "Specialization, qualification, experience, and registration are managed by an administrator. You can update your clinic below."}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Row icon={Briefcase}      label="Specialization"      value={clinicianData.specialization} />
+              {me.role === "THERAPIST" ? (
+                <Row icon={Briefcase}    label="Gender"            value={clinicianData.gender} />
+              ) : (
+                <Row icon={Briefcase}    label="Specialization"    value={clinicianData.specialization} />
+              )}
               <Row icon={GraduationCap}  label="Qualification"       value={clinicianData.qualification} />
               <Row icon={Clock}          label="Years of experience" value={clinicianData.yearsExperience} />
               <Row icon={BadgeCheck}     label="Registration number" value={clinicianData.registrationNumber} />

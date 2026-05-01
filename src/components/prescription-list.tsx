@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Download, FileText, Calendar, ExternalLink, Activity, Ban, Loader2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Download, FileText, Calendar, ExternalLink, Activity, Ban, Loader2, Stethoscope } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,11 @@ interface Prescription {
     fileUrl?: string;
     videoUrl?: string;
     createdAt: string;
+    // Optional link to the appointment that generated this prescription.
+    // Used as the primary visit-grouping key when present; otherwise the
+    // UI falls back to (calendar day + prescriber name) — same rule the
+    // backend applies when bundling the visit PDF.
+    appointmentId?: string | null;
     discontinuedAt?: string | null;
     discontinuedReason?: string | null;
     doctor?: {
@@ -73,6 +78,18 @@ interface PrescriptionListProps {
     onChange?: () => void;
 }
 
+interface VisitGroup {
+    key: string;
+    // Anchor row whose id we hand to the backend — the backend rebundles
+    // the rest of the visit by appointmentId or (day + prescriber).
+    anchor: Prescription;
+    prescriptions: Prescription[];
+    prescriberLabel: string;
+    qualification: string | null;
+    specialization: string | null;
+    visitDate: string;
+}
+
 const CLINICAL_ROLES = new Set(["DOCTOR", "THERAPIST", "ADMIN", "ADMIN_DOCTOR"]);
 
 export function PrescriptionList({
@@ -92,21 +109,24 @@ export function PrescriptionList({
     };
 
     /**
-     * Pull a generated-on-the-fly PDF rendition of the prescription and
-     * trigger a browser download. Goes through apiClient.getBlob so the
+     * Pull a generated-on-the-fly PDF of the visit's full prescription —
+     * the backend bundles every medicine prescribed during the same visit
+     * into one document, so passing any anchor row from the group yields
+     * the same combined PDF. Goes through apiClient.getBlob so the
      * Authorization header is attached and the existing 401-refresh flow
      * still applies.
      */
-    const handleDownloadPdf = async (rx: Prescription) => {
-        setDownloadingId(rx.id);
+    const handleDownloadVisitPdf = async (group: VisitGroup) => {
+        setDownloadingId(group.key);
         try {
-            const blob = await apiClient.getBlob(`/api/prescriptions/${rx.id}/pdf`);
+            const blob = await apiClient.getBlob(
+                `/api/prescriptions/${group.anchor.id}/pdf`,
+            );
             const url = URL.createObjectURL(blob);
-            const safeMed = rx.medicationName.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-            const dateSlug = new Date(rx.createdAt).toISOString().slice(0, 10);
+            const dateSlug = new Date(group.anchor.createdAt).toISOString().slice(0, 10);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `prescription-${safeMed}-${dateSlug}.pdf`;
+            a.download = `prescription-${dateSlug}.pdf`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -119,6 +139,58 @@ export function PrescriptionList({
         }
     };
 
+    // Group prescriptions by the visit they came from. Mirrors the
+    // backend's PDF bundling rule (appointmentId, then a same-day /
+    // same-prescriber fallback) so the on-screen grouping matches the
+    // PDF a user gets when they hit Download on the visit header.
+    const groups = useMemo<VisitGroup[]>(() => {
+        const byKey = new Map<string, VisitGroup>();
+        for (const rx of prescriptions) {
+            const dateSlug = new Date(rx.createdAt).toISOString().slice(0, 10);
+            const prescriberPerson = rx.doctor || rx.therapist;
+            const prescriberName =
+                prescriberPerson?.fullName ||
+                rx.doctor?.user?.email ||
+                rx.therapist?.user?.email ||
+                "Unknown";
+            const namePrefix = rx.doctor ? "Dr. " : "";
+            const roleLabel = rx.doctor ? "Doctor" : "Therapist";
+            const key = rx.appointmentId
+                ? `appt:${rx.appointmentId}`
+                : `day:${dateSlug}|${roleLabel}|${prescriberName}`;
+            const existing = byKey.get(key);
+            if (existing) {
+                existing.prescriptions.push(rx);
+                if (new Date(rx.createdAt) < new Date(existing.anchor.createdAt)) {
+                    existing.anchor = rx;
+                    existing.visitDate = new Date(rx.createdAt).toLocaleDateString();
+                }
+                continue;
+            }
+            byKey.set(key, {
+                key,
+                anchor: rx,
+                prescriptions: [rx],
+                prescriberLabel: `${namePrefix}${prescriberName} (${roleLabel})`,
+                qualification: prescriberPerson?.qualification?.trim() || null,
+                specialization: prescriberPerson?.specialization?.trim() || null,
+                visitDate: new Date(rx.createdAt).toLocaleDateString(),
+            });
+        }
+        const list = Array.from(byKey.values());
+        for (const g of list) {
+            g.prescriptions.sort(
+                (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+            );
+        }
+        list.sort(
+            (a, b) =>
+                new Date(b.anchor.createdAt).getTime() -
+                new Date(a.anchor.createdAt).getTime(),
+        );
+        return list;
+    }, [prescriptions]);
+
     if (!prescriptions?.length) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center border-2 border-dashed rounded-xl bg-secondary/5">
@@ -129,20 +201,56 @@ export function PrescriptionList({
     }
 
     return (
-        <div className="space-y-4">
-            {prescriptions.map((rx) => {
-                const prescriberPerson = rx.doctor || rx.therapist;
-                const prescriberName =
-                    prescriberPerson?.fullName ||
-                    rx.doctor?.user?.email ||
-                    rx.therapist?.user?.email ||
-                    "Unknown";
-                const namePrefix = rx.doctor ? "Dr. " : "";
-                const qualification = prescriberPerson?.qualification?.trim() || null;
-                const specialization = prescriberPerson?.specialization?.trim() || null;
-                const roleLabel = rx.doctor ? "Doctor" : "Therapist";
+        <div className="space-y-6">
+            {groups.map((group) => {
+                const downloading = downloadingId === group.key;
+                return (
+                    <section key={group.key} className="space-y-3">
+                        {/* Visit header — single Download covers every medicine in the visit. */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    {group.visitDate}
+                                    <span aria-hidden className="opacity-50">·</span>
+                                    <span className="text-[11px] normal-case tracking-normal">
+                                        {group.prescriptions.length}{" "}
+                                        medicine{group.prescriptions.length === 1 ? "" : "s"}
+                                    </span>
+                                </div>
+                                <div className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                                    <Stethoscope className="w-3.5 h-3.5 text-primary" />
+                                    {group.prescriberLabel}
+                                    {group.qualification && (
+                                        <span className="font-normal text-muted-foreground">
+                                            · {group.qualification}
+                                        </span>
+                                    )}
+                                </div>
+                                {group.specialization && (
+                                    <p className="text-[11px] text-muted-foreground/80 mt-0.5">
+                                        {group.specialization}
+                                    </p>
+                                )}
+                            </div>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={downloading}
+                                onClick={() => handleDownloadVisitPdf(group)}
+                                className="gap-2 h-9 text-xs"
+                                title="Download the full prescription for this visit"
+                            >
+                                {downloading
+                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    : <Download className="w-3.5 h-3.5" />}
+                                {downloading ? "Preparing…" : "Download prescription"}
+                            </Button>
+                        </div>
+
+                        <div className="space-y-3">
+                        {group.prescriptions.map((rx) => {
                 const discontinued = !!rx.discontinuedAt;
-                const downloading = downloadingId === rx.id;
 
                 return (
                     <Card
@@ -164,38 +272,11 @@ export function PrescriptionList({
                                                 </Badge>
                                             )}
                                         </div>
-                                        <p className="text-sm text-muted-foreground">
-                                            Prescribed by {namePrefix}{prescriberName}
-                                            {qualification && <span>, <span className="font-medium text-foreground/80">{qualification}</span></span>}
-                                            {" "}({roleLabel})
-                                        </p>
-                                        {specialization && (
-                                            <p className="text-xs text-muted-foreground/80 mt-0.5">{specialization}</p>
-                                        )}
                                         {discontinued && rx.discontinuedReason && (
                                             <p className="text-xs text-red-700 mt-1">
                                                 Reason: {rx.discontinuedReason}
                                             </p>
                                         )}
-                                    </div>
-                                    <div className="flex flex-col items-end gap-2">
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <Calendar className="w-3 h-3" />
-                                            {new Date(rx.createdAt).toLocaleDateString()}
-                                        </div>
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            disabled={downloading}
-                                            onClick={() => handleDownloadPdf(rx)}
-                                            className="gap-2 h-8 text-xs"
-                                            title="Download a PDF copy of this prescription"
-                                        >
-                                            {downloading
-                                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                : <Download className="w-3.5 h-3.5" />}
-                                            {downloading ? "Preparing…" : "Download"}
-                                        </Button>
                                     </div>
                                 </div>
 
@@ -311,6 +392,10 @@ export function PrescriptionList({
                             </div>
                         </div>
                     </Card>
+                );
+            })}
+                        </div>
+                    </section>
                 );
             })}
 

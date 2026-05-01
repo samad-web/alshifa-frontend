@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -16,11 +17,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Megaphone, Pin, Plus, Clock, AlertTriangle, AlertCircle, Info, Circle,
+  Pencil, Trash2,
 } from "lucide-react";
 import { communicationApi } from "@/services/communication.service";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import type { AnnouncementEntry, AnnouncementPriority } from "@/types";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 
 interface BranchOption { id: string; name: string }
 
@@ -46,13 +49,17 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function Announcements() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+  const myUserId = user?.id ?? null;
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const [announcements, setAnnouncements] = useState<AnnouncementEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [branches, setBranches] = useState<BranchOption[]>([]);
+  /** When set, the dialog edits this row instead of creating a new one. */
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form state
   const [title, setTitle] = useState("");
@@ -93,14 +100,14 @@ export default function Announcements() {
     }
   };
 
-  const handleCreate = async () => {
+  const handleSubmit = async () => {
     if (!title.trim() || !message.trim()) {
       toast.error("Title and message are required");
       return;
     }
     try {
       setSubmitting(true);
-      await communicationApi.createAnnouncement({
+      const payload = {
         title: title.trim(),
         message: message.trim(),
         priority,
@@ -108,15 +115,62 @@ export default function Announcements() {
         targetRoles: targetRoles.length > 0 ? targetRoles : undefined,
         isPinned,
         expiresAt: expiresAt || undefined,
-      });
-      toast.success("Announcement created");
+      };
+      if (editingId) {
+        // updateAnnouncement signature uses null (not undefined) to clear expiry,
+        // but expiresAt: undefined preserves the existing value — same shape as
+        // the create payload, so no special-casing needed here.
+        await communicationApi.updateAnnouncement(editingId, payload);
+        toast.success("Announcement updated");
+      } else {
+        await communicationApi.createAnnouncement(payload);
+        toast.success("Announcement created");
+      }
       resetForm();
+      setEditingId(null);
       setFormOpen(false);
       loadAnnouncements();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to create announcement");
+      toast.error(err?.message || (editingId ? "Failed to update announcement" : "Failed to create announcement"));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /**
+   * Open the dialog pre-filled with the announcement's current values so the
+   * author (or admin) can revise it. Stops the click event from bubbling so
+   * the card's mark-as-read handler doesn't fire underneath.
+   */
+  const handleEdit = (a: AnnouncementEntry, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingId(a.id);
+    setTitle(a.title);
+    setMessage(a.message);
+    setPriority(a.priority);
+    setBranchIds(a.branches?.map((b) => b.id) ?? []);
+    setTargetRoles(a.targetRoles ?? []);
+    setIsPinned(!!a.isPinned);
+    setExpiresAt(a.expiresAt ?? "");
+    setFormOpen(true);
+  };
+
+  const handleDelete = async (a: AnnouncementEntry, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const ok = await confirm({
+      title: "Delete announcement?",
+      message: `"${a.title}" will be removed for everyone who can see it. This can't be undone.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await communicationApi.deleteAnnouncement(a.id);
+      toast.success("Announcement deleted");
+      // Optimistic local removal — no need to wait for the next list load.
+      setAnnouncements((prev) => prev.filter((row) => row.id !== a.id));
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete announcement");
     }
   };
 
@@ -164,17 +218,27 @@ export default function Announcements() {
     <AppLayout>
       <div className="container mx-auto px-4 py-6 max-w-4xl">
         <PageHeader title="Announcements" subtitle="Branch-wide announcements and updates">
-          {isAdmin && (
-            <Dialog open={formOpen} onOpenChange={setFormOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  New Announcement
-                </Button>
-              </DialogTrigger>
+          {(isAdmin || editingId) && (
+            <Dialog
+              open={formOpen}
+              onOpenChange={(open) => {
+                setFormOpen(open);
+                // Reset edit state on dismissal so reopening "New Announcement"
+                // doesn't accidentally land in edit mode with stale fields.
+                if (!open) { setEditingId(null); resetForm(); }
+              }}
+            >
+              {isAdmin && (
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Announcement
+                  </Button>
+                </DialogTrigger>
+              )}
               <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Create Announcement</DialogTitle>
+                  <DialogTitle>{editingId ? "Edit Announcement" : "Create Announcement"}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 mt-2">
                   <div className="space-y-2">
@@ -260,19 +324,20 @@ export default function Announcements() {
                   </div>
                   <div className="space-y-2">
                     <Label>Expiry Date (optional)</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={expiresAt}
-                      onChange={(e) => setExpiresAt(e.target.value)}
+                      onChange={(iso) => setExpiresAt(iso)}
                     />
                   </div>
                   <Separator />
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setFormOpen(false)}>
+                    <Button variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); resetForm(); }}>
                       Cancel
                     </Button>
-                    <Button onClick={handleCreate} disabled={submitting}>
-                      {submitting ? "Publishing..." : "Publish"}
+                    <Button onClick={handleSubmit} disabled={submitting}>
+                      {submitting
+                        ? (editingId ? "Saving..." : "Publishing...")
+                        : (editingId ? "Save changes" : "Publish")}
                     </Button>
                   </div>
                 </div>
@@ -307,6 +372,10 @@ export default function Announcements() {
             {announcements.map((a) => {
               const pc = PRIORITY_CONFIG[a.priority] || PRIORITY_CONFIG.NORMAL;
               const PIcon = pc.icon;
+              const isAuthor  = !!myUserId && a.authorId === myUserId;
+              const canEdit   = isAuthor;
+              // Spec: creator can delete their own; ADMIN / ADMIN_DOCTOR can delete any.
+              const canDelete = isAuthor || isAdmin;
               return (
                 <Card
                   key={a.id}
@@ -357,6 +426,35 @@ export default function Announcements() {
                           </div>
                         )}
                       </div>
+
+                      {(canEdit || canDelete) && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {canEdit && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => handleEdit(a, e)}
+                              title="Edit announcement"
+                              aria-label="Edit announcement"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => handleDelete(a, e)}
+                              title="Delete announcement"
+                              aria-label="Delete announcement"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -365,6 +463,9 @@ export default function Announcements() {
           </div>
         )}
       </div>
+      {/* Imperative confirm dialog used by handleDelete. Renders nothing
+          until the promise is awaited, so this stays a cheap mount. */}
+      {confirmDialog}
     </AppLayout>
   );
 }

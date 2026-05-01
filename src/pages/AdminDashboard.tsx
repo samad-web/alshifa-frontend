@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift,
   Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse, Bell, RefreshCw, Loader2, Download,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import {
   dashboardSummaryApi,
@@ -30,6 +31,10 @@ export default function AdminDashboard() {
   const [summary, setSummary] = useState<AdminDashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  // Pagination state for the "Today's Attendance" staff section. Snaps back
+  // to page 1 when the branch scope changes (the underlying summary reloads).
+  const [attendancePage, setAttendancePage] = useState(1);
+  useEffect(() => { setAttendancePage(1); }, [branchIdParam]);
   // Pending diet-package count — surfaced inline as an operational alert so
   // admins immediately see PENDING reviews on dashboard load. Best-effort:
   // silent when the diet-prescription feature flag is off for this hospital.
@@ -103,6 +108,17 @@ export default function AdminDashboard() {
   const healthColor = summary.systemHealth.unresolvedAnomalies > 5
     ? "bg-amber-500"
     : "bg-emerald-500";
+
+  // Client-side pagination for today's attendance roster.
+  const ATTENDANCE_PAGE_SIZE = 10;
+  const attendanceTotalPages = Math.max(1, Math.ceil(summary.attendance.length / ATTENDANCE_PAGE_SIZE));
+  const attendanceSafePage = Math.min(attendancePage, attendanceTotalPages);
+  const attendancePageRows = summary.attendance.slice(
+    (attendanceSafePage - 1) * ATTENDANCE_PAGE_SIZE,
+    attendanceSafePage * ATTENDANCE_PAGE_SIZE,
+  );
+  const attendanceRangeStart = summary.attendance.length === 0 ? 0 : (attendanceSafePage - 1) * ATTENDANCE_PAGE_SIZE + 1;
+  const attendanceRangeEnd = Math.min(attendanceSafePage * ATTENDANCE_PAGE_SIZE, summary.attendance.length);
 
   return (
     <AppLayout>
@@ -284,7 +300,7 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {summary.attendance.map(a => (
+                {attendancePageRows.map(a => (
                   <tr key={a.id} className="hover:bg-muted/20">
                     <td className="px-5 py-2">{a.name}</td>
                     <td className="px-3 py-2"><Badge variant="outline" className="text-[10px]">{a.role}</Badge></td>
@@ -302,6 +318,36 @@ export default function AdminDashboard() {
               </tbody>
             </table>
           </div>
+          {summary.attendance.length > ATTENDANCE_PAGE_SIZE && (
+            <div className="px-5 py-3 border-t flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">
+                Showing {attendanceRangeStart}–{attendanceRangeEnd} of {summary.attendance.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setAttendancePage((p) => Math.max(1, p - 1))}
+                  disabled={attendanceSafePage <= 1}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <span className="px-2 tabular-nums">Page {attendanceSafePage} of {attendanceTotalPages}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setAttendancePage((p) => Math.min(attendanceTotalPages, p + 1))}
+                  disabled={attendanceSafePage >= attendanceTotalPages}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
       </PageTransition>
     </AppLayout>

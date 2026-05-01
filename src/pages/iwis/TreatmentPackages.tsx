@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,12 +35,17 @@ export default function TreatmentPackagesPage() {
     // not create / edit / deactivate templates. Backend enforces the same;
     // hiding the UI prevents the visible-but-403 footgun.
     const canManagePackages = role === "ADMIN" || role === "ADMIN_DOCTOR";
-    // Branch is sourced from the global navbar selector. When the admin has
-    // "All branches" picked we fall back to the first branch in their list so
-    // package creation always has a concrete branchId to attach to.
+    // Admins (ADMIN, ADMIN_DOCTOR) drive scope from the navbar selector —
+    // when "All Branches" is picked we fan out across the hospital and show
+    // a branch label on every package card. DOCTOR / THERAPIST don't see
+    // the navbar switcher so they fall back to the first branch.
+    const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
     const { branchIdParam } = useBranchScope();
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+    // Concrete branch the page is currently displaying. Stays "" in the
+    // admin "All Branches" view; non-admins fall back to the first branch.
     const [branchId, setBranchId] = useState("");
+    const isCrossBranch = isAdmin && !branchIdParam;
     const [packages, setPackages] = useState<TreatmentPackage[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -47,7 +53,7 @@ export default function TreatmentPackagesPage() {
     const [enrolOpen, setEnrolOpen] = useState<string | null>(null);
     const [editing, setEditing] = useState<TreatmentPackage | null>(null);
     const [form, setForm] = useState({
-        name: "", description: "", durationDays: "21", price: "0", taxPercent: "0",
+        branchId: "", name: "", description: "", durationDays: "21", price: "0", taxPercent: "0",
     });
     const [components, setComponents] = useState<ComponentRow[]>([
         { type: "APPOINTMENT", description: "Daily Abhyanga", quantity: 21 },
@@ -60,13 +66,16 @@ export default function TreatmentPackagesPage() {
         branchesApi.list().then(setBranches).catch(() => setBranches([]));
     }, []);
 
-    // React to the global branch selector. Default to the first branch when
-    // "All branches" is active so we always have a concrete branchId for
-    // package CRUD calls (which require one).
+    // React to the global branch selector. Admins respect "All Branches"
+    // (branchId stays "" and the list endpoint returns the cross-branch
+    // view scoped server-side to the user's hospital). Non-admins are
+    // pinned to the first branch in their list because they don't see the
+    // navbar switcher.
     useEffect(() => {
         if (branchIdParam) { setBranchId(branchIdParam); return; }
+        if (isAdmin) { setBranchId(""); return; }
         if (branches[0] && !branchId) setBranchId(branches[0].id);
-    }, [branchIdParam, branches, branchId]);
+    }, [branchIdParam, branches, branchId, isAdmin]);
 
     // Patient list is scoped to the active branch so the enrol dropdown only
     // shows patients that belong to the package's branch.
@@ -77,10 +86,12 @@ export default function TreatmentPackagesPage() {
     }, [branchId]);
 
     const reload = useCallback(async () => {
-        if (!branchId) return;
+        // Admin cross-branch mode: branchId is "" — backend returns every
+        // branch in the hospital. Non-admin: wait for first branch.
+        if (!branchId && !isAdmin) return;
         setLoading(true);
-        try { setPackages(await iwisApi.listPackages(branchId)); } finally { setLoading(false); }
-    }, [branchId]);
+        try { setPackages(await iwisApi.listPackages(branchId || undefined)); } finally { setLoading(false); }
+    }, [branchId, isAdmin]);
 
     useEffect(() => { reload(); }, [reload]);
 
@@ -88,6 +99,7 @@ export default function TreatmentPackagesPage() {
         if (pkg) {
             setEditing(pkg);
             setForm({
+                branchId: pkg.branchId,
                 name: pkg.name, description: pkg.description || "",
                 durationDays: String(pkg.durationDays),
                 price: String(pkg.price), taxPercent: String(pkg.taxPercent || 0),
@@ -95,7 +107,10 @@ export default function TreatmentPackagesPage() {
             setComponents(pkg.components || []);
         } else {
             setEditing(null);
-            setForm({ name: "", description: "", durationDays: "21", price: "0", taxPercent: "0" });
+            // Default the form's branchId to the active page scope. In the
+            // admin cross-branch view this stays "" so the dialog forces
+            // the admin to commit to a target branch before saving.
+            setForm({ branchId: branchId || "", name: "", description: "", durationDays: "21", price: "0", taxPercent: "0" });
             setComponents([{ type: "APPOINTMENT", description: "", quantity: 1 }]);
         }
         setDialogOpen(true);
@@ -103,9 +118,15 @@ export default function TreatmentPackagesPage() {
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault();
+        const targetBranchId = form.branchId || branchId;
+        if (!targetBranchId) {
+            toast({ title: "Pick a branch", description: "Choose a branch for this package.", variant: "destructive" });
+            return;
+        }
         try {
             const payload = {
-                branchId, name: form.name, description: form.description || undefined,
+                branchId: targetBranchId,
+                name: form.name, description: form.description || undefined,
                 durationDays: Number(form.durationDays),
                 price: Number(form.price), taxPercent: Number(form.taxPercent),
                 components,
@@ -148,10 +169,19 @@ export default function TreatmentPackagesPage() {
 
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Building2 className="w-4 h-4" />
-                    Branch: <span className="font-semibold text-foreground">
-                        {branches.find((b) => b.id === branchId)?.name || "—"}
-                    </span>
-                    <span className="text-xs">(switch via navbar)</span>
+                    {isCrossBranch ? (
+                        <>
+                            Branch: <span className="font-semibold text-foreground">All branches</span>
+                            <span className="text-xs">(narrow via navbar)</span>
+                        </>
+                    ) : (
+                        <>
+                            Branch: <span className="font-semibold text-foreground">
+                                {branches.find((b) => b.id === branchId)?.name || "—"}
+                            </span>
+                            <span className="text-xs">(switch via navbar)</span>
+                        </>
+                    )}
                 </div>
 
                 {loading ? (
@@ -169,6 +199,13 @@ export default function TreatmentPackagesPage() {
                         {packages.map((pkg) => (
                             <Panel key={pkg.id} title={pkg.name} className="group hover:shadow-elevated transition-all">
                                 <div className="space-y-4">
+                                    {/* Branch label only matters in cross-branch mode — when
+                                        a single branch is scoped, every card belongs to it. */}
+                                    {isCrossBranch && pkg.branch?.name && (
+                                        <Badge variant="outline" className="gap-1 text-[11px]">
+                                            <Building2 className="w-3 h-3" /> {pkg.branch.name}
+                                        </Badge>
+                                    )}
                                     {pkg.description && <p className="text-sm text-muted-foreground">{pkg.description}</p>}
                                     <div className="grid grid-cols-3 gap-3 text-sm">
                                         <div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-primary/70" /> {pkg.durationDays} days</div>
@@ -221,6 +258,28 @@ export default function TreatmentPackagesPage() {
                             <DialogDescription>Define a bundled programme with a fixed price and per-session tracking.</DialogDescription>
                         </DialogHeader>
                         <form onSubmit={submit} className="space-y-4 py-4">
+                            {/* Branch picker shown only in admin "All Branches" mode —
+                                when a branch is already pinned via the navbar, the
+                                page-level scope is committed and the field would just
+                                duplicate it. */}
+                            {!branchId && (
+                                <div className="space-y-2">
+                                    <Label>Branch</Label>
+                                    <Select
+                                        value={form.branchId}
+                                        onValueChange={(v) => setForm({ ...form, branchId: v })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select a branch" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {branches.map((b) => (
+                                                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
                             <div className="space-y-2">
                                 <Label>Name</Label>
                                 <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="21-Day Panchakarma Rejuvenation" />
@@ -323,7 +382,7 @@ export default function TreatmentPackagesPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Start date</Label>
-                                    <Input type="date" value={enrol.startDate} onChange={(e) => setEnrol({ ...enrol, startDate: e.target.value })} />
+                                    <DatePicker value={enrol.startDate} onChange={(iso) => setEnrol({ ...enrol, startDate: iso })} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Total sessions</Label>

@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -576,15 +578,14 @@ export default function ResourceSharing() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">From Date</label>
-                  <Input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} />
+                  <DatePicker value={formDate} onChange={(iso) => setFormDate(iso)} />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">To Date</label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={formEndDate}
-                    onChange={e => setFormEndDate(e.target.value)}
-                    min={formDate || undefined}
+                    onChange={(iso) => setFormEndDate(iso)}
+                    fromDate={formDate ? new Date(formDate) : undefined}
                   />
                   <p className="text-[10px] text-muted-foreground">
                     Leave blank for a single-day arrangement.
@@ -597,11 +598,11 @@ export default function ResourceSharing() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Start Time</label>
-                  <Input type="time" value={formStartTime} onChange={e => setFormStartTime(e.target.value)} />
+                  <TimePicker value={formStartTime} onChange={(hhmm) => setFormStartTime(hhmm)} />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">End Time</label>
-                  <Input type="time" value={formEndTime} onChange={e => setFormEndTime(e.target.value)} />
+                  <TimePicker value={formEndTime} onChange={(hhmm) => setFormEndTime(hhmm)} />
                 </div>
               </div>
               <div className="space-y-1.5">

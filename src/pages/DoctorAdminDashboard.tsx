@@ -12,8 +12,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import {
   Activity, AlertTriangle, CheckCircle2, Users, UserPlus, Trophy, Clock,
-  Stethoscope, Settings, BarChart3, BellRing, FileText, Share2, HeartPulse,
-  TrendingUp,
+  Stethoscope, Settings, BarChart3, BellRing, Share2, HeartPulse,
+  TrendingUp, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import {
   dashboardSummaryApi,
@@ -45,6 +45,11 @@ export default function DoctorAdminDashboard() {
   const { branchIdParam, setBranchScope } = useBranchScope();
   const branchId = branchIdParam ?? "";
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  // Page reset triggers in the section render below — this state lives at
+  // page scope so a branch switch (which reloads `summary.staff`) snaps the
+  // viewer back to page 1.
+  const [staffPage, setStaffPage] = useState(1);
+  useEffect(() => { setStaffPage(1); }, [branchId]);
 
   async function loadBranches() {
     try {
@@ -85,6 +90,19 @@ export default function DoctorAdminDashboard() {
   }
 
   const name = summary.greeting.name || profile?.full_name || "Admin";
+
+  // Client-side pagination for the Staff Overview section. Volume can run
+  // into 50+ clinicians on bigger hospitals, so a 10-row page keeps the
+  // table glanceable and removes the long inner-scroll.
+  const STAFF_PAGE_SIZE = 10;
+  const staffTotalPages = Math.max(1, Math.ceil(summary.staff.length / STAFF_PAGE_SIZE));
+  const staffSafePage = Math.min(staffPage, staffTotalPages);
+  const staffPageRows = summary.staff.slice(
+    (staffSafePage - 1) * STAFF_PAGE_SIZE,
+    staffSafePage * STAFF_PAGE_SIZE,
+  );
+  const staffRangeStart = summary.staff.length === 0 ? 0 : (staffSafePage - 1) * STAFF_PAGE_SIZE + 1;
+  const staffRangeEnd = Math.min(staffSafePage * STAFF_PAGE_SIZE, summary.staff.length);
 
   return (
     <AppLayout>
@@ -210,7 +228,7 @@ export default function DoctorAdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {summary.staff.map(s => (
+                {staffPageRows.map(s => (
                   <tr key={s.id} className="hover:bg-muted/20">
                     <td className="px-5 py-2">{s.name}</td>
                     <td className="px-3 py-2">
@@ -267,6 +285,36 @@ export default function DoctorAdminDashboard() {
               </tbody>
             </table>
           </div>
+          {summary.staff.length > STAFF_PAGE_SIZE && (
+            <div className="px-5 py-3 border-t flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">
+                Showing {staffRangeStart}–{staffRangeEnd} of {summary.staff.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setStaffPage((p) => Math.max(1, p - 1))}
+                  disabled={staffSafePage <= 1}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <span className="px-2 tabular-nums">Page {staffSafePage} of {staffTotalPages}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setStaffPage((p) => Math.min(staffTotalPages, p + 1))}
+                  disabled={staffSafePage >= staffTotalPages}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* SECTION D — Pending Clinical Decisions */}
@@ -515,7 +563,6 @@ export default function DoctorAdminDashboard() {
             <div className="grid grid-cols-2 gap-2 text-xs">
               <QuickAction to="/assign-patient" icon={UserPlus} label="Assign Patient" />
               <QuickAction to="/create-user" icon={Users} label="Create Staff" />
-              <QuickAction to="/skill-matrix" icon={FileText} label="Skill Matrix" />
               <QuickAction to="/performance-scorecards" icon={BarChart3} label="Scorecards" />
               <QuickAction to="/staff-schedule?tab=availability" icon={Clock} label="Availability" />
               <QuickAction to="/resource-sharing" icon={Share2} label="Resource Sharing" />

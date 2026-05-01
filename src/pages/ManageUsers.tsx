@@ -26,7 +26,7 @@ interface Therapist {
     id: string;
     fullName: string | null;
     email: string;
-    specialization: string | null;
+    gender: string | null;
     qualification: string | null;
     yearsExperience: number | null;
 }
@@ -455,7 +455,7 @@ export default function ManageUsers() {
                                                     <p className="text-xs text-muted-foreground">{therapist.email}</p>
                                                 </div>
                                                 <span className="bg-accent/10 text-accent px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                                                    {therapist.specialization || "Clinical"}
+                                                    {therapist.gender || "—"}
                                                 </span>
                                             </div>
                                             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/30">
@@ -500,7 +500,7 @@ export default function ManageUsers() {
                                         <tr className="text-left">
                                             <th className="pb-3 font-semibold text-sm text-muted-foreground">Name</th>
                                             <th className="pb-3 font-semibold text-sm text-muted-foreground">Email</th>
-                                            <th className="pb-3 font-semibold text-sm text-muted-foreground">Specialization</th>
+                                            <th className="pb-3 font-semibold text-sm text-muted-foreground">Gender</th>
                                             <th className="pb-3 font-semibold text-sm text-muted-foreground">Qualification</th>
                                             <th className="pb-3 font-semibold text-sm text-muted-foreground">Experience</th>
                                             <th className="pb-3 font-semibold text-sm text-muted-foreground text-right">Actions</th>
@@ -523,7 +523,7 @@ export default function ManageUsers() {
                                                     <td className="py-4 text-sm text-muted-foreground">{therapist.email}</td>
                                                     <td className="py-4 text-sm">
                                                         <span className="bg-accent/10 text-accent px-2 py-1 rounded-md text-xs font-medium">
-                                                            {therapist.specialization || "Clinical"}
+                                                            {therapist.gender || "—"}
                                                         </span>
                                                     </td>
                                                     <td className="py-4 text-sm text-muted-foreground">{therapist.qualification || "N/A"}</td>

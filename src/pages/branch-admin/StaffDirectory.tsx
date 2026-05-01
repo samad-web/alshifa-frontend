@@ -226,13 +226,19 @@ export default function StaffDirectory() {
               );
               if (matching) setScorecard(matching as any);
             })
-            .catch(() => {});
+            .catch((err) => {
+              // Scorecard panel is best-effort — log but don't block the
+              // sheet. The render branches gracefully on `scorecard` being null.
+              console.warn('[StaffDirectory] scorecard fetch failed', err);
+            });
         }
 
         if (row.role === "THERAPIST") {
           iwisApi.getSkills(row.profileId)
             .then((s) => { if (!cancelled) setSkills(s); })
-            .catch(() => {});
+            .catch((err) => {
+              console.warn('[StaffDirectory] skills fetch failed', err);
+            });
         }
       } finally {
         if (!cancelled) setProfileLoading(false);
@@ -427,7 +433,7 @@ export default function StaffDirectory() {
                       {openProfile.role === "THERAPIST" && skills.length > 0 && (
                         <div className="space-y-2 pt-2">
                           <p className="text-xs font-medium text-foreground uppercase tracking-wide">
-                            Skill matrix row
+                            Therapy skills
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {skills.map((s) => (

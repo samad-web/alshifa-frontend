@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Activity, User, Pill, Calendar, FileText, MessageSquare, Heart,
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { PatientLocationCard, type PatientLocationFields } from "@/components/PatientLocationCard";
 
 // ── Types (loose — upstream API doesn't have strict types here) ──
 
@@ -38,6 +39,17 @@ interface PatientData {
     painLocations?: string[];
   };
   appointments?: AppointmentRow[];
+  // Home Therapy: location & contact (optional — may be null on legacy rows)
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  primaryPhone?: string | null;
+  alternativePhone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  locationVerified?: boolean;
 }
 
 interface AppointmentRow {
@@ -94,6 +106,21 @@ const STATUS_COLORS: Record<string, string> = {
 // ── Tabs ────────────────────────────────────────────────────────────────
 
 function OverviewTab({ patient }: { patient: PatientData }) {
+  // Local copy so PatientLocationCard's "Re-verify" can update the embedded
+  // map without a full page refresh. Synced when the parent re-fetches.
+  const [location, setLocation] = useState<PatientLocationFields>(() => ({
+    id: patient.id,
+    addressLine1: patient.addressLine1 ?? null,
+    addressLine2: patient.addressLine2 ?? null,
+    city: patient.city ?? null,
+    state: patient.state ?? null,
+    pincode: patient.pincode ?? null,
+    primaryPhone: patient.primaryPhone ?? null,
+    alternativePhone: patient.alternativePhone ?? null,
+    latitude: patient.latitude ?? null,
+    longitude: patient.longitude ?? null,
+    locationVerified: patient.locationVerified ?? false,
+  }));
   return (
     <div className="space-y-4">
       <Card>
@@ -110,6 +137,11 @@ function OverviewTab({ patient }: { patient: PatientData }) {
           <InfoRow label="Patient ID" value={patient.id} mono />
         </CardContent>
       </Card>
+
+      <PatientLocationCard
+        patient={location}
+        onUpdated={(next) => setLocation((prev) => ({ ...prev, ...next, id: prev.id }))}
+      />
 
       {patient.onboardingData && (
         <Card className="border-primary/20 bg-primary/5">
@@ -431,12 +463,27 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string;
 export default function PatientDetails() {
   const { role } = useAuth();
   const { id } = useParams();
+  // `?tab=vitals` (or rx, journey, etc.) opens the matching tab on first
+  // render — used by the Patients index page's "Assign vitals" deep link.
+  const [searchParams] = useSearchParams();
   const [patient, setPatient] = useState<PatientData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const canEditClinical = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "DOCTOR";
   const canOrderMedicine = role === "ADMIN" || role === "ADMIN_DOCTOR";
+
+  const initialTab = useMemo(() => {
+    const VALID_TABS = ["overview", "vitals", "journey", "rx", "appointments", "handoffs", "pharmacy"];
+    const requested = searchParams.get("tab");
+    if (requested && VALID_TABS.includes(requested)) {
+      // Pharmacy tab is gated on canOrderMedicine — don't deep-link to it for
+      // roles that can't see it.
+      if (requested === "pharmacy" && !canOrderMedicine) return "overview";
+      return requested;
+    }
+    return "overview";
+  }, [searchParams, canOrderMedicine]);
 
   useEffect(() => {
     if (!id) return;
@@ -495,7 +542,7 @@ export default function PatientDetails() {
         </Button>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs defaultValue={initialTab} className="w-full">
         <TabsList className={cn("grid w-full", canOrderMedicine ? "grid-cols-7" : "grid-cols-6")}>
           <TabsTrigger value="overview" className="gap-1.5"><User className="h-3.5 w-3.5" /> Overview</TabsTrigger>
           <TabsTrigger value="vitals" className="gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Vitals</TabsTrigger>

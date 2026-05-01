@@ -43,6 +43,7 @@ export interface TherapyRoom {
   type: TherapyRoomType; capacity: number;
   isActive: boolean; notes?: string;
   _count?: { bookings: number };
+  branch?: { id: string; name: string };
 }
 
 export interface TherapyRoomBooking {
@@ -158,7 +159,7 @@ export interface TherapistSkill {
 }
 
 export interface TherapistMatchResult {
-  therapist: { id: string; fullName: string | null; specialization: string | null; qualification: string | null };
+  therapist: { id: string; fullName: string | null; gender: string | null; qualification: string | null };
   matchedSkills: Array<{ skill: AyurvedicSkill; proficiency: Proficiency }>;
   missingSkills: AyurvedicSkill[];
   coverage: number;
@@ -172,6 +173,7 @@ export interface TreatmentPackage {
   isActive: boolean;
   components: Array<{ type: string; description: string; quantity: number }>;
   _count?: { enrolments: number };
+  branch?: { id: string; name: string };
 }
 
 export interface PackageEnrolment {
@@ -210,7 +212,11 @@ export const iwisApi = {
   },
 
   // Feature 1: Therapy rooms
-  listRooms: async (branchId: string) => (await apiClient.get<TherapyRoom[]>('/api/therapy-rooms', { branchId })).data,
+  // branchId is optional — when omitted (admin "All Branches" navbar
+  // scope) the backend returns rooms across every branch in the user's
+  // hospital, with each row carrying its `branch` relation for display.
+  listRooms: async (branchId?: string) =>
+    (await apiClient.get<TherapyRoom[]>('/api/therapy-rooms', branchId ? { branchId } : undefined)).data,
   createRoom: async (data: Partial<TherapyRoom>) => (await apiClient.post<TherapyRoom>('/api/therapy-rooms', data)).data,
   updateRoom: async (id: string, data: Partial<TherapyRoom>) => (await apiClient.put<TherapyRoom>(`/api/therapy-rooms/${id}`, data)).data,
   deactivateRoom: async (id: string) => (await apiClient.delete(`/api/therapy-rooms/${id}`)).data,
@@ -280,8 +286,10 @@ export const iwisApi = {
     (await apiClient.get<Array<{ skill: AyurvedicSkill; byBranch: Record<string, { CERTIFIED: number; EXPERIENCED: number; LEARNING: number; total: number }> }>>('/api/therapists/coverage')).data,
 
   // Feature 5: Treatment packages
-  listPackages: async (branchId: string) =>
-    (await apiClient.get<TreatmentPackage[]>('/api/packages', { branchId })).data,
+  // branchId is optional — admins picking "All Branches" in the navbar
+  // get the cross-branch list back, scoped server-side to their hospital.
+  listPackages: async (branchId?: string) =>
+    (await apiClient.get<TreatmentPackage[]>('/api/packages', branchId ? { branchId } : undefined)).data,
   createPackage: async (data: Partial<TreatmentPackage>) =>
     (await apiClient.post<TreatmentPackage>('/api/packages', data)).data,
   updatePackage: async (id: string, data: Partial<TreatmentPackage>) =>

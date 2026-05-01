@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -51,23 +53,30 @@ export default function GroupSessionsPage() {
             .then(({ data }) => setTherapists(data)).catch(() => {});
     }, []);
 
-    // Sync branch from the global navbar selector. Falls back to the first
-    // branch in the user's list when "All branches" is active.
+    // Admins (ADMIN, ADMIN_DOCTOR) drive scope from the navbar selector —
+    // when "All Branches" is picked we fan out across the hospital. DOCTOR
+    // / THERAPIST don't see the navbar switcher so they fall back to the
+    // first branch in their list.
+    const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
+    const isCrossBranch = isAdmin && !branchIdParam;
     useEffect(() => {
         if (branchIdParam) { setBranchId(branchIdParam); return; }
+        if (isAdmin) { setBranchId(""); return; }
         if (branches[0] && !branchId) setBranchId(branches[0].id);
-    }, [branchIdParam, branches, branchId]);
+    }, [branchIdParam, branches, branchId, isAdmin]);
 
     useEffect(() => {
-        if (!branchId) return;
+        // Room list drives the create dialog — only fetch when a concrete
+        // branch is scoped.
+        if (!branchId) { setRooms([]); return; }
         iwisApi.listRooms(branchId).then(setRooms).catch(() => {});
     }, [branchId]);
 
     const reload = useCallback(async () => {
-        if (!branchId) return;
+        if (!branchId && !isAdmin) return;
         setLoading(true);
-        try { setSessions(await iwisApi.listGroupSessions({ branchId })); } finally { setLoading(false); }
-    }, [branchId]);
+        try { setSessions(await iwisApi.listGroupSessions({ branchId: branchId || undefined })); } finally { setLoading(false); }
+    }, [branchId, isAdmin]);
 
     useEffect(() => { reload(); }, [reload]);
 
@@ -122,10 +131,19 @@ export default function GroupSessionsPage() {
 
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Building2 className="w-4 h-4" />
-                    Branch: <span className="font-semibold text-foreground">
-                        {branches.find((b) => b.id === branchId)?.name || "—"}
-                    </span>
-                    <span className="text-xs">(switch via navbar)</span>
+                    {isCrossBranch ? (
+                        <>
+                            Branch: <span className="font-semibold text-foreground">All branches</span>
+                            <span className="text-xs">(narrow via navbar)</span>
+                        </>
+                    ) : (
+                        <>
+                            Branch: <span className="font-semibold text-foreground">
+                                {branches.find((b) => b.id === branchId)?.name || "—"}
+                            </span>
+                            <span className="text-xs">(switch via navbar)</span>
+                        </>
+                    )}
                 </div>
 
                 {loading ? (
@@ -192,15 +210,15 @@ export default function GroupSessionsPage() {
                             <div className="grid grid-cols-3 gap-4">
                                 <div className="space-y-2">
                                     <Label>Date</Label>
-                                    <Input type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                                    <DatePicker value={form.date} onChange={(iso) => setForm({ ...form, date: iso })} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Start</Label>
-                                    <Input type="time" required value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
+                                    <TimePicker value={form.startTime} onChange={(hhmm) => setForm({ ...form, startTime: hhmm })} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>End</Label>
-                                    <Input type="time" required value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
+                                    <TimePicker value={form.endTime} onChange={(hhmm) => setForm({ ...form, endTime: hhmm })} />
                                 </div>
                             </div>
                             <div className="space-y-2">

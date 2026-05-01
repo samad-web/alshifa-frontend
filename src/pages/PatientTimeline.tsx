@@ -13,6 +13,7 @@ import { Panel } from "@/components/ui/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -178,21 +179,19 @@ export default function PatientTimeline() {
                     <div className="flex flex-wrap gap-4 items-end">
                         <div className="flex flex-col gap-1">
                             <Label htmlFor="from">From</Label>
-                            <Input
+                            <DatePicker
                                 id="from"
-                                type="date"
                                 value={fromDate}
-                                onChange={(e) => setFromDate(e.target.value)}
+                                onChange={(iso) => setFromDate(iso)}
                                 className="w-40"
                             />
                         </div>
                         <div className="flex flex-col gap-1">
                             <Label htmlFor="to">To</Label>
-                            <Input
+                            <DatePicker
                                 id="to"
-                                type="date"
                                 value={toDate}
-                                onChange={(e) => setToDate(e.target.value)}
+                                onChange={(iso) => setToDate(iso)}
                                 className="w-40"
                             />
                         </div>

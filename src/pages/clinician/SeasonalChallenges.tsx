@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Progress } from "@/components/ui/progress";
 import {
   Loader2, AlertCircle, CheckCircle2, Clock, Target,
@@ -169,8 +170,8 @@ export default function SeasonalChallenges() {
                 <Input placeholder="Description" required value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="md:col-span-2" />
                 <Input type="number" placeholder="Target" required value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} />
                 <Input placeholder="Icon (star, trophy, target, zap)" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} />
-                <Input type="date" placeholder="Start Date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
-                <Input type="date" placeholder="End Date" required value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+                <DatePicker placeholder="Start Date" value={form.startDate} onChange={(iso) => setForm({ ...form, startDate: iso })} />
+                <DatePicker placeholder="End Date" value={form.endDate} onChange={(iso) => setForm({ ...form, endDate: iso })} />
                 <Input placeholder="Scope (optional)" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} />
                 <div className="flex items-center gap-4 px-1">
                   <span className="text-sm text-muted-foreground">Target Roles:</span>

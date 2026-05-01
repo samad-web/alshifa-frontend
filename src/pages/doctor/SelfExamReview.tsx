@@ -76,7 +76,13 @@ export default function SelfExamReview() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await selfExamService.reviewQueue({ status });
+      // Forward the navbar branch scope as `branchId` so the backend can
+      // narrow ADMIN's hospital-wide list. Non-admin roles (DOCTOR) are
+      // already server-scoped by patient assignment regardless of this param.
+      const list = await selfExamService.reviewQueue({
+        status,
+        ...(branchIdParam ? { branchId: branchIdParam } : {}),
+      });
       setRows(list as Row[]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -84,7 +90,7 @@ export default function SelfExamReview() {
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, [status, branchIdParam]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -116,10 +122,12 @@ export default function SelfExamReview() {
                 <Skeleton className="h-20 w-full" />
               </div>
             ) : (() => {
-              const scoped = branchIdParam
-                ? rows.filter((r) => selfExamBranchId(r) === branchIdParam)
-                : rows;
-              if (scoped.length === 0) {
+              // Backend now applies the role-correct scope (DOCTOR ↦ assigned
+              // patients, ADMIN/ADMIN_DOCTOR ↦ hospital ± branch narrowing).
+              // No client-side branch filter — that path used stale
+              // sessionStorage and was the original cause of submissions
+              // disappearing from the doctor's queue.
+              if (rows.length === 0) {
                 return (
                   <Card>
                     <CardContent className="pt-6 text-center text-muted-foreground">
@@ -131,7 +139,7 @@ export default function SelfExamReview() {
               if (isAdmin && isAll) {
                 return (
                   <GroupedByBranch
-                    items={scoped}
+                    items={rows}
                     getBranchId={selfExamBranchId}
                     getBranchName={selfExamBranchName}
                     renderItem={(r) => <ReviewRow row={r} onOpen={() => setOpenId(r.id)} />}
@@ -140,7 +148,7 @@ export default function SelfExamReview() {
               }
               return (
                 <div className="space-y-3">
-                  {scoped.map((r) => <ReviewRow key={r.id} row={r} onOpen={() => setOpenId(r.id)} />)}
+                  {rows.map((r) => <ReviewRow key={r.id} row={r} onOpen={() => setOpenId(r.id)} />)}
                 </div>
               );
             })()}

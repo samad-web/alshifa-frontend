@@ -33,6 +33,13 @@ import { iwisApi, type TreatmentPackage } from "@/services/iwis.service";
 import { useAuth } from "@/hooks/useAuth";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { formatDate, expiryTone } from "@/lib/format-date";
+import { InlineJourneyBuilder, type JourneyDraft, type JourneyTaskDraft } from "@/components/InlineJourneyBuilder";
+import {
+    HomeTherapyRequestForm,
+    EMPTY_HOME_THERAPY_DRAFT,
+    validateHomeTherapyDraft,
+    type HomeTherapyDraft,
+} from "@/components/HomeTherapyRequestForm";
 
 interface Medicine {
     id: string;
@@ -79,6 +86,8 @@ interface MultiplePrescriptionFormProps {
     patientName?: string;
     onSuccess?: () => void;
     onCancel?: () => void;
+    /** Diagnosis text from the SOAP notes — pre-fills the inline journey title. */
+    diagnosisHint?: string;
 }
 
 /**
@@ -139,16 +148,26 @@ export function MultiplePrescriptionForm({
     patientName,
     onSuccess,
     onCancel,
+    diagnosisHint,
 }: MultiplePrescriptionFormProps) {
     const [loading, setLoading] = useState(false);
     const [videos, setVideos] = useState<ExternalVideo[]>([]);
+
+    // Inline journey draft — null when the clinician hasn't enabled the
+    // "Add Journey" panel below the medication rows.
+    const [journeyDraft, setJourneyDraft] = useState<JourneyDraft | null>(null);
+
+    // Home-therapy referral draft — only DOCTOR / ADMIN_DOCTOR can author
+    // these. Therapists writing prescriptions don't see the section.
+    const [homeTherapyDraft, setHomeTherapyDraft] = useState<HomeTherapyDraft>(EMPTY_HOME_THERAPY_DRAFT);
 
     // ── Treatment package selector ─────────────────────────────────────
     // Loads packages scoped to the active branch (navbar context first,
     // user's home branch as fallback) and lets the clinician attach one
     // to the prescription as broader plan context. The selected package's
     // id is sent up with the batch payload (Prescription.packageId).
-    const { profile } = useAuth();
+    const { profile, role: viewerRole } = useAuth();
+    const canRequestHomeTherapy = viewerRole === "DOCTOR" || viewerRole === "ADMIN_DOCTOR";
     const { branchIdParam } = useBranchScope();
     const homeBranchId =
         (profile as any)?.branchId
@@ -344,6 +363,19 @@ export function MultiplePrescriptionForm({
         } else if (med.nearestExpiry && expiryTone(med.nearestExpiry) === "expiring") {
             toast.success(`${med.name} — nearest batch expires ${formatDate(med.nearestExpiry)}`, { duration: 2500 });
         }
+
+        // Suggest a MEDICATION task to the inline journey builder. The builder
+        // listens for `inline-journey:add-task` on the window — only acts if
+        // the journey panel is enabled and in "Create New" mode. Therapists
+        // get filtered out inside the builder (no MEDICATION authority).
+        const freq = newItems[index].frequency || "Daily";
+        const suggestedTask: JourneyTaskDraft = {
+            type: "MEDICATION",
+            title: med.name,
+            description: med.brand ? `Brand: ${med.brand}` : undefined,
+            frequency: freq,
+        };
+        window.dispatchEvent(new CustomEvent("inline-journey:add-task", { detail: { task: suggestedTask } }));
     };
 
     /** Render the right-tone chip for an expiry date — amber within 30 days,
@@ -377,12 +409,75 @@ export function MultiplePrescriptionForm({
         setLoading(true);
 
         try {
+            // Build the optional journey payload. existingJourneyId is not
+            // wired through the inline atomic create path on the backend — we
+            // only send `journey` when the clinician is authoring a NEW one.
+            // (Assigning an existing template is a separate POST that the
+            // builder can do directly from its own state when needed.)
+            let journeyPayload: undefined | {
+                title: string; condition: string; goal: string; targetEndDate: string;
+                phases: { name: string; durationDays: number;
+                    tasks: { type: string; title: string; description?: string; frequency: string }[] }[];
+            };
+            if (journeyDraft && !journeyDraft.existingJourneyId) {
+                if (!journeyDraft.title || !journeyDraft.condition || !journeyDraft.goal || !journeyDraft.targetEndDate) {
+                    toast.error("Journey requires title, condition, goal, and target end date");
+                    setLoading(false);
+                    return;
+                }
+                if (!journeyDraft.phases.length || journeyDraft.phases.some((p) => !p.name || p.durationDays < 1)) {
+                    toast.error("Each journey phase requires a name and duration ≥ 1 day");
+                    setLoading(false);
+                    return;
+                }
+                journeyPayload = {
+                    title:         journeyDraft.title,
+                    condition:     journeyDraft.condition,
+                    goal:          journeyDraft.goal,
+                    targetEndDate: journeyDraft.targetEndDate,
+                    phases:        journeyDraft.phases.map((p) => ({
+                        name:         p.name,
+                        durationDays: p.durationDays,
+                        tasks:        p.tasks
+                            .filter((t) => t.title && t.frequency)
+                            .map((t) => ({
+                                type:        t.type,
+                                title:       t.title,
+                                description: t.description || undefined,
+                                frequency:   t.frequency,
+                            })),
+                    })),
+                };
+            }
+
+            // Home-therapy referral payload — only DOCTOR / ADMIN_DOCTOR
+            // can author one. validateHomeTherapyDraft returns either a
+            // ready payload (or null when the section is disabled) OR a
+            // precise error message we can surface in a toast.
+            let homeTherapyPayload: { totalSessions: number; sessionModes: ("HOME"|"HOSPITAL")[]; notes?: string; intervalDays?: number } | null = null;
+            if (canRequestHomeTherapy) {
+                const ht = validateHomeTherapyDraft(homeTherapyDraft);
+                if (!ht.ok) {
+                    toast.error(ht.error);
+                    setLoading(false);
+                    return;
+                }
+                homeTherapyPayload = ht.payload;
+            }
+
             await apiClient.post('/api/prescriptions/batch-add', {
                 patientId,
                 medicines: prescriptionItems,
-                packageId: selectedPackageId || undefined,
+                packageId:    selectedPackageId || undefined,
+                journey:      journeyPayload,
+                homeTherapy:  homeTherapyPayload || undefined,
             });
-            toast.success("Prescriptions added successfully");
+            const successMsg = homeTherapyPayload
+                ? "Prescription saved · home-therapy request sent for admin approval"
+                : journeyPayload
+                    ? "Prescriptions and treatment journey added"
+                    : "Prescriptions added successfully";
+            toast.success(successMsg);
             onSuccess?.();
         } catch (error: any) {
             toast.error(error?.message || "Failed to add prescriptions");
@@ -858,6 +953,27 @@ export function MultiplePrescriptionForm({
                     </div>
                 ))}
             </div>
+
+            {/* Inline Journey Builder — optional treatment plan attached to
+                the prescription. Submitting the form sends the journey object
+                in the same atomic call (POST /api/prescriptions/batch-add). */}
+            <InlineJourneyBuilder
+                patientId={patientId}
+                diagnosisHint={diagnosisHint}
+                onChange={setJourneyDraft}
+            />
+
+            {/* Home Therapy Request — DOCTOR / ADMIN_DOCTOR only. When
+                enabled, the same atomic call also creates a
+                HomeTherapyRequest in PENDING_APPROVAL status and notifies
+                admins via Socket.IO. */}
+            {canRequestHomeTherapy && (
+                <HomeTherapyRequestForm
+                    draft={homeTherapyDraft}
+                    onChange={setHomeTherapyDraft}
+                    branchId={packageBranchId}
+                />
+            )}
 
             <div className="flex gap-3 justify-end pt-4 border-t">
                 {onCancel && (

@@ -17,10 +17,11 @@ import {
 import { operationsApi } from "@/services/operations.service";
 import type { PerformanceScorecard } from "@/types";
 import {
-  Loader2, BarChart3, TrendingUp, TrendingDown, Award, Users, Sparkles,
+  Loader2, BarChart3, TrendingUp, TrendingDown, Award, Users, Sparkles, Home, Star, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBranchScope } from "@/hooks/useBranchScope";
+import { homeTherapyService } from "@/services/homeTherapy.service";
 
 const metricLabels: { key: keyof PerformanceScorecard; label: string; max: number; color: string; invert?: boolean }[] = [
   { key: "patientsSeenCount", label: "Patients Seen", max: 100, color: "bg-blue-500" },
@@ -299,6 +300,9 @@ export default function PerformanceScorecards() {
                 )}
               </div>
 
+              {/* Home Therapy section — sessions completed / scheduled / on-time / patient rating per therapist */}
+              {branchId && <HomeTherapyScorecardsSection branchId={branchId} />}
+
               {sortedBranch.length === 0 ? (
                 <Card className="border-none shadow-sm">
                   <CardContent className="py-12 text-center">
@@ -369,5 +373,102 @@ export default function PerformanceScorecards() {
         </Tabs>
       </div>
     </AppLayout>
+  );
+}
+
+/**
+ * Home Therapy section for the Branch Overview — one row per therapist
+ * with sessions this month, completion rate, average patient feedback
+ * rating, and on-time arrival rate (≤ scheduledTime + 15 min).
+ *
+ * Self-hides when there is no home-therapy activity in the period.
+ */
+function HomeTherapyScorecardsSection({ branchId }: { branchId: string }) {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof homeTherapyService.getBranchScorecards>>["rows"]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    homeTherapyService.getBranchScorecards(branchId, "month")
+      .then((res) => { if (!cancelled) setRows(res?.rows ?? []); })
+      .catch(() => { if (!cancelled) setRows([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [branchId]);
+
+  if (loading) {
+    return (
+      <Card className="border-none shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Home className="w-4 h-4 text-primary" /> Home Therapy
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="py-6 flex items-center justify-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+        </CardContent>
+      </Card>
+    );
+  }
+  if (rows.length === 0) return null;
+
+  return (
+    <Card className="border-none shadow-sm overflow-hidden">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Home className="w-4 h-4 text-primary" /> Home Therapy — this month
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Therapist</TableHead>
+                <TableHead className="text-center">Completed</TableHead>
+                <TableHead className="text-center">Scheduled</TableHead>
+                <TableHead className="text-center">Completion %</TableHead>
+                <TableHead className="text-center">
+                  <span className="inline-flex items-center gap-1"><Star className="w-3 h-3" /> Avg Rating</span>
+                </TableHead>
+                <TableHead className="text-center">
+                  <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> On-Time %</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.therapistId}>
+                  <TableCell className="font-medium">
+                    {r.fullName || r.therapistId.slice(0, 8)}
+                    {r.specialization && (
+                      <div className="text-[11px] text-muted-foreground">{r.specialization}</div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">{r.completed}</TableCell>
+                  <TableCell className="text-center">{r.scheduled}</TableCell>
+                  <TableCell className="text-center">
+                    <Badge
+                      variant="outline"
+                      className={
+                        r.completionRate >= 80 ? "bg-green-50 text-green-700 border-green-300"
+                        : r.completionRate >= 60 ? "bg-yellow-50 text-yellow-700 border-yellow-300"
+                        : "bg-red-50 text-red-700 border-red-300"
+                      }
+                    >
+                      {r.completionRate}%
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {r.feedbackCount > 0 ? `${r.avgPatientRating.toFixed(1)} (${r.feedbackCount})` : "—"}
+                  </TableCell>
+                  <TableCell className="text-center">{r.onTimeRate}%</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

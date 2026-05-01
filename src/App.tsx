@@ -37,6 +37,7 @@ const TherapistPatients = lazy(() => import("./pages/TherapistPatients"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const PatientDetails = lazy(() => import("./pages/PatientDetails"));
+const PatientsPage = lazy(() => import("./pages/Patients"));
 const PatientOnboarding = lazy(() => import("./pages/PatientOnboarding"));
 const PatientAppointments = lazy(() => import("./pages/PatientAppointments"));
 const ExerciseLibrary = lazy(() => import("./pages/ExerciseLibrary"));
@@ -67,7 +68,6 @@ const StaffActivityFeed = lazy(() => import("./pages/admin/StaffActivityFeed"));
 const PerformanceScorecards = lazy(() => import("./pages/admin/PerformanceScorecards"));
 const AttendanceTracker = lazy(() => import("./pages/admin/AttendanceTracker"));
 const StaffSchedule = lazy(() => import("./pages/admin/StaffSchedule"));
-const SkillMatrix = lazy(() => import("./pages/admin/SkillMatrix"));
 const ResourceSharingPage = lazy(() => import("./pages/admin/ResourceSharing"));
 const CentralizedInventory = lazy(() => import("./pages/admin/CentralizedInventory"));
 
@@ -96,6 +96,9 @@ const MessageTemplatesPage = lazy(() => import("./pages/MessageTemplates"));
 const ReminderSettingsPage = lazy(() => import("./pages/ReminderSettings"));
 // Critical-journey admin page: patients flagged for non-adherence
 const CriticalJourneyPage = lazy(() => import("./pages/CriticalJourney"));
+// Home Therapy — admin approval dashboard
+const HomeTherapyRequestsPage = lazy(() => import("./pages/admin/HomeTherapyRequests"));
+const HomeTherapyLiveMapPage = lazy(() => import("./pages/admin/HomeTherapyLiveMap"));
 const HandoffNotes = lazy(() => import("./pages/HandoffNotes"));
 const PatientPortal = lazy(() => import("./pages/patient/PatientPortal"));
 const VisitSummaryPage = lazy(() => import("./pages/VisitSummary"));
@@ -107,8 +110,6 @@ const DietPackagesPage = lazy(() => import("./pages/iwis/DietPackages"));
 const PatientDietPage = lazy(() => import("./pages/iwis/PatientDiet"));
 const ClinicalPhotosPage = lazy(() => import("./pages/iwis/ClinicalPhotos"));
 const TreatmentPackagesPage = lazy(() => import("./pages/iwis/TreatmentPackages"));
-// /therapist-match is now a redirect to /skill-matrix; the standalone
-// TherapistMatch page is no longer mounted as a route.
 const GroupSessionsPage = lazy(() => import("./pages/iwis/GroupSessions"));
 
 // Super Admin (IWIS platform-level)
@@ -222,16 +223,6 @@ function AppRoutes() {
           <ProtectedRoute allowedRoles={["BRANCH_ADMIN", "ADMIN", "ADMIN_DOCTOR"]}>
             <FeatureGate feature="PERFORMANCE_SCORECARDS" title="Performance Scorecards isn't enabled">
               <PerformanceScorecards />
-            </FeatureGate>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/branch-admin/skill-matrix"
-        element={
-          <ProtectedRoute allowedRoles={["BRANCH_ADMIN", "ADMIN", "ADMIN_DOCTOR"]}>
-            <FeatureGate feature="STAFF_SKILL_MATRIX" title="Staff Skill Matrix isn't enabled">
-              <SkillMatrix />
             </FeatureGate>
           </ProtectedRoute>
         }
@@ -465,6 +456,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/patients"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "DOCTOR", "THERAPIST", "PHARMACIST"]}>
+            <PatientsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/patients/:id"
         element={
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
@@ -531,16 +530,6 @@ function AppRoutes() {
           <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
             <FeatureGate feature="STAFF_ATTENDANCE" title="Staff Attendance isn't enabled">
               <AttendanceTracker />
-            </FeatureGate>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/skill-matrix"
-        element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "DOCTOR", "THERAPIST"]}>
-            <FeatureGate feature="STAFF_SKILL_MATRIX" title="Staff Skill Matrix isn't enabled">
-              <SkillMatrix />
             </FeatureGate>
           </ProtectedRoute>
         }
@@ -732,6 +721,22 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/home-therapy"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
+            <HomeTherapyRequestsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/home-therapy/live-map"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
+            <HomeTherapyLiveMapPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/handoff-notes"
         element={
           <ProtectedRoute allowedRoles={["DOCTOR", "THERAPIST", "ADMIN_DOCTOR"]}>
@@ -858,13 +863,6 @@ function AppRoutes() {
             </FeatureGate>
           </ProtectedRoute>
         }
-      />
-      {/* Therapist Match is now bundled into the Skill Matrix page. The
-          old route is kept as a redirect so bookmarks and legacy
-          notification deep-links don't break. */}
-      <Route
-        path="/therapist-match"
-        element={<Navigate to="/skill-matrix" replace />}
       />
       <Route
         path="/group-sessions"

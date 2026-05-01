@@ -73,6 +73,14 @@ export const clinicianGamificationApi = {
     return data;
   },
 
+  // Admin queue — paginated list of redemptions across all users with the
+  // given status (default PENDING). Used by the Reward Store admin panel
+  // instead of /rewards/mine, which only returns the caller's own.
+  async listAllRedemptions(params?: { status?: 'PENDING' | 'APPROVED' | 'FULFILLED' | 'REJECTED'; page?: number; limit?: number }): Promise<{ redemptions: RewardRedemption[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+    const { data } = await apiClient.get<{ redemptions: RewardRedemption[]; pagination: { page: number; limit: number; total: number; totalPages: number } }>('/api/clinician-gamification/rewards/redemptions', params);
+    return data;
+  },
+
   async createReward(payload: {
     name: string; description: string; icon?: string;
     category: string; pointsCost: number; stock?: number;

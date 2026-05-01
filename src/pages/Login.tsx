@@ -198,7 +198,7 @@ export default function Login() {
                 inputMode="email"
                 autoComplete="email"
                 spellCheck={false}
-                placeholder="doctor@alshifa.com"
+                placeholder="doctor@iwis.com"
                 value={email}
                 onChange={(e) => { setEmail(stripLeadingSpaces(e.target.value)); setEmailIssue(null); }}
                 onBlur={() => {

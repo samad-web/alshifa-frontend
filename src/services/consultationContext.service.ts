@@ -57,6 +57,17 @@ export interface ContextVisitSummary {
   appointmentId: string | null;
 }
 
+export interface TriageDocument {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+  category: string;
+  description: string | null;
+  createdAt: string;
+}
+
 export interface ContextTriageSession {
   id: string;
   severity: string | null;
@@ -65,6 +76,7 @@ export interface ContextTriageSession {
   painRegions: CheckInPainRegion[] | null;
   responses: Record<string, unknown> | null;
   createdAt: string;
+  documents: TriageDocument[];
 }
 
 export interface ContextPainCheckIn {

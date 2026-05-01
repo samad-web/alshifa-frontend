@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarIcon, Loader2, Video, MapPin, ChevronRight, ChevronLeft, Activity, Lock } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Video, MapPin, ChevronRight, ChevronLeft, Activity, Check, Sun, Sunset, Moon, CalendarOff } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -214,8 +214,14 @@ export function ClientBookingModal({
                 branchId: formData.branchId
             });
             toast.success("Appointment request submitted successfully!");
+            // Refresh the parent dashboard now — the booking is durable
+            // regardless of whether the patient opens the kit next or skips.
             onSuccess?.();
-            onClose();
+            // Pivot to the post-booking kit prompt instead of closing. The
+            // patient can either start the kit (which closes + navigates)
+            // or skip for now (which just closes). Either way the
+            // appointment is already on file.
+            setStep("self-exam-intro");
         } catch (error: any) {
             if (error?.status === 409) {
                 setSuggestedSlot(error?.details?.suggestedSlot || null);
@@ -229,10 +235,12 @@ export function ClientBookingModal({
     };
 
     const nextStep = () => {
+        // self-exam-intro is no longer in the pre-booking chain — it shows
+        // up only AFTER `handleSubmit` succeeds, so opening the kit can't
+        // abandon a half-finished booking like it used to.
         if (step === "branch") setStep("type");
         else if (step === "type") setStep("triage");
-        else if (step === "triage") setStep("self-exam-intro");  // brief kit preview
-        else if (step === "self-exam-intro") setStep("clinician");
+        else if (step === "triage") setStep("clinician");
         else if (step === "clinician") setStep("time");    // slots fetched once clinician is known
         else if (step === "time") setStep("confirm");
     };
@@ -240,9 +248,8 @@ export function ClientBookingModal({
     const prevStep = () => {
         if (step === "type" && !initialBranchId) setStep("branch");
         else if (step === "triage") setStep("type");
-        else if (step === "self-exam-intro") setStep("triage");
         else if (step === "clinician") {
-            setStep("self-exam-intro");
+            setStep("triage");
             setFormData(prev => ({ ...prev, doctorId: "" }));
         }
         else if (step === "time") setStep("clinician");
@@ -421,6 +428,7 @@ export function ClientBookingModal({
                         <SelfExamIntroStep
                             bundle={selfExamBundle}
                             loading={loadingSelfExam}
+                            confirmed
                             onOpenKit={() => {
                                 // Close the Radix dialog first, then navigate on the next tick.
                                 // Navigating synchronously while the dialog is still closing
@@ -428,7 +436,10 @@ export function ClientBookingModal({
                                 onClose();
                                 setTimeout(() => navigate("/self-exam"), 0);
                             }}
-                            onLater={nextStep}
+                            // The booking is already submitted at this point, so
+                            // skipping just dismisses the modal — there's no
+                            // remaining step to advance to.
+                            onLater={onClose}
                         />
                     )}
 
@@ -521,65 +532,52 @@ export function ClientBookingModal({
                                     disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                                 />
 
-                                {formData.date && (
-                                    <div className="w-full space-y-2.5">
-                                        <Label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Available Time Slots for {format(formData.date, "PPP")}</Label>
-                                        {fetchingSlots ? (
-                                            <div className="flex items-center justify-center p-8">
-                                                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                                {formData.date && (() => {
+                                    // Only AVAILABLE, non-held slots are bookable. We filter
+                                    // here (not inside SlotPicker) so the empty state below
+                                    // fires correctly even when the API returns rows that
+                                    // are all BOOKED/BLOCKED/HELD — the patient should not
+                                    // see disabled tiles for a clinician with no openings.
+                                    const bookableSlots = availableSlots.filter(
+                                        (s: any) => s.status === 'AVAILABLE' && !s.isHeld,
+                                    );
+                                    return (
+                                        <div className="w-full space-y-3">
+                                            <div className="flex items-baseline justify-between">
+                                                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                                    Available times for {format(formData.date, "PPP")}
+                                                </Label>
+                                                {!fetchingSlots && bookableSlots.length > 0 && (
+                                                    <span className="text-[11px] text-muted-foreground" aria-live="polite">
+                                                        {bookableSlots.length} open
+                                                    </span>
+                                                )}
                                             </div>
-                                        ) : availableSlots.length > 0 ? (
-                                            <TooltipProvider>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    {availableSlots.map(slotData => {
-                                                        const slotLabel = typeof slotData === 'string' ? slotData : slotData.slot;
-                                                        const isBlocked = slotData.status === 'BLOCKED' || slotData.status === 'BOOKED';
 
-                                                        return (
-                                                            <Tooltip key={slotLabel}>
-                                                                <TooltipTrigger asChild>
-                                                                    <div className="relative">
-                                                                        <Button
-                                                                            variant={formData.slot === slotLabel ? "default" : "outline"}
-                                                                            onClick={() => !isBlocked && setFormData({ ...formData, slot: slotLabel })}
-                                                                            disabled={isBlocked}
-                                                                            className={cn(
-                                                                                "w-full rounded-md text-[11px] font-bold transition-all relative overflow-hidden h-9 px-2",
-                                                                                isBlocked && "bg-muted/50 border-muted text-muted-foreground/60 cursor-not-allowed opacity-90",
-                                                                                slotData.status === 'BLOCKED' && "bg-stripes border-risk/10"
-                                                                            )}
-                                                                            size="sm"
-                                                                        >
-                                                                            <span className="relative z-10 flex items-center justify-center gap-1.5 line-clamp-1">
-                                                                                {slotData.status === 'BLOCKED' && <Lock className="w-3 h-3 text-risk/50" />}
-                                                                                {slotData.status === 'BOOKED' && <Activity className="w-3 h-3 text-accent/50" />}
-                                                                                {slotLabel}
-                                                                            </span>
-                                                                        </Button>
-                                                                    </div>
-                                                                </TooltipTrigger>
-                                                                {isBlocked && (
-                                                                    <TooltipContent side="top" className="bg-popover border border-border shadow-md px-3 py-1.5">
-                                                                        <p className="text-[10px] font-bold uppercase tracking-tight text-foreground/80">
-                                                                            {slotData.status === 'BLOCKED' ? "Blocked – Leave" : "Reserved"}
-                                                                        </p>
-                                                                        <p className="text-[10px] text-muted-foreground leading-tight">
-                                                                            {slotData.reason || "Slot unavailable"} ({slotLabel})
-                                                                        </p>
-                                                                    </TooltipContent>
-                                                                )}
-                                                            </Tooltip>
-                                                        );
-                                                    })}
+                                            {fetchingSlots ? (
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" aria-busy="true" aria-label="Loading available time slots">
+                                                    {Array.from({ length: 9 }).map((_, i) => (
+                                                        <div key={i} className="h-12 rounded-lg bg-muted/40 animate-pulse" />
+                                                    ))}
                                                 </div>
-                                            </TooltipProvider>
-                                        ) : (
-                                            <div className="text-center p-4 bg-muted/50 rounded-lg text-[11px] font-medium text-muted-foreground">
-                                                No slots available for this day. Try another date.
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                            ) : bookableSlots.length > 0 ? (
+                                                <SlotPicker
+                                                    slots={bookableSlots}
+                                                    selected={formData.slot}
+                                                    onSelect={(slot) => setFormData({ ...formData, slot })}
+                                                />
+                                            ) : (
+                                                <div className="rounded-xl border border-dashed border-border/60 bg-secondary/10 p-6 text-center space-y-2">
+                                                    <CalendarOff className="w-8 h-8 mx-auto text-muted-foreground/60" aria-hidden="true" />
+                                                    <p className="text-sm font-medium text-foreground">No times available on this day</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        This clinician has no openings on this date. Try another day.
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                             <div className="flex gap-2 pt-4">
                                 <Button variant="ghost" size="sm" className="flex-1 gap-2 text-muted-foreground" onClick={prevStep}>
@@ -709,11 +707,19 @@ function SelfExamIntroStep({
     loading,
     onOpenKit,
     onLater,
+    confirmed = false,
 }: {
     bundle: SelfExamBundle | null;
     loading: boolean;
     onOpenKit: () => void;
     onLater: () => void;
+    /**
+     * When true, this screen renders as the post-booking follow-up rather
+     * than a pre-booking preview. Adds an explicit "appointment confirmed"
+     * banner so the patient sees the booking went through, and uses
+     * follow-up wording on the buttons.
+     */
+    confirmed?: boolean;
 }) {
     if (loading) {
         return (
@@ -724,19 +730,38 @@ function SelfExamIntroStep({
         );
     }
 
+    // The "booking confirmed" banner sits at the top of the post-booking
+    // version of this screen. Same component renders for both pre- and
+    // post-booking — the wording differs based on `confirmed`.
+    const confirmedBanner = confirmed && (
+        <div className="p-3 rounded-lg border-2 bg-emerald-50 border-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-700/60 flex items-start gap-2">
+            <Check className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100 leading-tight">
+                    Appointment confirmed
+                </p>
+                <p className="text-[11px] text-emerald-800/80 dark:text-emerald-200/80 mt-0.5">
+                    You'll see it on your dashboard. Optional next step below — you can also start it later from your dashboard.
+                </p>
+            </div>
+        </div>
+    );
+
     // No DRAFT came back — either the triage covered regions outside the 9
     // supported zones, or the auto-init hook failed. Render a soft message
     // and let the patient continue.
     if (!bundle || bundle.submission.painZones.length === 0) {
         return (
             <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
+                {confirmedBanner}
                 <div className="p-4 rounded-lg border bg-muted/40 text-sm text-muted-foreground">
-                    No pre-consultation tests are required for the area you
-                    selected. Continue to pick a clinician.
+                    {confirmed
+                        ? "No pre-consultation tests are required for your visit. You're all set."
+                        : "No pre-consultation tests are required for the area you selected. Continue to pick a clinician."}
                 </div>
                 <div className="flex justify-end">
                     <Button onClick={onLater}>
-                        Continue <ChevronRight className="w-4 h-4 ml-1" />
+                        {confirmed ? "Done" : <>Continue <ChevronRight className="w-4 h-4 ml-1" /></>}
                     </Button>
                 </div>
             </div>
@@ -754,6 +779,7 @@ function SelfExamIntroStep({
 
     return (
         <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
+            {confirmedBanner}
             <div className="p-3 rounded-lg border bg-primary/5 border-primary/20 text-[11px] leading-relaxed text-primary">
                 <p className="font-bold flex items-center gap-1.5 mb-1 uppercase">
                     <ClipboardList className="w-3 h-3" />
@@ -815,5 +841,154 @@ function SelfExamIntroStep({
                 </Button>
             </div>
         </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SlotPicker — a self-contained, accessible time-slot selector. Groups raw
+// 24-hour slots into Morning / Afternoon / Evening sections and formats
+// labels in 12-hour display form. Receives only AVAILABLE, non-held slots
+// (the parent filters out BOOKED / BLOCKED / HELD rows so unavailable
+// times never reach the patient). `isNearlyFull` slots remain selectable
+// and get an amber dot accent.
+//
+// Touch targets are 48px (h-12) to satisfy WCAG 2.5.5; focus rings rely on
+// the underlying <button> defaults so keyboard users can tab through.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SlotPickerSlot {
+    slot?: string;
+    time?: string;
+    startTime?: string;
+    status?: 'AVAILABLE' | string;
+    isNearlyFull?: boolean;
+    spotsLeft?: number;
+}
+
+interface SlotPickerProps {
+    slots: SlotPickerSlot[];
+    selected: string;
+    onSelect: (slot: string) => void;
+}
+
+function formatSlotLabel(raw: string): string {
+    // Accepts "HH:MM" (24h) and renders "h:MM AM/PM" for human display.
+    const m = /^(\d{1,2}):(\d{2})/.exec(raw);
+    if (!m) return raw;
+    const h = Number(m[1]);
+    const min = m[2];
+    const period = h >= 12 ? "PM" : "AM";
+    const display = h % 12 === 0 ? 12 : h % 12;
+    return `${display}:${min} ${period}`;
+}
+
+function bucketForSlot(raw: string): "morning" | "afternoon" | "evening" {
+    const m = /^(\d{1,2}):/.exec(raw);
+    const h = m ? Number(m[1]) : 12;
+    if (h < 12) return "morning";
+    if (h < 17) return "afternoon";
+    return "evening";
+}
+
+function SlotPicker({ slots, selected, onSelect }: SlotPickerProps) {
+    // Normalise slot strings up-front — the legacy shape sometimes carries
+    // the time on `slot`, sometimes on `time` or `startTime`.
+    const normalised = slots
+        .map((s) => ({
+            ...s,
+            label: (typeof s === 'string' ? (s as unknown as string) : (s.slot ?? s.time ?? s.startTime ?? "")) as string,
+        }))
+        .filter((s) => !!s.label);
+
+    const buckets: Record<"morning" | "afternoon" | "evening", typeof normalised> = {
+        morning: [], afternoon: [], evening: [],
+    };
+    for (const s of normalised) buckets[bucketForSlot(s.label)].push(s);
+
+    const sectionMeta: Record<keyof typeof buckets, { label: string; icon: JSX.Element; range: string }> = {
+        morning:   { label: "Morning",   icon: <Sun    className="w-3.5 h-3.5 text-amber-500" />,    range: "before 12:00" },
+        afternoon: { label: "Afternoon", icon: <Sunset className="w-3.5 h-3.5 text-orange-500" />,   range: "12:00 – 5:00" },
+        evening:   { label: "Evening",   icon: <Moon   className="w-3.5 h-3.5 text-indigo-500" />,   range: "after 5:00"   },
+    };
+
+    return (
+        <TooltipProvider delayDuration={200}>
+            <div className="space-y-4" role="radiogroup" aria-label="Available time slots">
+                {(Object.keys(buckets) as Array<keyof typeof buckets>).map((key) => {
+                    const items = buckets[key];
+                    if (items.length === 0) return null;
+                    const meta = sectionMeta[key];
+                    return (
+                        <section key={key} className="space-y-2">
+                            <header className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                                    {meta.icon}
+                                    <span>{meta.label}</span>
+                                </div>
+                                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{meta.range}</span>
+                            </header>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {items.map((s) => {
+                                    const label = s.label;
+                                    const display = formatSlotLabel(label);
+                                    const isSelected = selected === label;
+                                    const ariaState = isSelected
+                                        ? `${display}, selected`
+                                        : `${display}, available${s.isNearlyFull ? ', nearly full' : ''}`;
+
+                                    const button = (
+                                        <button
+                                            type="button"
+                                            role="radio"
+                                            aria-checked={isSelected}
+                                            aria-label={ariaState}
+                                            onClick={() => onSelect(label)}
+                                            className={cn(
+                                                "relative h-12 rounded-xl border text-sm font-semibold transition-all",
+                                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+                                                isSelected
+                                                    ? "bg-primary text-primary-foreground border-primary shadow-md ring-2 ring-primary/30"
+                                                    : "bg-background border-border/60 text-foreground hover:border-primary hover:bg-primary/5 hover:-translate-y-0.5 hover:shadow-sm",
+                                            )}
+                                        >
+                                            <span className="flex items-center justify-center gap-1.5">
+                                                {isSelected && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+                                                <span>{display}</span>
+                                            </span>
+                                            {!isSelected && s.isNearlyFull && (
+                                                <span
+                                                    className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-500"
+                                                    aria-hidden="true"
+                                                />
+                                            )}
+                                        </button>
+                                    );
+
+                                    if (!s.isNearlyFull) return <div key={label}>{button}</div>;
+
+                                    return (
+                                        <Tooltip key={label}>
+                                            <TooltipTrigger asChild>
+                                                <div>{button}</div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="text-xs">
+                                                Nearly full — book soon
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    );
+                })}
+
+                {normalised.some((s) => s.isNearlyFull) && (
+                    <div className="flex flex-wrap items-center gap-3 pt-1 text-[10px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-primary" /> Selected</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Nearly full</span>
+                    </div>
+                )}
+            </div>
+        </TooltipProvider>
     );
 }

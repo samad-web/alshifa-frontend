@@ -29,25 +29,29 @@ const TYPE_LABEL: Record<TherapyRoomType, string> = {
 
 export default function TherapyRoomsPage() {
     const { toast } = useToast();
-    const { profile } = useAuth();
+    const { profile, role } = useAuth();
     const { confirm, dialog: confirmDialog } = useConfirm();
-    // Branch is derived from the global navbar selector. ALL_BRANCHES (i.e.
-    // `branchIdParam === undefined`) means the admin hasn't picked a branch
-    // yet — therapy rooms belong to a single branch, so we fall back to the
-    // current user's home branch in that case so the page never renders
-    // empty for non-admin clinicians.
+    // Admins (ADMIN, ADMIN_DOCTOR) drive scope from the navbar selector —
+    // when they pick "All Branches" we fan out across the hospital and show
+    // a per-room branch label. Non-admins (THERAPIST, DOCTOR) don't have
+    // the navbar switcher at all, so we anchor them to their home branch
+    // and never go cross-branch from this surface.
+    const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
     const { branchIdParam } = useBranchScope();
     const homeBranchId = (profile as any)?.branchId
         ?? (profile as any)?.user?.branchId
         ?? null;
-    const branchId = branchIdParam ?? homeBranchId ?? "";
+    // For admins: undefined means "All Branches" (cross-branch fetch). For
+    // non-admins: always pin to home branch.
+    const scopedBranchId = isAdmin ? branchIdParam : (branchIdParam ?? homeBranchId ?? undefined);
+    const isCrossBranch = isAdmin && !scopedBranchId;
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
     const [rooms, setRooms] = useState<TherapyRoom[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState<TherapyRoom | null>(null);
-    const [form, setForm] = useState<{ name: string; type: TherapyRoomType; capacity: string; notes: string }>({
-        name: "", type: "SHIRODHARA", capacity: "1", notes: "",
+    const [form, setForm] = useState<{ branchId: string; name: string; type: TherapyRoomType; capacity: string; notes: string }>({
+        branchId: "", name: "", type: "SHIRODHARA", capacity: "1", notes: "",
     });
 
     useEffect(() => {
@@ -58,42 +62,64 @@ export default function TherapyRoomsPage() {
     }, []);
 
     const reload = useCallback(async () => {
-        if (!branchId) {
-            setRooms([]);
-            setLoading(false);
-            return;
-        }
         setLoading(true);
         try {
-            setRooms(await iwisApi.listRooms(branchId));
+            // Pass through the navbar-driven scope; undefined => cross-branch
+            // (backend scopes by hospital). Non-admins always end up with a
+            // concrete branchId here.
+            setRooms(await iwisApi.listRooms(scopedBranchId));
         } finally {
             setLoading(false);
         }
-    }, [branchId]);
+    }, [scopedBranchId]);
 
     useEffect(() => { reload(); }, [reload]);
 
-    const activeBranchName = branches.find((b) => b.id === branchId)?.name ?? null;
+    const activeBranchName = scopedBranchId
+        ? branches.find((b) => b.id === scopedBranchId)?.name ?? null
+        : null;
 
     const open = (room: TherapyRoom | null = null) => {
         if (room) {
             setEditing(room);
-            setForm({ name: room.name, type: room.type, capacity: String(room.capacity), notes: room.notes || "" });
+            setForm({
+                branchId: room.branchId,
+                name: room.name,
+                type: room.type,
+                capacity: String(room.capacity),
+                notes: room.notes || "",
+            });
         } else {
             setEditing(null);
-            setForm({ name: "", type: "SHIRODHARA", capacity: "1", notes: "" });
+            // Default the form's branchId to whatever scope is active. In the
+            // cross-branch admin view this stays empty so the dialog forces
+            // the admin to pick a target branch.
+            setForm({
+                branchId: scopedBranchId ?? "",
+                name: "",
+                type: "SHIRODHARA",
+                capacity: "1",
+                notes: "",
+            });
         }
         setDialogOpen(true);
     };
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!branchId) {
-            toast({ title: "Pick a branch", description: "Use the navbar branch selector first.", variant: "destructive" });
+        const targetBranchId = form.branchId || scopedBranchId;
+        if (!targetBranchId) {
+            toast({ title: "Pick a branch", description: "Choose a branch for this room.", variant: "destructive" });
             return;
         }
         try {
-            const payload = { branchId, name: form.name, type: form.type, capacity: Number(form.capacity), notes: form.notes || undefined };
+            const payload = {
+                branchId: targetBranchId,
+                name: form.name,
+                type: form.type,
+                capacity: Number(form.capacity),
+                notes: form.notes || undefined,
+            };
             if (editing) await iwisApi.updateRoom(editing.id, payload);
             else await iwisApi.createRoom(payload);
             toast({ title: editing ? "Room updated" : "Room registered" });
@@ -132,7 +158,12 @@ export default function TherapyRoomsPage() {
                     every screen consumes the same global selector. */}
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Building2 className="w-4 h-4" />
-                    {activeBranchName ? (
+                    {isCrossBranch ? (
+                        <span>
+                            Showing rooms across <span className="font-medium text-foreground">all branches</span>
+                            <span className="ml-1 text-xs">— pick a branch in the top navigation to narrow.</span>
+                        </span>
+                    ) : activeBranchName ? (
                         <span>
                             Showing rooms for <span className="font-medium text-foreground">{activeBranchName}</span>
                             <span className="ml-1 text-xs">— change via the branch selector in the top navigation.</span>
@@ -161,6 +192,13 @@ export default function TherapyRoomsPage() {
                                     <div className="flex flex-wrap gap-2">
                                         <Badge variant="secondary">{TYPE_LABEL[room.type]}</Badge>
                                         <Badge variant="outline" className="gap-1"><Users className="w-3 h-3" /> capacity {room.capacity}</Badge>
+                                        {/* Show owning branch only in cross-branch mode —
+                                            otherwise it's just noise (the whole list is one branch). */}
+                                        {isCrossBranch && room.branch?.name && (
+                                            <Badge variant="outline" className="gap-1">
+                                                <Building2 className="w-3 h-3" /> {room.branch.name}
+                                            </Badge>
+                                        )}
                                         {!room.isActive && <Badge variant="destructive">Inactive</Badge>}
                                     </div>
                                     {room.notes && <p className="text-sm text-muted-foreground italic">{room.notes}</p>}
@@ -186,6 +224,28 @@ export default function TherapyRoomsPage() {
                             <DialogDescription>Rooms are booked atomically alongside therapist time slots.</DialogDescription>
                         </DialogHeader>
                         <form onSubmit={submit} className="space-y-5 py-4">
+                            {/* Branch picker shown only when there's no scope
+                                pinned by the navbar (admin "All Branches"
+                                view). The room model is per-branch so the
+                                admin must commit to one before saving. */}
+                            {!scopedBranchId && (
+                                <div className="space-y-2">
+                                    <Label>Branch</Label>
+                                    <Select
+                                        value={form.branchId}
+                                        onValueChange={(v) => setForm({ ...form, branchId: v })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select a branch" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {branches.map((b) => (
+                                                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
                             <div className="space-y-2">
                                 <Label>Room name</Label>
                                 <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Shirodhara Room 1" />

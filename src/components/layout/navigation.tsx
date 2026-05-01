@@ -20,7 +20,6 @@ import {
   Megaphone,
   ArrowRightLeft,
   ClipboardCheck,
-  Shield,
   Sparkles,
   Swords,
   Gift,
@@ -47,6 +46,7 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth, AppRole } from "@/hooks/useAuth";
 import { useTenantFeatures } from "@/hooks/useTenantFeatures";
+import { useHomeTherapyPendingCount } from "@/hooks/useHomeTherapyPendingCount";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { UserProfileMenu } from "@/components/layout/UserProfileMenu";
 import { BranchScopeSwitcher } from "@/components/layout/BranchScopeSwitcher";
@@ -61,7 +61,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 
-type NavLeaf = { path: string; label: string; icon: LucideIcon; featureKey?: string; section?: string };
+type NavLeaf = { path: string; label: string; icon: LucideIcon; featureKey?: string; section?: string; badgeCount?: number };
 type NavGroup = { label: string; icon: LucideIcon; items: NavLeaf[]; featureKey?: string };
 type NavEntry = NavLeaf | NavGroup;
 
@@ -92,7 +92,6 @@ const PATH_TO_FEATURE: Record<string, string> = {
   "/performance-scorecards":  "PERFORMANCE_SCORECARDS",
   "/attendance":              "STAFF_ATTENDANCE",
   "/staff-schedule":          "STAFF_ATTENDANCE",
-  "/skill-matrix":            "STAFF_SKILL_MATRIX",
   // Clinician gamification
   "/xp-dashboard":         "CLINICIAN_XP",
   "/seasonal-challenges":  "SEASONAL_CHALLENGES",
@@ -146,6 +145,21 @@ function filterNavByFeatures(items: NavEntry[], has: (key: string) => boolean): 
     .filter((e): e is NavEntry => e !== null);
 }
 
+/**
+ * Stamp a `badgeCount` onto every leaf whose path appears in the supplied
+ * `badges` map. Used by the navbar to surface live counts (e.g. pending
+ * Home-Therapy requests). Returns a fresh structure — never mutates inputs.
+ */
+function annotateNavBadges(items: NavEntry[], badges: Record<string, number>): NavEntry[] {
+  const apply = (leaf: NavLeaf): NavLeaf => {
+    const c = badges[leaf.path];
+    return c && c > 0 ? { ...leaf, badgeCount: c } : leaf;
+  };
+  return items.map((entry) => isGroup(entry)
+    ? { ...entry, items: entry.items.map(apply) }
+    : apply(entry));
+}
+
 const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
   switch (role) {
     case "ADMIN":
@@ -157,6 +171,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           label: "Clinical",
           icon: FilePlus2,
           items: [
+            { path: "/patients", label: "All Patients", icon: Users },
             { path: "/create-user", label: "Create User", icon: User },
             { path: "/manage-users", label: "Manage Users", icon: Users },
             { path: "/assign-patient", label: "Assign Patient", icon: User },
@@ -183,7 +198,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/staff-activity", label: "Staff Activity", icon: Users },
             { path: "/performance-scorecards", label: "Scorecards", icon: ClipboardCheck },
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays },
-            { path: "/skill-matrix", label: "Skill Matrix & Match", icon: Shield },
           ],
         },
         {
@@ -208,6 +222,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/message-templates", label: "Message Templates", icon: MessageSquare },
             { path: "/reminder-settings", label: "Daily Reminders", icon: CalendarDays },
             { path: "/critical-journey", label: "Critical Journey", icon: HeartPulse },
+            { path: "/admin/home-therapy", label: "Home Therapy", icon: Home },
+            { path: "/admin/home-therapy/live-map", label: "Therapist Live Map", icon: MapIcon },
           ],
         },
         {
@@ -235,6 +251,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           icon: FilePlus2,
           items: [
             { path: "/doctor", label: "My Patients", icon: User, section: "Patients" },
+            { path: "/patients", label: "All Patients", icon: Users, section: "Patients" },
             { path: "/assign-patient", label: "Assign Patient", icon: User, section: "Patients" },
             { path: "/create-user", label: "Create User", icon: User, section: "Users" },
             { path: "/manage-users", label: "Manage Users", icon: Users, section: "Users" },
@@ -265,7 +282,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/staff-activity", label: "Staff Activity", icon: Users, section: "Staff" },
             { path: "/performance-scorecards", label: "Scorecards", icon: ClipboardCheck, section: "Staff" },
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays, section: "Staff" },
-            { path: "/skill-matrix", label: "Skill Matrix & Match", icon: Shield, section: "Staff" },
             { path: "/pharmacy", label: "Pharmacy Dashboard", icon: Stethoscope, section: "Pharmacy" },
             { path: "/pharmacy/orders", label: "Orders", icon: ShoppingCart, section: "Pharmacy" },
             { path: "/pharmacy/inventory", label: "Inventory", icon: Package, section: "Pharmacy" },
@@ -278,6 +294,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/message-templates", label: "Message Templates", icon: MessageSquare, section: "Operations" },
             { path: "/reminder-settings", label: "Daily Reminders", icon: CalendarDays, section: "Operations" },
             { path: "/critical-journey", label: "Critical Journey", icon: HeartPulse, section: "Operations" },
+            { path: "/admin/home-therapy", label: "Home Therapy", icon: Home, section: "Operations" },
+            { path: "/admin/home-therapy/live-map", label: "Therapist Live Map", icon: MapIcon, section: "Operations" },
           ],
         },
         {
@@ -312,6 +330,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           label: "Patients",
           icon: User,
           items: [
+            { path: "/patients", label: "All Patients", icon: Users },
             { path: "/assign-patient", label: "Assign Patient", icon: User },
             { path: "/manage-users", label: "View Users", icon: Users },
           ],
@@ -322,8 +341,9 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/attendance", label: "Attendance", icon: ClipboardCheck },
             { path: "/branch-admin/scorecards", label: "Scorecards", icon: Trophy },
-            { path: "/branch-admin/skill-matrix", label: "Skill Matrix", icon: Shield },
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays },
+            { path: "/admin/home-therapy", label: "Home Therapy", icon: Home },
+            { path: "/admin/home-therapy/live-map", label: "Therapist Live Map", icon: MapIcon },
           ],
         },
         // Patient + team chats are unified at /chat (in-page tab strip).
@@ -352,7 +372,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/clinical-photos", label: "Clinical Photos", icon: Camera },
             { path: "/treatment-packages", label: "Packages", icon: Package },
-            { path: "/skill-matrix", label: "Therapist Match", icon: Sparkles },
             { path: "/group-sessions", label: "Group Sessions", icon: Users },
           ],
         },
@@ -545,6 +564,7 @@ function useOverflowSplit(items: NavEntry[]): {
 function NavLinkPill({ entry, pathname }: { entry: NavLeaf; pathname: string }) {
   const Icon = entry.icon;
   const isActive = pathMatchesNav(pathname, entry.path);
+  const badge = entry.badgeCount;
   return (
     <Link
       to={entry.path}
@@ -557,6 +577,14 @@ function NavLinkPill({ entry, pathname }: { entry: NavLeaf; pathname: string }) 
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span>{entry.label}</span>
+      {!!badge && badge > 0 && (
+        <span
+          aria-label={`${badge} pending`}
+          className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none"
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
     </Link>
   );
 }
@@ -618,6 +646,14 @@ function NavGroupDropdown({
   const useTwoColumns =
     sections.length >= 2 || (sections[0]?.[1].length ?? 0) > 6;
 
+  // Sum of badge counts across the group's leaves — surfaced on the group
+  // trigger so admins see the pending Home-Therapy tally without opening
+  // the dropdown.
+  const groupBadge = useMemo(
+    () => entry.items.reduce((acc, leaf) => acc + (leaf.badgeCount ?? 0), 0),
+    [entry.items],
+  );
+
   return (
     <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger
@@ -640,6 +676,14 @@ function NavGroupDropdown({
                 · {activeLeaf.label}
               </span>
             )}
+          </span>
+        )}
+        {groupBadge > 0 && (
+          <span
+            aria-label={`${groupBadge} pending`}
+            className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none"
+          >
+            {groupBadge > 99 ? "99+" : groupBadge}
           </span>
         )}
         <ChevronDown
@@ -680,6 +724,7 @@ function NavGroupDropdown({
                 {items.map((item) => {
                   const ItemIcon = item.icon;
                   const isActive = item.path === activeLeafPath;
+                  const itemBadge = item.badgeCount;
                   return (
                     <Link
                       key={item.path}
@@ -703,6 +748,14 @@ function NavGroupDropdown({
                         <ItemIcon className="h-3.5 w-3.5" />
                       </span>
                       <span className="truncate">{item.label}</span>
+                      {!!itemBadge && itemBadge > 0 && (
+                        <span
+                          aria-label={`${itemBadge} pending`}
+                          className="ml-auto inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none"
+                        >
+                          {itemBadge > 99 ? "99+" : itemBadge}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -818,6 +871,7 @@ function MoreMenu({
                   {entry.items.map((item) => {
                     const ItemIcon = item.icon;
                     const isActive = pathMatchesNav(pathname, item.path);
+                    const itemBadge = item.badgeCount;
                     return (
                       <Link
                         key={item.path}
@@ -832,6 +886,14 @@ function MoreMenu({
                       >
                         <ItemIcon className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{item.label}</span>
+                        {!!itemBadge && itemBadge > 0 && (
+                          <span
+                            aria-label={`${itemBadge} pending`}
+                            className="ml-auto inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none"
+                          >
+                            {itemBadge > 99 ? "99+" : itemBadge}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}
@@ -1025,9 +1087,17 @@ export function Navigation() {
   const { user, role, profile, signOut } = useAuth();
   const { has: hasFeature } = useTenantFeatures();
 
+  // Pending Home-Therapy approval count (admin-like roles only). Folded
+  // into the navItems memo as a `badgeCount` on the matching leaf so the
+  // pill renderer can show it without extra plumbing.
+  const homeTherapyPending = useHomeTherapyPendingCount();
+
   const navItems = useMemo(
-    () => filterNavByFeatures(getRoleNavItems(role), hasFeature),
-    [role, hasFeature],
+    () => annotateNavBadges(
+      filterNavByFeatures(getRoleNavItems(role), hasFeature),
+      { "/admin/home-therapy": homeTherapyPending },
+    ),
+    [role, hasFeature, homeTherapyPending],
   );
 
   const { containerRef, ghostRef, visibleCount } = useOverflowSplit(navItems);

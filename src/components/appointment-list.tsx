@@ -1,4 +1,4 @@
-import { Calendar, Clock, User, Edit2, XCircle, CheckCircle2, Video, MessageSquare, Activity, MapPin, ClipboardList } from "lucide-react";
+import { Calendar, Clock, User, Edit2, XCircle, CheckCircle2, Video, MessageSquare, Activity, MapPin, ClipboardList, Paperclip, FileText } from "lucide-react";
 import { RetentionChecklistModal } from "./RetentionChecklistModal";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,15 @@ interface Appointment {
         suggestedSpecialty: string;
         responses: any;
         createdAt: string;
+        documents?: Array<{
+            id: string;
+            fileName: string;
+            fileUrl: string;
+            fileType: string;
+            category: string;
+            description: string | null;
+            createdAt: string;
+        }>;
     };
 }
 
@@ -328,6 +337,35 @@ export function AppointmentList({
                                                 <div className="col-span-full space-y-1 border-t border-border/40 pt-2">
                                                     <p className="text-[10px] text-muted-foreground uppercase font-bold">Medical History</p>
                                                     <p className="text-xs italic text-foreground/70">{appointment.triageSession.responses.medicalHistory}</p>
+                                                </div>
+                                            )}
+                                            {/* Reports / scans uploaded during triage. Was previously
+                                                stored on the triage session but not surfaced here, so
+                                                doctors had no way to see them at review time. */}
+                                            {appointment.triageSession.documents && appointment.triageSession.documents.length > 0 && (
+                                                <div className="col-span-full space-y-1.5 border-t border-border/40 pt-2">
+                                                    <p className="text-[10px] text-muted-foreground uppercase font-bold flex items-center gap-1">
+                                                        <Paperclip className="w-3 h-3" />
+                                                        Uploaded Reports ({appointment.triageSession.documents.length})
+                                                    </p>
+                                                    <ul className="space-y-1">
+                                                        {appointment.triageSession.documents.map((doc) => (
+                                                            <li key={doc.id} className="flex items-start gap-2">
+                                                                <a
+                                                                    href={doc.fileUrl}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="text-xs text-primary hover:underline flex items-center gap-1.5 min-w-0"
+                                                                >
+                                                                    <FileText className="w-3 h-3 shrink-0" />
+                                                                    <span className="truncate">{doc.fileName}</span>
+                                                                </a>
+                                                                {doc.description && (
+                                                                    <span className="text-[10px] text-muted-foreground italic">— {doc.description}</span>
+                                                                )}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
                                                 </div>
                                             )}
                                         </div>

@@ -4,6 +4,11 @@ import { X, Play, Pause, RotateCcw, Wind, Sparkles, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// All patterns share the brand-primary colour family (--primary is already
+// teal in the design tokens), so we use Tailwind primary classes throughout.
+// The four patterns are differentiated by left-accent opacity, not hue —
+// keeps the modal cohesive instead of a four-way colour buffet.
+
 type BreathingPattern = {
   name: string;
   description: string;
@@ -12,8 +17,6 @@ type BreathingPattern = {
   exhale: number;
   holdAfter: number;
   cycles: number;
-  color: string;
-  gradient: string;
 };
 
 const PATTERNS: BreathingPattern[] = [
@@ -21,25 +24,21 @@ const PATTERNS: BreathingPattern[] = [
     name: "Box Breathing",
     description: "Equal phases for calm focus. Used by Navy SEALs.",
     inhale: 4, hold: 4, exhale: 4, holdAfter: 4, cycles: 6,
-    color: "text-blue-500", gradient: "from-blue-500/20 to-cyan-500/20",
   },
   {
     name: "4-7-8 Relaxation",
     description: "Deep relaxation for anxiety and sleep.",
     inhale: 4, hold: 7, exhale: 8, holdAfter: 0, cycles: 4,
-    color: "text-violet-500", gradient: "from-violet-500/20 to-purple-500/20",
   },
   {
     name: "Energizing Breath",
     description: "Quick recharge for mid-day fatigue.",
     inhale: 3, hold: 0, exhale: 3, holdAfter: 0, cycles: 8,
-    color: "text-amber-500", gradient: "from-amber-500/20 to-orange-500/20",
   },
   {
     name: "Pain Relief",
     description: "Slow deep breathing to manage discomfort.",
     inhale: 5, hold: 2, exhale: 7, holdAfter: 0, cycles: 5,
-    color: "text-emerald-500", gradient: "from-emerald-500/20 to-teal-500/20",
   },
 ];
 
@@ -209,135 +208,149 @@ export function BreathingExercise({ isOpen, onClose, onComplete }: BreathingExer
 
             <div className="px-6 pb-6">
               {!selectedPattern ? (
-                // Pattern selection
-                <motion.div className="space-y-3" layout>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Choose a breathing pattern that suits your current need.
+                // ── Pattern selection — uses the same Card-on-card visual
+                // pattern the rest of the patient dashboard uses (bg-card +
+                // border-border/50 + hover:bg-accent/50) so it doesn't look
+                // like a one-off component glued in.
+                <motion.div className="space-y-2" layout>
+                  <p className="text-xs uppercase tracking-tight font-bold text-muted-foreground mb-3">
+                    Choose your pattern
                   </p>
                   {PATTERNS.map((pattern, i) => (
                     <motion.button
                       key={pattern.name}
+                      type="button"
                       className={cn(
-                        "w-full text-left p-4 rounded-2xl border transition-all",
-                        "bg-gradient-to-r", pattern.gradient,
-                        "hover:shadow-md hover:scale-[1.01] active:scale-[0.99]"
+                        "group w-full text-left p-4 rounded-2xl relative overflow-hidden",
+                        "border border-border/60 bg-card",
+                        "hover:bg-accent/40 hover:border-primary/40",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                        "transition-colors active:scale-[0.99]",
                       )}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.1 }}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
                       onClick={() => handleStart(pattern)}
                     >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className={cn("font-bold text-sm", pattern.color)}>{pattern.name}</h3>
-                          <p className="text-xs text-muted-foreground mt-0.5">{pattern.description}</p>
-                          <div className="flex gap-2 mt-2">
+                      {/* Left accent bar — primary teal, full width on hover. */}
+                      <span
+                        className={cn(
+                          "absolute left-0 top-0 bottom-0 w-1 bg-primary transition-all",
+                          "group-hover:w-1.5",
+                        )}
+                      />
+                      <div className="flex items-center justify-between gap-3 pl-2">
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-sm leading-tight text-foreground group-hover:text-primary transition-colors">
+                            {pattern.name}
+                          </h3>
+                          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+                            {pattern.description}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
                             {[
                               { label: "In", value: pattern.inhale },
                               ...(pattern.hold > 0 ? [{ label: "Hold", value: pattern.hold }] : []),
                               { label: "Out", value: pattern.exhale },
                               ...(pattern.holdAfter > 0 ? [{ label: "Hold", value: pattern.holdAfter }] : []),
                             ].map((p, j) => (
-                              <span key={j} className="text-[10px] px-2 py-0.5 rounded-full bg-background/60 text-foreground font-bold">
+                              <span
+                                key={j}
+                                className="text-[10px] font-bold tabular-nums px-2 py-0.5 rounded-full bg-primary/10 text-primary"
+                              >
                                 {p.label} {p.value}s
                               </span>
                             ))}
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-background/60 text-foreground font-bold">
-                              {pattern.cycles}x
+                            <span className="text-[10px] font-bold tabular-nums px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                              ×{pattern.cycles}
                             </span>
                           </div>
                         </div>
-                        <Play className={cn("w-5 h-5 flex-shrink-0", pattern.color)} />
+                        <Play className="w-5 h-5 flex-shrink-0 text-primary transition-transform group-hover:translate-x-0.5" />
                       </div>
                     </motion.button>
                   ))}
                 </motion.div>
               ) : (
-                // Active exercise
-                <div className="flex flex-col items-center space-y-6">
-                  {/* Pattern name */}
+                // ── Active exercise — single orb, tight type, primary palette ───
+                <div className="flex flex-col items-center space-y-5">
+                  {/* Pattern name + cycle indicator */}
                   <div className="text-center">
-                    <h3 className={cn("font-bold", selectedPattern.color)}>{selectedPattern.name}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Cycle {currentCycle} of {selectedPattern.cycles}
+                    <h3 className="text-sm font-bold uppercase tracking-tight text-primary">
+                      {selectedPattern.name}
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
+                      Cycle {currentCycle} / {selectedPattern.cycles}
                     </p>
                   </div>
 
-                  {/* Breathing circle */}
-                  <div className="relative flex items-center justify-center" style={{ width: 240, height: 240 }}>
-                    {/* Outer pulse */}
+                  {/* Single breathing orb — soft glow + scaling sphere. */}
+                  <div className="relative flex items-center justify-center" style={{ width: 260, height: 260 }}>
+                    {/* Soft outer glow that breathes with the orb. */}
                     <motion.div
-                      className="absolute rounded-full bg-primary/5 dark:bg-primary/10"
-                      animate={{
-                        scale: getCircleScale() * 1.1,
-                        opacity: [0.3, 0.6, 0.3],
-                      }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                      style={{ width: 200, height: 200 }}
+                      className="absolute rounded-full bg-primary/20"
+                      style={{ width: 220, height: 220, filter: "blur(20px)" }}
+                      animate={{ scale: getCircleScale() * 1.08, opacity: [0.5, 0.8, 0.5] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
                     />
 
-                    {/* Main circle */}
+                    {/* The orb itself — single sphere using the primary token
+                        with a highlight gradient for depth. */}
                     <motion.div
-                      className={cn(
-                        "rounded-full flex items-center justify-center",
-                        "bg-gradient-to-br",
-                        selectedPattern.gradient,
-                        "border-2 border-primary/20"
-                      )}
+                      className="rounded-full flex items-center justify-center shadow-xl bg-primary"
+                      style={{
+                        width: 180, height: 180,
+                        backgroundImage: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.45), transparent 60%)",
+                      }}
                       animate={{ scale: getCircleScale() }}
                       transition={{ duration: 0.8, ease: "easeInOut" }}
-                      style={{ width: 160, height: 160 }}
                     >
-                      <div className="text-center">
+                      <div className="text-center px-2">
                         {currentPhase === "complete" ? (
                           <motion.div
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
                             transition={{ type: "spring" }}
                           >
-                            <Sparkles className="w-8 h-8 text-primary mx-auto mb-2" />
-                            <span className="text-lg font-black text-foreground">Done!</span>
+                            <Sparkles className="w-7 h-7 mx-auto mb-1 text-primary-foreground" />
+                            <span className="block text-base font-bold tracking-tight text-primary-foreground">Done</span>
                           </motion.div>
                         ) : (
                           <>
                             <motion.span
                               key={currentPhase}
-                              className="block text-lg font-black text-foreground"
-                              initial={{ opacity: 0, y: -10 }}
+                              className="block text-xs font-bold uppercase tracking-[0.18em] text-primary-foreground/90"
+                              initial={{ opacity: 0, y: -6 }}
                               animate={{ opacity: 1, y: 0 }}
                             >
                               {PHASE_LABELS[currentPhase]}
                             </motion.span>
-                            <span className="text-3xl font-black text-primary tabular-nums">
+                            <span className="block text-5xl font-black tabular-nums text-primary-foreground leading-none mt-1">
                               {getPhaseSeconds(currentPhase) - phaseTime}
                             </span>
                           </>
                         )}
                       </div>
                     </motion.div>
+                  </div>
 
-                    {/* Progress dots */}
+                  {/* Progress strip — current cycle elongates into a pill. */}
+                  <div className="flex gap-1.5 items-center h-1.5">
                     {Array.from({ length: selectedPattern.cycles }).map((_, i) => {
-                      const angle = ((i / selectedPattern.cycles) * 360 - 90) * (Math.PI / 180);
-                      const dotRadius = 110;
+                      const filled  = i < currentCycle - 1;
+                      const current = i === currentCycle - 1;
                       return (
-                        <motion.div
+                        <motion.span
                           key={i}
                           className={cn(
-                            "absolute w-2.5 h-2.5 rounded-full transition-colors",
-                            i < currentCycle - 1
-                              ? "bg-primary"
-                              : i === currentCycle - 1
-                                ? "bg-primary/60 ring-2 ring-primary/30"
-                                : "bg-muted"
+                            "rounded-full transition-all",
+                            filled  ? "bg-primary" :
+                            current ? "bg-primary" : "bg-muted",
                           )}
-                          style={{
-                            left: 120 + Math.cos(angle) * dotRadius - 5,
-                            top: 120 + Math.sin(angle) * dotRadius - 5,
-                          }}
+                          style={{ width: current ? 18 : 6, height: 6 }}
                           initial={{ scale: 0 }}
                           animate={{ scale: 1 }}
-                          transition={{ delay: i * 0.05 }}
+                          transition={{ delay: i * 0.04 }}
                         />
                       );
                     })}
@@ -346,15 +359,15 @@ export function BreathingExercise({ isOpen, onClose, onComplete }: BreathingExer
                   {/* Guidance text */}
                   <motion.p
                     key={currentPhase}
-                    className="text-sm text-muted-foreground text-center"
+                    className="text-xs text-muted-foreground text-center max-w-xs"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                   >
                     {PHASE_ICONS[currentPhase]}
                   </motion.p>
 
-                  {/* Timer and controls */}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {/* Total elapsed time */}
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums">
                     <Timer className="w-3 h-3" />
                     {formatTime(totalElapsed)}
                   </div>

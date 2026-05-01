@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Pill, Calendar, FileText, Activity, ListChecks, MapPin,
-  ChevronLeft, ChevronRight, Loader2, Stethoscope,
+  ChevronLeft, ChevronRight, Loader2, Stethoscope, Paperclip,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -295,6 +295,35 @@ function TriageTab({ data }: { data: ConsultationContextResponse }) {
             {regions.length > 0 && (
               <div className="scale-[0.85] origin-top-left -mb-12">
                 <BodyMapPainSelector initialPainRegions={regions} readOnly />
+              </div>
+            )}
+            {/* Reports / scans uploaded by the patient during the triage
+                wizard — fileUrl is a relative path on the API host, so
+                we render <a href> directly with target=_blank. */}
+            {t.documents && t.documents.length > 0 && (
+              <div className="space-y-1 pt-1.5 border-t border-border/40">
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                  <Paperclip className="w-3 h-3" />
+                  Uploaded reports ({t.documents.length})
+                </p>
+                <ul className="space-y-0.5">
+                  {t.documents.map((doc) => (
+                    <li key={doc.id}>
+                      <a
+                        href={doc.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-primary hover:underline flex items-center gap-1.5"
+                      >
+                        <FileText className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{doc.fileName}</span>
+                      </a>
+                      {doc.description && (
+                        <p className="text-[10px] text-muted-foreground ml-4">{doc.description}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>

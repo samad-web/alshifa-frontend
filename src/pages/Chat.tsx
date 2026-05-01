@@ -229,6 +229,7 @@ export default function Chat() {
                                         <Button
                                             variant="ghost"
                                             size="icon"
+                                            aria-label="Back to conversations"
                                             className="md:hidden"
                                             onClick={() => setSelectedConv(null)}
                                         >
@@ -246,7 +247,7 @@ export default function Chat() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1">
-                                        <Button variant="ghost" size="icon" className="text-muted-foreground"><MoreVertical className="h-4 w-4" /></Button>
+                                        <Button variant="ghost" size="icon" aria-label="Conversation menu" className="text-muted-foreground"><MoreVertical className="h-4 w-4" /></Button>
                                     </div>
                                 </div>
                             }
