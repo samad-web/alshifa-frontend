@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -10,6 +11,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { iwisApi, type DietPrescription, type DietDailyPlan, type MealTime } from "@/services/iwis.service";
 import { apiClient } from "@/lib/api-client";
+import type { MealFoodLinks, DietMealFoodLink } from "@/types/ayurvedicFood";
+import { cn } from "@/lib/utils";
 
 const MEAL_LABEL: Record<MealTime, string> = {
     MORNING_EMPTY: "Morning (empty)",
@@ -110,6 +113,10 @@ export default function PatientDietPage() {
                                                 <div className="text-sm"><span className="font-bold text-destructive">Avoid:</span> {m.avoidFoods.map(f => f.name).join(", ")}</div>
                                             )}
                                             {m.instructions && <div className="text-xs text-muted-foreground italic">{m.instructions}</div>}
+                                            {/* Read-only structured foods linked from the food database
+                                                (Feature 1). Renders nothing when no structured links exist —
+                                                the free-text Eat/Avoid lines above remain the patient's view. */}
+                                            {m.id && <StructuredFoodList mealId={m.id} />}
                                             {!logged && (
                                                 <div className="flex gap-2 pt-2">
                                                     <Button size="sm" onClick={() => log(plan.prescription.id, m.mealTime, true)} className="bg-wellness hover:bg-wellness/90">
@@ -129,5 +136,62 @@ export default function PatientDietPage() {
                 )}
             </div>
         </AppLayout>
+    );
+}
+
+// ── Read-only structured-food block per meal (Feature 1) ───────────────────
+//
+// Fetches /api/ayurvedic-foods/meals/:mealId/foods on its own. Renders nothing
+// when no structured links exist for the meal — the patient sees only the
+// existing free-text Eat/Avoid lines above. Patient cannot link, unlink, or
+// see allergy alerts here (clinical action — doctor handles those upstream).
+
+function StructuredFoodList({ mealId }: { mealId: string }) {
+    const { data, isLoading } = useQuery({
+        queryKey: ["meal-food-links", mealId],
+        queryFn: async () => {
+            const { data } = await apiClient.get<MealFoodLinks>(`/api/ayurvedic-foods/meals/${mealId}/foods`);
+            return data;
+        },
+        staleTime: 30_000,
+    });
+
+    if (isLoading) return null;
+    const eat = data?.foods ?? [];
+    const avoid = data?.avoidFoods ?? [];
+    if (eat.length === 0 && avoid.length === 0) return null;
+
+    return (
+        <div className="pt-2 border-t border-border/40 space-y-1.5">
+            {eat.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                    {eat.map((l) => <ReadonlyChip key={l.id} link={l} />)}
+                </div>
+            )}
+            {avoid.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                    {avoid.map((l) => <ReadonlyChip key={l.id} link={l} avoid />)}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ReadonlyChip({ link, avoid }: { link: DietMealFoodLink; avoid?: boolean }) {
+    const display = link.food?.name ?? link.foodNameFree ?? "Unnamed";
+    const qtyUnit = [link.quantity, link.unit].filter((v) => v !== null && v !== undefined && `${v}`.length > 0).join(" ");
+    const calories = link.food?.calories;
+    return (
+        <span className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]",
+            avoid
+                ? "bg-rose-50 text-rose-900 border-rose-200"
+                : "bg-emerald-50 text-emerald-900 border-emerald-200",
+        )}>
+            {avoid && <span aria-hidden>⚠</span>}
+            <span className="font-medium">{display}</span>
+            {qtyUnit && <span className="opacity-70">{qtyUnit}</span>}
+            {calories != null && <span className="opacity-60">({Math.round(calories)} kcal)</span>}
+        </span>
     );
 }

@@ -25,6 +25,7 @@ import { appointmentsApi } from "@/services/appointments.service";
 import { queueApi, type QueueEntry, type ArrivalStatus } from "@/services/queue.service";
 import { useQueueSocket } from "@/hooks/useQueueSocket";
 import TodoPanel from "@/components/todo/TodoPanel";
+import { FollowUpTaskPanel } from "@/components/doctor/FollowUpTaskPanel";
 import { SelfExamBundlePanel, urgencyBadge } from "@/components/dashboard/SelfExamBundlePanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
@@ -333,6 +334,14 @@ export default function DoctorDashboard() {
         />
 
         {/* SECTION D — Care Gap Alerts moved to popup in header. */}
+
+        {/* SECTION D2 — Follow-Up Tasks (Feature 5)
+            Auto-generated from clinical events (triage swelling/high-pain,
+            post-consultation high-pain, low diet adherence, journey phase
+            activation). Doctor's morning panel — overdue / high-priority
+            counts surface in the header chip strip; completing a task
+            earns XP via the existing ClinicianXP pipeline. */}
+        <FollowUpTaskPanel />
 
         {/* SECTION E — Patient Roster */}
         <section className="rounded-xl border bg-card shadow-card overflow-hidden">
