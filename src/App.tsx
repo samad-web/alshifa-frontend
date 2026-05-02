@@ -107,6 +107,9 @@ const VisitSummaryPage = lazy(() => import("./pages/VisitSummary"));
 // IWIS Competitor Features (0-6)
 const TherapyRoomsPage = lazy(() => import("./pages/iwis/TherapyRooms"));
 const DietPrescriptionsPage = lazy(() => import("./pages/iwis/DietPrescriptions"));
+const FoodDatabase = lazy(() => import("./pages/admin/FoodDatabase"));
+const RecipeLibrary = lazy(() => import("./pages/admin/RecipeLibrary"));
+const WorkflowAutomation = lazy(() => import("./pages/admin/WorkflowAutomation"));
 const DietPackagesPage = lazy(() => import("./pages/iwis/DietPackages"));
 const PatientDietPage = lazy(() => import("./pages/iwis/PatientDiet"));
 const ClinicalPhotosPage = lazy(() => import("./pages/iwis/ClinicalPhotos"));
@@ -304,7 +307,7 @@ function AppRoutes() {
       <Route
         path="/therapist/session/:appointmentId"
         element={
-          <ProtectedRoute allowedRoles={["THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["THERAPIST", "DOCTOR", "ADMIN_DOCTOR"]}>
             <ConsultationRoom />
           </ProtectedRoute>
         }
@@ -575,6 +578,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/seasonal-challenges"
         element={
@@ -792,6 +796,32 @@ function AppRoutes() {
             <FeatureGate feature="DIET_PRESCRIPTION" title="Diet Prescriptions isn't enabled">
               <DietPrescriptionsPage />
             </FeatureGate>
+          </ProtectedRoute>
+        }
+      />
+      {/* Ayurvedic Food Database + Recipe Library (Feature 1) */}
+      <Route
+        path="/food-database"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+            <FoodDatabase />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/recipe-library"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
+            <RecipeLibrary />
+          </ProtectedRoute>
+        }
+      />
+      {/* Workflow Automation Rules Engine (Feature 3) — branch-admin only. */}
+      <Route
+        path="/admin/workflow-automation"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}>
+            <WorkflowAutomation />
           </ProtectedRoute>
         }
       />

@@ -26,6 +26,7 @@ import type { Prescription, VisitSummaryEntry } from "@/types";
 import { cn } from "@/lib/utils";
 import { FeedbackPromptListener } from "@/components/FeedbackModal";
 import { HomeTherapyFeedbackListener } from "@/components/HomeTherapyFeedbackListener";
+import { HealthReportsTab } from "@/components/patient/HealthReportsTab";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -458,7 +459,7 @@ export default function PatientPortal() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <Tabs defaultValue="appointments" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="appointments" className="gap-1.5">
                   <Calendar className="h-3.5 w-3.5" /> Appointments
                 </TabsTrigger>
@@ -471,11 +472,15 @@ export default function PatientPortal() {
                 <TabsTrigger value="summaries" className="gap-1.5">
                   <ClipboardList className="h-3.5 w-3.5" /> Visit Summaries
                 </TabsTrigger>
+                <TabsTrigger value="reports" className="gap-1.5">
+                  <FileText className="h-3.5 w-3.5" /> Health Reports
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="appointments" className="pt-4"><AppointmentsTab /></TabsContent>
               <TabsContent value="prescriptions" className="pt-4"><PrescriptionsTab /></TabsContent>
               <TabsContent value="documents" className="pt-4"><DocumentsTab /></TabsContent>
               <TabsContent value="summaries" className="pt-4"><VisitSummariesTab /></TabsContent>
+              <TabsContent value="reports" className="pt-4"><HealthReportsTab /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

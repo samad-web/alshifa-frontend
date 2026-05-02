@@ -13,10 +13,14 @@ import {
   Activity, Users, Calendar, DollarSign, ShieldAlert, AlertTriangle, Gift,
   Building2, Clock, UserPlus, Flag, BarChart3, HeartPulse, Bell, RefreshCw, Loader2, Download,
   ChevronLeft, ChevronRight, Stethoscope, HeartHandshake, Pill, ShieldCheck,
-  CheckCircle2,
+  CheckCircle2, Leaf, ArrowRight,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StaffOverviewCard } from "@/components/admin/StaffOverviewCard";
 import { WorkloadDistributionChart } from "@/components/admin/WorkloadDistributionChart";
+import type { FoodDatabaseStats } from "@/types/ayurvedicFood";
 import {
   dashboardSummaryApi,
   AdminDashboardSummary,
@@ -253,6 +257,13 @@ export default function AdminDashboard() {
             <StaffOverviewCard role="ADMIN_DOCTOR"  label="Admin Doctors" count={staffCounts.ADMIN_DOCTOR} icon={ShieldCheck} />
           </div>
         </section>
+
+        {/* SECTION B3 — Clinical Content (Ayurvedic Food DB + Recipe Library
+            stats). Quick-glance counts with a deep-link to the full database
+            management page. Visible to ADMIN + ADMIN_DOCTOR (the page is
+            already ADMIN-gated; the role check below is defensive in case
+            this dashboard ever gets opened up). */}
+        <ClinicalContentStrip />
 
         {/* SECTION C — Critical Journey (patients flagged for non-adherence) */}
         <CriticalJourneySection
@@ -535,6 +546,65 @@ function ActivityFeedSection() {
             );
           })
         )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Clinical Content stats strip (Feature 1). Pulls /api/ayurvedic-foods/stats
+ * and renders a horizontal card with food + recipe counts and a deep link
+ * to the full /food-database management page. Only visible to ADMIN +
+ * ADMIN_DOCTOR; other roles get nothing (the backend stats route 403s
+ * everyone else anyway).
+ */
+function ClinicalContentStrip() {
+  const { role } = useAuth();
+  const allowed = role === "ADMIN" || role === "ADMIN_DOCTOR";
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["food-db-stats"],
+    queryFn: async () => {
+      const { data } = await apiClient.get<FoodDatabaseStats>("/api/ayurvedic-foods/stats");
+      return data;
+    },
+    enabled: allowed,
+    staleTime: 60_000,
+  });
+
+  if (!allowed) return null;
+
+  return (
+    <section className="rounded-2xl border bg-card shadow-sm p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="text-sm font-bold tracking-tight flex items-center gap-2 text-[#0D6E6E]">
+          <Leaf className="w-4 h-4" />
+          Clinical Content
+        </h2>
+        <div className="flex items-center gap-2 flex-wrap">
+          {isLoading ? (
+            <>
+              <Skeleton className="h-7 w-20" />
+              <Skeleton className="h-7 w-20" />
+              <Skeleton className="h-7 w-28" />
+            </>
+          ) : (
+            <>
+              <Badge variant="outline" className="text-xs gap-1 border-[#0D6E6E]/30 text-[#0D6E6E]">
+                <span className="font-bold tabular-nums">{data?.totalFoods ?? 0}</span> Foods
+              </Badge>
+              <Badge variant="outline" className="text-xs gap-1 border-[#0D6E6E]/30 text-[#0D6E6E]">
+                <span className="font-bold tabular-nums">{data?.totalRecipes ?? 0}</span> Recipes
+              </Badge>
+              <Link
+                to="/food-database"
+                className="text-xs font-semibold text-[#0D6E6E] hover:underline inline-flex items-center gap-1"
+              >
+                Manage DB <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </>
+          )}
+        </div>
       </div>
     </section>
   );

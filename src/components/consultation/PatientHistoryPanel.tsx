@@ -11,6 +11,8 @@
  */
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -18,12 +20,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Pill, Calendar, FileText, Activity, ListChecks, MapPin,
   ChevronLeft, ChevronRight, Loader2, Stethoscope, Paperclip,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   consultationContextApi,
   type ConsultationContextResponse,
 } from "@/services/consultationContext.service";
+import { healthReportService } from "@/services/healthReport.service";
 import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
 
 type TabKey = "prescriptions" | "appointments" | "summaries" | "triage" | "pain" | "journey";
@@ -422,6 +426,11 @@ function JourneyTab({ data }: { data: ConsultationContextResponse }) {
               )} />
               <span className="flex-1 truncate">{p.name}</span>
               <span className="text-[10px] text-muted-foreground shrink-0">{p.durationDays}d</span>
+              {/* Feature 4 — auto-generated phase progress report indicator.
+                  Lazy-checks whether a HealthReport(reportType=PHASE_PROGRESS)
+                  exists for this phase and surfaces a "Report Sent" badge + a
+                  click-to-open link. Only fires the query for COMPLETED phases. */}
+              {p.status === "COMPLETED" && <PhaseProgressIndicator phaseId={p.id} />}
             </div>
           ))}
         </div>
@@ -445,6 +454,64 @@ function JourneyTab({ data }: { data: ConsultationContextResponse }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Lazy badge + view link for the auto-generated PHASE_PROGRESS report
+ * (Feature 4). Renders nothing if no report exists for the phase yet.
+ *
+ * Caches per phaseId via TanStack Query — cheap because the panel only
+ * shows phases for the active journey (~3-7 typical) and most will be
+ * UPCOMING/ACTIVE (so this component is never mounted for them).
+ */
+function PhaseProgressIndicator({ phaseId }: { phaseId: string }) {
+  const { data: report } = useQuery({
+    queryKey: ["phase-progress-report", phaseId],
+    queryFn: () => healthReportService.getPhaseReport(phaseId),
+    staleTime: 60_000,
+    // Don't retry on 404 — it just means the report hasn't been generated.
+    retry: false,
+  });
+
+  const [busy, setBusy] = useState(false);
+
+  if (!report) return null;
+
+  async function handleView() {
+    if (!report) return;
+    setBusy(true);
+    try {
+      const blob = await healthReportService.downloadBlob(report.id);
+      const url = window.URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to open report");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Badge
+        variant="outline"
+        className="text-[9px] gap-1 border-primary text-primary px-1 py-0 h-4"
+        title="A progress report was sent to the patient when this phase completed"
+      >
+        <TrendingUp className="w-2.5 h-2.5" />
+        Report Sent
+      </Badge>
+      <button
+        type="button"
+        onClick={handleView}
+        disabled={busy}
+        className="text-[10px] text-primary hover:underline disabled:opacity-50"
+      >
+        {busy ? "Loading…" : "View"}
+      </button>
+    </>
   );
 }
 

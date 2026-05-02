@@ -42,6 +42,9 @@ import {
   HeartPulse,
   MoreHorizontal,
   MessageSquareHeart,
+  Leaf,
+  BookOpen,
+  Zap,
   LucideIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -227,6 +230,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/critical-journey", label: "Critical Journey", icon: HeartPulse },
             { path: "/admin/home-therapy", label: "Home Therapy", icon: Home },
             { path: "/admin/home-therapy/live-map", label: "Therapist Live Map", icon: MapIcon },
+            { path: "/admin/workflow-automation", label: "Automation Rules", icon: Zap },
           ],
         },
         {
@@ -260,11 +264,14 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/manage-users", label: "Manage Users", icon: Users, section: "Users" },
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2, section: "Records" },
             { path: "/diet-prescriptions", label: "Diet Plans", icon: Salad, section: "Records" },
+            { path: "/food-database", label: "Food Database", icon: Leaf, section: "Records" },
+            { path: "/recipe-library", label: "Recipe Library", icon: BookOpen, section: "Records" },
             { path: "/diet-packages", label: "Diet Package Reviews", icon: Salad, section: "Records" },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon, section: "Records" },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText, section: "Records" },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck, section: "Records" },
             { path: "/self-exam-review", label: "Self-Exam Review", icon: ClipboardList, section: "Records" },
+            { path: "/admin/workflow-automation", label: "Automation Rules", icon: Zap, section: "Operations" },
           ],
         },
         {
@@ -362,6 +369,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
             { path: "/diet-prescriptions", label: "Diet Plans", icon: Salad },
+            { path: "/food-database", label: "Food Database", icon: Leaf },
+            { path: "/recipe-library", label: "Recipe Library", icon: BookOpen },
             { path: "/diet-packages", label: "Diet Packages", icon: Salad },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
@@ -414,6 +423,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           items: [
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
             { path: "/diet-packages", label: "Diet Packages", icon: Salad },
+            { path: "/recipe-library", label: "Recipe Library", icon: BookOpen },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck },

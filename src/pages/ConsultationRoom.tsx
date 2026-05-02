@@ -29,6 +29,7 @@ import { ChatWrapper } from "@/components/chat/ChatWrapper";
 import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
 import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
 import { PatientHistoryPanel } from "@/components/consultation/PatientHistoryPanel";
+import { GenerateReportButton } from "@/components/consultation/GenerateReportButton";
 import { PainMapCard } from "@/components/patient/PainMapCard";
 import { PatientRecordReviewTracker } from "@/components/doctor/PatientRecordReviewTracker";
 import { useAuth } from "@/hooks/useAuth";
@@ -242,6 +243,26 @@ export default function ConsultationRoom() {
                             <Save className="w-4 h-4 mr-2" />
                             {isSaving ? "Saving..." : "Save Notes"}
                         </Button>
+                        {/* Generate Health Report (Feature 2). Visible to clinicians on
+                            in-progress / completed appointments. Idempotent per
+                            appointmentId — modal flips to "Resend" if a report already
+                            exists. */}
+                        {(role === "DOCTOR" || role === "ADMIN_DOCTOR") &&
+                         appointment.patient?.id &&
+                         (appointment.status === "COMPLETED" ||
+                          appointment.status === "IN_PROGRESS" ||
+                          appointment.status === "CONFIRMED") && (
+                            <GenerateReportButton
+                                appointmentId={appointment.id}
+                                patientId={appointment.patient.id}
+                                patientName={appointment.patient?.fullName || "Patient"}
+                                patientHasWhatsApp={
+                                    !!appointment.patient?.user?.notificationPreference?.whatsappNumber
+                                    || !!appointment.patient?.phoneNumber
+                                    || !!appointment.patient?.primaryPhone
+                                }
+                            />
+                        )}
                         <Button size="sm" onClick={handleCompleteSession} className="bg-wellness hover:bg-wellness/90">
                             <CheckCircle className="w-4 h-4 mr-2" />
                             Complete Session

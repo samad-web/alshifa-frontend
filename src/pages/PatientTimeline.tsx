@@ -19,18 +19,20 @@ import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import {
     Calendar, Pill, Activity, FileText, Clipboard,
-    ChevronLeft, Loader2, AlertCircle, RefreshCw
+    ChevronLeft, Loader2, AlertCircle, RefreshCw, ExternalLink,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
 import type { CheckInPainRegion, LastPainRegionsResponse } from "@/services/enhancedDashboard.service";
+import { healthReportService } from "@/services/healthReport.service";
 
 const EVENT_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-    APPOINTMENT:  { label: "Appointment",       icon: Calendar,   color: "bg-blue-100 text-blue-700 border-blue-200" },
-    PRESCRIPTION: { label: "Prescription",      icon: Pill,       color: "bg-green-100 text-green-700 border-green-200" },
-    CHECKIN:      { label: "Daily Check-in",    icon: Activity,   color: "bg-amber-100 text-amber-700 border-amber-200" },
-    DOCUMENT:     { label: "Document",          icon: FileText,   color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-    MEDICATION:   { label: "Medication Log",    icon: Clipboard,  color: "bg-purple-100 text-purple-700 border-purple-200" },
+    APPOINTMENT:    { label: "Appointment",       icon: Calendar,   color: "bg-blue-100 text-blue-700 border-blue-200" },
+    PRESCRIPTION:   { label: "Prescription",      icon: Pill,       color: "bg-green-100 text-green-700 border-green-200" },
+    CHECKIN:        { label: "Daily Check-in",    icon: Activity,   color: "bg-amber-100 text-amber-700 border-amber-200" },
+    DOCUMENT:       { label: "Document",          icon: FileText,   color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+    MEDICATION:     { label: "Medication Log",    icon: Clipboard,  color: "bg-purple-100 text-purple-700 border-purple-200" },
+    HEALTH_REPORT:  { label: "Health Report",     icon: FileText,   color: "bg-teal-100 text-teal-700 border-teal-200" },
 };
 
 interface TimelineEvent {
@@ -129,6 +131,27 @@ export default function PatientTimeline() {
 
     const [fromDate, setFromDate] = useState(defaultFrom);
     const [toDate, setToDate] = useState(defaultTo);
+
+    // ── HEALTH_REPORT view-pdf handler ───────────────────────────────────
+    // Fetches the PDF as a Blob via the auth-injecting apiClient (a direct
+    // window.open won't carry the JWT) and opens it in a new tab.
+    const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+    const openHealthReport = useCallback(async (reportId: string) => {
+        setPdfBusyId(reportId);
+        try {
+            const blob = await healthReportService.downloadBlob(reportId);
+            const url = window.URL.createObjectURL(
+                new Blob([blob], { type: "application/pdf" }),
+            );
+            window.open(url, "_blank", "noopener,noreferrer");
+            setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : "Failed to open report";
+            toast({ title: "Error", description: msg, variant: "destructive" });
+        } finally {
+            setPdfBusyId(null);
+        }
+    }, [toast]);
 
     const fetchTimeline = useCallback(async () => {
         if (!patientId) return;
@@ -261,6 +284,26 @@ export default function PatientTimeline() {
                                                         {event.subtitle && (
                                                             <p className="text-sm text-muted-foreground">{event.subtitle}</p>
                                                         )}
+                                                        {event.type === "HEALTH_REPORT" && (() => {
+                                                            const reportId = (event.meta?.reportId as string | undefined) || event.id;
+                                                            const busy = pdfBusyId === reportId;
+                                                            return (
+                                                                <Button
+                                                                    variant="link"
+                                                                    size="sm"
+                                                                    className="px-0 mt-1 h-auto text-teal-700 hover:text-teal-800"
+                                                                    disabled={busy}
+                                                                    onClick={() => openHealthReport(reportId)}
+                                                                >
+                                                                    {busy ? (
+                                                                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                                                    ) : (
+                                                                        <ExternalLink className="w-3 h-3 mr-1" />
+                                                                    )}
+                                                                    View Report
+                                                                </Button>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </div>
                                                 <span className="text-xs text-muted-foreground whitespace-nowrap mt-1">
