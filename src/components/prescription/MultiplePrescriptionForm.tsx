@@ -40,6 +40,8 @@ import {
     validateHomeTherapyDraft,
     type HomeTherapyDraft,
 } from "@/components/HomeTherapyRequestForm";
+import VoiceNoteButton from "@/components/voice-note/components/VoiceNoteButton";
+import type { ParsedVoiceNote } from "@/components/voice-note/types";
 
 interface Medicine {
     id: string;
@@ -266,8 +268,10 @@ export function MultiplePrescriptionForm({
             frequency: "",
             duration: "",
             notes: "",
-            timing: "AFTER_FOOD",
-            vehicle: "WARM_WATER",
+            // Empty so the "Choose option" placeholder shows on a fresh row;
+            // both fields stay optional (the doctor can leave them blank).
+            timing: "",
+            vehicle: "",
             videoUrl: "",
         },
     ]);
@@ -294,8 +298,8 @@ export function MultiplePrescriptionForm({
                 frequency: "",
                 duration: "",
                 notes: "",
-                timing: "AFTER_FOOD",
-                vehicle: "WARM_WATER",
+                timing: "",
+                vehicle: "",
                 videoUrl: "",
             },
         ]);
@@ -495,10 +499,109 @@ export function MultiplePrescriptionForm({
                         <p className="text-sm text-muted-foreground">For: {patientName}</p>
                     )}
                 </div>
-                <Button type="button" variant="outline" size="sm" onClick={addItem} className="gap-2">
-                    <Plus className="w-4 h-4" />
-                    Add Medication
-                </Button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <VoiceNoteButton
+                        getAuthToken={() => localStorage.getItem("accessToken")}
+                        baseUrl={import.meta.env.VITE_API_BASE_URL || ""}
+                        onResult={async (parsed: ParsedVoiceNote) => {
+                            const hasMeds = !!parsed.medications?.length;
+                            const ht = parsed.homeTherapy;
+                            const hasTherapy = !!(ht && ht.requested);
+
+                            if (!hasMeds && !hasTherapy) {
+                                toast.warning("No medications or therapy details were extracted from the voice note. Edit the transcript and try again, or fill manually.");
+                                return;
+                            }
+
+                            // ── 1. Medications: fill rows immediately, link to inventory async ──
+                            if (hasMeds) {
+                                const extraNotes = [parsed.dietaryAdvice, parsed.nextSteps]
+                                    .filter((s) => s && s.trim())
+                                    .join(" · ");
+                                const baseRows: PrescriptionItem[] = parsed.medications.map((m, i) => ({
+                                    medicationName: m.name || "",
+                                    dosage:         m.dosage || "",
+                                    frequency:      m.frequency || "",
+                                    duration:       m.duration || "",
+                                    notes:          i === 0 ? extraNotes : "",
+                                    // Leave Timing/Vehicle blank so the doctor explicitly
+                                    // picks — the LLM can't reliably infer Anupana from
+                                    // dictation. Both fields are optional on submit.
+                                    timing:         "",
+                                    vehicle:        "",
+                                    videoUrl:       "",
+                                }));
+                                setPrescriptionItems(baseRows);
+
+                                // Inventory linkage: for each spoken medicine, hit the catalog
+                                // search and lift the medicineId / sku / nearestExpiry / videoUrl
+                                // when the LLM returned an exact catalog name. The prompt is
+                                // already fed the catalog so most names match verbatim; this is
+                                // the same /api/pharmacy/medicines/search endpoint the per-row
+                                // typeahead uses, so the auth/branch scoping is consistent.
+                                Promise.all(baseRows.map(async (row) => {
+                                    if (!row.medicationName) return row;
+                                    try {
+                                        const { data } = await apiClient.get<{ medicines: Medicine[] }>(
+                                            "/api/pharmacy/medicines/search",
+                                            { q: row.medicationName, limit: 5, sortBy: "name", sortOrder: "asc" },
+                                        );
+                                        const list = data?.medicines || [];
+                                        const target = row.medicationName.trim().toLowerCase();
+                                        // Exact case-insensitive name match only — partial/fuzzy matches
+                                        // would risk linking the wrong drug, and the row stays
+                                        // "Unlinked Medication" until the doctor picks one manually.
+                                        const exact = list.find((m) => (m.name || "").trim().toLowerCase() === target);
+                                        if (!exact) return row;
+                                        return {
+                                            ...row,
+                                            medicineId:    exact.id,
+                                            sku:           exact.sku,
+                                            nearestExpiry: exact.nearestExpiry ?? null,
+                                            videoUrl:      row.videoUrl || (exact.videoUrl || ""),
+                                        };
+                                    } catch {
+                                        return row;
+                                    }
+                                })).then((linkedRows) => {
+                                    setPrescriptionItems(linkedRows);
+                                    const linkedCount = linkedRows.filter((r) => r.medicineId).length;
+                                    if (linkedCount > 0) {
+                                        toast.success(`${linkedCount} of ${linkedRows.length} medication${linkedRows.length > 1 ? "s" : ""} linked to inventory.`);
+                                    }
+                                });
+
+                                toast.success(`${parsed.medications.length} medication${parsed.medications.length > 1 ? "s" : ""} filled from voice note. Review and save.`);
+                            }
+
+                            // ── 2. Home-therapy referral: only doctors can author one ──
+                            if (hasTherapy && canRequestHomeTherapy) {
+                                const totalSessions = Math.max(1, Math.min(50, ht.totalSessions || 1));
+                                // sessionModes is already length-reconciled by the backend
+                                // normalizer, but pad defensively in case an older backend
+                                // build is still running.
+                                const modes = Array.from({ length: totalSessions }, (_, i) =>
+                                    (ht.sessionModes[i] === "HOSPITAL" ? "HOSPITAL" : "HOME") as "HOME" | "HOSPITAL",
+                                );
+                                setHomeTherapyDraft({
+                                    enabled:         true,
+                                    totalSessions,
+                                    sessionModes:    modes,
+                                    intervalEnabled: ht.intervalDays > 0,
+                                    intervalDays:    ht.intervalDays > 0 ? Math.min(30, ht.intervalDays) : 1,
+                                    notes:           ht.instructionsForTherapist || "",
+                                });
+                                toast.success(`Home-therapy: ${totalSessions} session${totalSessions > 1 ? "s" : ""} pre-filled. Review the section below.`);
+                            } else if (hasTherapy && !canRequestHomeTherapy) {
+                                toast.info("Therapy details were dictated, but only doctors can submit home-therapy requests. Ignored.");
+                            }
+                        }}
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={addItem} className="gap-2">
+                        <Plus className="w-4 h-4" />
+                        Add Medication
+                    </Button>
+                </div>
             </div>
 
             {/* ── Treatment package picker ──────────────────────────────
@@ -791,12 +894,14 @@ export function MultiplePrescriptionForm({
 
                             <div className="space-y-2">
                                 <Label>Timing</Label>
+                                {/* Radix Select treats "" as uncontrolled — pass undefined
+                                    so the placeholder renders for fresh rows. */}
                                 <Select
-                                    value={item.timing}
+                                    value={item.timing || undefined}
                                     onValueChange={(val) => updateItem(index, "timing", val)}
                                 >
                                     <SelectTrigger>
-                                        <SelectValue />
+                                        <SelectValue placeholder="Choose option" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {TIMING_OPTIONS.map(opt => (
@@ -809,11 +914,11 @@ export function MultiplePrescriptionForm({
                             <div className="space-y-2">
                                 <Label>Vehicle (Anupana)</Label>
                                 <Select
-                                    value={item.vehicle}
+                                    value={item.vehicle || undefined}
                                     onValueChange={(val) => updateItem(index, "vehicle", val)}
                                 >
                                     <SelectTrigger>
-                                        <SelectValue />
+                                        <SelectValue placeholder="Choose option" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {VEHICLE_OPTIONS.map(opt => (
