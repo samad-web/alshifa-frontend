@@ -22,8 +22,6 @@ import { toast } from "sonner";
 import type { VisitSummaryEntry } from "@/types";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { GroupedByBranch } from "@/components/common/GroupedByBranch";
-import VoiceNoteButton from "@/components/voice-note/components/VoiceNoteButton";
-import type { ParsedVoiceNote } from "@/components/voice-note/types";
 
 function summaryBranchId(s: any): string | null {
   return s?.branchId
@@ -317,37 +315,6 @@ function DoctorView({ userId }: { userId: string }) {
                     <Wand2 className="h-4 w-4 mr-1" />
                     {autoGenerating ? "Generating..." : "Auto-generate from appointment"}
                   </Button>
-                  {/* Voice-Note dictation helper. Doctor speaks the visit
-                      summary, OpenAI extracts the 7 fields, the handler below
-                      fills every field on this form directly (medications →
-                      prescriptions[], exercisePlan → exercises[0].exercise). */}
-                  <VoiceNoteButton
-                    getAuthToken={() => localStorage.getItem("accessToken")}
-                    baseUrl={import.meta.env.VITE_API_BASE_URL || ""}
-                    onResult={(parsed: ParsedVoiceNote) => {
-                      if (parsed.diagnosis)      setDiagnosis(parsed.diagnosis);
-                      if (parsed.treatmentNotes) setTreatmentNotes(parsed.treatmentNotes);
-                      if (parsed.medications?.length) {
-                        setPrescriptions(parsed.medications.map((m) => ({
-                          medication: m.name || "",
-                          dosage:     m.dosage || "",
-                          frequency:  m.frequency || "",
-                          duration:   m.duration || "",
-                        })));
-                      }
-                      // exercisePlan is a free-text recommendation — drop it
-                      // into the first exercise row's "exercise" field; the
-                      // doctor can split into structured rows manually if
-                      // multiple distinct exercises were dictated.
-                      if (parsed.exercisePlan) {
-                        setExercises([{ exercise: parsed.exercisePlan, sets: 0, reps: 0, frequency: "" }]);
-                      }
-                      if (parsed.dietaryAdvice)  setDietaryAdvice(parsed.dietaryAdvice);
-                      if (parsed.nextSteps)      setNextSteps(parsed.nextSteps);
-                      if (parsed.followUpDate)   setFollowUpDate(parsed.followUpDate);
-                      toast.success("Visit summary fields filled from voice note. Review and save.");
-                    }}
-                  />
                 </div>
               </div>
 
