@@ -44,6 +44,28 @@ export interface ParsedMedication {
   duration: string;
 }
 
+/** Therapist-referral details extracted when the doctor mentions a
+ *  therapist, session counts, location, schedule, etc. `requested` gates
+ *  the host's home-therapy section: false → ignore the rest. */
+export interface ParsedHomeTherapy {
+  /** True only when the doctor explicitly asked for therapist sessions. */
+  requested: boolean;
+  /** 0 when not stated. The host clamps to [1,50] before submitting. */
+  totalSessions: number;
+  /** Length must equal totalSessions when requested. Each entry says
+   *  whether THAT session is at the patient's home or in the hospital.
+   *  When the doctor only states one mode, the array is filled with
+   *  that mode N times. */
+  sessionModes: ("HOME" | "HOSPITAL")[];
+  /** 0 = doctor didn't specify a between-session cadence. 1 = daily,
+   *  2 = every other day, 3 = every 3 days, 7 = weekly, 14 = fortnightly.
+   *  The host treats >0 as `intervalEnabled: true`. */
+  intervalDays: number;
+  /** Free-text instructions the therapist should follow ("focus on lower
+   *  back", "use medicated oil X", "avoid heavy pressure on the knee"). */
+  instructionsForTherapist: string;
+}
+
 export interface ParsedVoiceNote {
   medications: ParsedMedication[];
   /** Imperative bullet-style guidance ("avoid cold water", "rest 2 days").
@@ -65,6 +87,10 @@ export interface ParsedVoiceNote {
    *  The LLM should resolve relative phrases like "in 2 weeks" to absolute
    *  dates using the current date as the reference point. */
   followUpDate: string;
+  /** Therapist-referral block. Always present in the response shape so
+   *  consumers can rely on `parsed.homeTherapy.requested`; defaults to
+   *  `requested: false` when no therapist work was dictated. */
+  homeTherapy: ParsedHomeTherapy;
   /** The transcript text the LLM was given, returned for traceability. */
   rawText: string;
 }
