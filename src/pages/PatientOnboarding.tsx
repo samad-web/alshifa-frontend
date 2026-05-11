@@ -32,13 +32,24 @@ export default function PatientOnboarding() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     gender: profile?.patient?.gender || "",
-    therapyType: profile?.patient?.therapyType || "",
+    // Multi-select. Initial value comes from the patient's previously-saved
+    // preferences (now an array column) — empty array if first-time onboarding.
+    therapyTypes: (profile?.patient?.therapyTypes ?? []) as string[],
     sleepBedtime: "",
     sleepWakeTime: "",
     sleepDuration: 7,
     painLevel: 0,
     painLocations: [] as string[],
   });
+
+  const toggleTherapyType = (type: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      therapyTypes: prev.therapyTypes.includes(type)
+        ? prev.therapyTypes.filter((t) => t !== type)
+        : [...prev.therapyTypes, type],
+    }));
+  };
 
   const calculateSleepDuration = (bedtime: string, wakeTime: string) => {
     if (!bedtime || !wakeTime) return formData.sleepDuration;
@@ -75,12 +86,29 @@ export default function PatientOnboarding() {
     }
   ];
 
+  // Gate the Next button on Step 0 — same pattern as the existing toast-on-
+  // submit guards, but rendered as `disabled` so the button visibly reflects
+  // the requirement instead of failing silently after a click.
+  const step0Ready = !!formData.gender && formData.therapyTypes.length > 0;
+  const step1Ready = !!formData.sleepBedtime && !!formData.sleepWakeTime;
+  const nextDisabled =
+    (currentStep === 0 && !step0Ready) ||
+    (currentStep === 1 && !step1Ready);
+
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
-      // Validation
-      if (currentStep === 0 && !formData.gender) {
-        toast.error("Please select your gender");
-        return;
+      // Validation toasts as a fallback if the disabled gate is ever bypassed
+      // (e.g. via keyboard activation in dev tooling). Same messages as before
+      // plus a new one for the multi-select therapy-types requirement.
+      if (currentStep === 0) {
+        if (!formData.gender) {
+          toast.error("Please select your gender");
+          return;
+        }
+        if (formData.therapyTypes.length === 0) {
+          toast.error("Please select at least one therapy type");
+          return;
+        }
       }
       if (currentStep === 1) {
         if (!formData.sleepBedtime || !formData.sleepWakeTime) {
@@ -174,23 +202,37 @@ export default function PatientOnboarding() {
             {currentStep === 0 && (
               <div className="space-y-8 animate-in fade-in duration-500">
                 <div className="space-y-4">
-                  <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground">{t('onboarding.therapy_type')}</Label>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                    {["AYURVEDA", "YOGA", "UNANI", "SIDDHA", "HOMEOPATHY"].map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, therapyType: type })}
-                        className={cn(
-                          "py-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1",
-                          formData.therapyType === type
-                            ? "bg-primary/5 border-primary text-primary"
-                            : "bg-background border-transparent hover:border-border text-muted-foreground"
-                        )}
-                      >
-                        <span className="text-[10px] font-black tracking-tight">{t(`onboarding.${type.toLowerCase()}`)}</span>
-                      </button>
-                    ))}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+                      Choose your preferred therapy types
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">Select all that apply.</p>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Preferred therapy types"
+                    className="grid grid-cols-2 md:grid-cols-5 gap-3"
+                  >
+                    {["AYURVEDA", "YOGA", "UNANI", "SIDDHA", "HOMEOPATHY"].map((type) => {
+                      const checked = formData.therapyTypes.includes(type);
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          role="checkbox"
+                          aria-checked={checked}
+                          onClick={() => toggleTherapyType(type)}
+                          className={cn(
+                            "py-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1",
+                            checked
+                              ? "bg-primary/5 border-primary text-primary"
+                              : "bg-background border-transparent hover:border-border text-muted-foreground",
+                          )}
+                        >
+                          <span className="text-[10px] font-black tracking-tight">{t(`onboarding.${type.toLowerCase()}`)}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -318,7 +360,7 @@ export default function PatientOnboarding() {
             <Button
               className="flex-1 h-14 lg:h-16 text-lg font-black tracking-wide rounded-2xl shadow-lg hover:shadow-xl transition-all"
               onClick={handleNext}
-              disabled={loading}
+              disabled={loading || nextDisabled}
             >
               {loading ? (
                 "Saving Assessment..."

@@ -21,6 +21,7 @@ import {
 } from "@/services/dashboardSummary.service";
 import { branchesApi } from "@/services/branches.service";
 import TodoPanel, { AssignedByMePanel } from "@/components/todo/TodoPanel";
+import { FollowUpTaskPanel } from "@/components/doctor/FollowUpTaskPanel";
 import TherapistLiveTrackingPanel from "@/components/dashboard/TherapistLiveTrackingPanel";
 import { useBranchScope, ALL_BRANCHES } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
@@ -146,12 +147,12 @@ export default function DoctorAdminDashboard() {
             variant="attention"
             href="/appointments?status=PENDING"
           />
-          <StatCard title="Open Care Gaps" value={summary.stats.openCareGaps} icon={Activity} variant="risk" />
+          <StatCard title="Open Care Gaps" value={summary.stats.openCareGaps} icon={Activity} variant="risk" href="/care-gaps" />
           <StatCard
             title="Staff On Duty"
             value={summary.stats.staffOnDuty}
             icon={Users}
-            href="/staff-activity"
+            href="/staff-schedule?tab=activity"
           />
           <StatCard
             title="Unassigned Patients"
@@ -348,10 +349,15 @@ export default function DoctorAdminDashboard() {
           </div>
         </section>
 
-        {/* SECTION E — Todo Panel with Assignment Capability. Admin doctor
-            sees the XP rewards on assigned tasks so they can calibrate
-            awards for the clinicians they manage. */}
-        <TodoPanel canAssign title="My Tasks" />
+        {/* SECTION E — Todo Panel + Follow-Up Tasks side-by-side.
+            ADMIN_DOCTOR previously saw FollowUpTaskPanel on /doctor (the
+            shared "My Patients" view); we moved it here so the oversight
+            role sees both task surfaces in one place. Two-column on lg+,
+            stacks on smaller screens. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <TodoPanel canAssign title="My Tasks" />
+          <FollowUpTaskPanel />
+        </div>
         <AssignedByMePanel />
 
         {/* Public thank-you cards from completed journeys. Self-hides when
@@ -557,9 +563,9 @@ export default function DoctorAdminDashboard() {
             <h3 className="font-semibold flex items-center gap-2 mb-3"><BarChart3 className="w-4 h-4 text-primary" /> Quick Reports</h3>
             <div className="space-y-2 text-sm">
               <ReportLink to="/reports?tab=appointments" label="Appointment Summary Today" />
-              <ReportLink to="/reports?tab=care-gaps" label="Care Gap Summary" />
-              <ReportLink to="/reports?tab=adherence" label="Medication Adherence" />
-              <ReportLink to="/reports?tab=revenue" label="Revenue Today" />
+              <ReportLink to="/care-gaps" label="Care Gap Summary" />
+              <ReportLink to="/medication-adherence" label="Medication Adherence" />
+              <ReportLink to="/revenue" label="Revenue Today" />
             </div>
           </div>
           <div>

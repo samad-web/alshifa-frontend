@@ -2,6 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -15,7 +25,7 @@ import {
   TodoTab,
   AssignableStaff,
 } from "@/services/todos.service";
-import { Plus, AlertCircle, CheckCircle2, Clock, Sparkles, UserCheck, Bell } from "lucide-react";
+import { Plus, AlertCircle, CheckCircle2, Clock, Sparkles, UserCheck, Bell, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TodoPanelProps {
@@ -25,6 +35,11 @@ interface TodoPanelProps {
   // Hide XP badges / "XP earned" toasts — used by oversight-only surfaces
   // (ADMIN_DOCTOR dashboard) that must not expose gamification.
   hideXP?: boolean;
+  // Render without the outer card chrome (border + radius + shadow). Used
+  // when the panel sits inside another card (e.g. the consolidated
+  // <TasksSection /> on the Admin Dashboard) so we don't get a double
+  // border. No business-logic change: same content, same hooks, same data.
+  bare?: boolean;
 }
 
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
@@ -57,7 +72,7 @@ function formatRelative(date: string | null): string {
   return d.toLocaleDateString();
 }
 
-export default function TodoPanel({ canAssign = false, className, title = "My Tasks", hideXP = false }: TodoPanelProps) {
+export default function TodoPanel({ canAssign = false, className, title = "My Tasks", hideXP = false, bare = false }: TodoPanelProps) {
   const { toast } = useToast();
   const [data, setData] = useState<TodoListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,7 +135,14 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
   }, [data, hideXP]);
 
   return (
-    <div className={cn("rounded-xl border bg-card shadow-card overflow-hidden", className)}>
+    <div
+      className={cn(
+        // Outer chrome is suppressed in `bare` mode — the parent card already
+        // owns the border + radius + shadow.
+        bare ? "overflow-hidden" : "rounded-xl border bg-card shadow-card overflow-hidden",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between px-5 py-4 border-b">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-5 h-5 text-primary" />
@@ -142,8 +164,6 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
         {([
           { k: "all", label: "All" },
           { k: "assigned", label: "Assigned to Me" },
-          { k: "self", label: "Self-Created" },
-          { k: "done", label: "Done" },
         ] as { k: TodoTab; label: string }[]).map((t) => (
           <button
             key={t.k}
@@ -163,7 +183,7 @@ export default function TodoPanel({ canAssign = false, className, title = "My Ta
         {!loading && data?.items.length === 0 && (
           <div className="p-8 text-center text-sm text-muted-foreground">
             <Sparkles className="w-8 h-8 mx-auto mb-2 text-primary/40" />
-            {tab === "done" ? "No completed tasks yet." : "No tasks here. Add one to get started."}
+            No tasks here. Add one to get started.
           </div>
         )}
         {data?.items.map((t) => (
@@ -477,10 +497,14 @@ function AssignTaskDialog({ open, onOpenChange, onCreated, hideXP = false }: Tas
  *  Tasks I've Assigned — management view for ADMIN / ADMIN_DOCTOR
  * ──────────────────────────────────────────────────────────────────── */
 
-export function AssignedByMePanel({ className, hideXP = false }: { className?: string; hideXP?: boolean }) {
+export function AssignedByMePanel({ className, hideXP = false, bare = false }: { className?: string; hideXP?: boolean; bare?: boolean }) {
   const { toast } = useToast();
   const [data, setData] = useState<Awaited<ReturnType<typeof todosApi.listAssignedByMe>> | null>(null);
   const [loading, setLoading] = useState(true);
+  // Confirmation flow for the hover-trash delete action. Holds the id of the
+  // task pending deletion; null means the AlertDialog is closed.
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -500,22 +524,38 @@ export function AssignedByMePanel({ className, hideXP = false }: { className?: s
     }
   }
 
-  async function handleRevoke(id: string) {
+  async function confirmDeleteTask() {
+    if (!taskToDelete) return;
+    const id = taskToDelete;
+    // Optimistic removal — restore from a refetch on failure.
+    const previous = data;
+    setData((prev) => prev ? { ...prev, items: prev.items.filter((t) => t.id !== id) } : prev);
+    setDeleting(true);
     try {
       await todosApi.revoke(id);
-      toast({ title: "Task revoked" });
+      toast({ title: "Task deleted" });
+      // Resync counts (total / completed / overdue).
       refresh();
     } catch (err) {
+      setData(previous);
       toast({
-        title: "Couldn't revoke task",
+        title: "Failed to delete task",
         description: err instanceof Error ? err.message : "",
         variant: "destructive",
       });
+    } finally {
+      setDeleting(false);
+      setTaskToDelete(null);
     }
   }
 
   return (
-    <div className={cn("rounded-xl border bg-card shadow-card overflow-hidden", className)}>
+    <div
+      className={cn(
+        bare ? "overflow-hidden" : "rounded-xl border bg-card shadow-card overflow-hidden",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between px-5 py-4 border-b">
         <div className="flex items-center gap-2">
           <UserCheck className="w-5 h-5 text-primary" />
@@ -535,7 +575,10 @@ export function AssignedByMePanel({ className, hideXP = false }: { className?: s
           </div>
         )}
         {data?.items.map((t) => (
-          <div key={t.id} className="px-5 py-3 flex items-start justify-between gap-3">
+          <div
+            key={t.id}
+            className="group relative px-5 py-3 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors"
+          >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <Badge className={cn("text-[10px] h-5", PRIORITY_BADGE[t.priority])}>{t.priority}</Badge>
@@ -556,15 +599,47 @@ export function AssignedByMePanel({ className, hideXP = false }: { className?: s
                   <Bell className="w-3 h-3 mr-1" /> Remind
                 </Button>
               )}
-              {t.status === "PENDING" && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs text-red-600" onClick={() => handleRevoke(t.id)}>
-                  Revoke
-                </Button>
-              )}
             </div>
+            {/* Hover trash — appears top-right of the row on hover. Confirms
+                via AlertDialog before calling DELETE /api/todos/:id (backend
+                allows the creator or ADMIN_DOCTOR to delete any status). */}
+            <button
+              type="button"
+              onClick={() => setTaskToDelete(t.id)}
+              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500"
+              title="Delete task"
+              aria-label={`Delete task: ${t.title}`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           </div>
         ))}
       </div>
+
+      <AlertDialog
+        open={!!taskToDelete}
+        onOpenChange={(open) => { if (!open) setTaskToDelete(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Task</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete this follow-up task?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteTask}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

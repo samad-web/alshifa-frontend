@@ -17,6 +17,7 @@ import { Send, Loader2, Mic, MicOff, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useAudioRecorder } from "./useAudioRecorder";
 
 interface CoachComposerProps {
@@ -64,9 +65,14 @@ export function CoachComposer({
         e.preventDefault();
         pressStartedRef.current = true;
         cancelledByDragOff.current = false;
-        // Capture pointer so a drag-off-and-release still fires pointerup
-        // on the button (lets us implement slide-to-cancel reliably).
-        try { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+        // Capture pointer on the BUTTON (currentTarget), not on e.target.
+        // e.target lands on the inner Lucide <Mic /> SVG, and that SVG is
+        // unmounted the moment recording starts (icon flips to <Square />).
+        // When the captured element disappears the browser auto-releases
+        // capture, then the very next sub-pixel motion fires a stray
+        // pointerleave that flips cancelledByDragOff and causes the
+        // recording to be silently discarded. currentTarget is stable.
+        try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
         await recorder.startRecording();
     }
 
@@ -74,15 +80,35 @@ export function CoachComposer({
         if (!pressStartedRef.current) return;
         pressStartedRef.current = false;
         if (cancelledByDragOff.current) {
+            // Slide-to-cancel was triggered. Make it visible — silent cancels
+            // were the original symptom (recording captured, then dropped
+            // with no UI feedback at all).
             recorder.cancelRecording();
+            toast("Recording cancelled", {
+                description: "Drag back onto the mic before releasing to send.",
+                icon: "🎙",
+            });
             return;
         }
         const blob = await recorder.stopRecording();
-        if (blob && onSendAudio) await onSendAudio(blob);
+        if (!blob) {
+            // useAudioRecorder rejects recordings under ~3KB (~half a
+            // second) because Whisper hallucinates more than it transcribes
+            // on those. Without this toast the press silently produces no
+            // request, no audio, no error — the patient has no idea why.
+            toast.error("Hold the mic a little longer", {
+                description: "Press and hold for at least one full second, then release.",
+                icon: "🎙",
+            });
+            return;
+        }
+        if (onSendAudio) await onSendAudio(blob);
     }
 
     function handleMicPointerLeave() {
         // If the user drags off the button before releasing, cancel.
+        // With pointer capture on the BUTTON (set above) this only fires
+        // for genuine drag-off gestures, not for the icon-swap flicker.
         if (recorder.isRecording) cancelledByDragOff.current = true;
     }
 
@@ -93,7 +119,14 @@ export function CoachComposer({
         if (recorder.isRecording) {
             void (async () => {
                 const blob = await recorder.stopRecording();
-                if (blob && onSendAudio) await onSendAudio(blob);
+                if (!blob) {
+                    toast.error("Recording too short", {
+                        description: "Tap once to start, then keep talking for at least a second before tapping again to send.",
+                        icon: "🎙",
+                    });
+                    return;
+                }
+                if (onSendAudio) await onSendAudio(blob);
             })();
         } else {
             void recorder.startRecording();

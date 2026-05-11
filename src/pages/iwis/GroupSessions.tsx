@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -11,13 +11,20 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Users, Loader2, Calendar, Clock, DoorOpen, Building2, CheckCircle2, UserPlus } from "lucide-react";
+import {
+    Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Plus, Users, Loader2, Calendar, Clock, DoorOpen, Building2, CheckCircle2, UserPlus, Check, ChevronsUpDown, X } from "lucide-react";
 import { iwisApi, type GroupSession, type TherapyRoom } from "@/services/iwis.service";
 import { branchesApi } from "@/services/branches.service";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { useConfirm } from "@/components/common/ConfirmDialog";
+import { cn } from "@/lib/utils";
+
+interface PatientLite { id: string; fullName: string | null; phoneNumber?: string | null }
 
 const STATUS_TONE: Record<string, string> = {
     OPEN: "bg-wellness/10 text-wellness border-wellness/30",
@@ -46,12 +53,35 @@ export default function GroupSessionsPage() {
         date: new Date().toISOString().slice(0, 10),
         startTime: "07:00", endTime: "08:00", maxCapacity: "10",
     });
+    // Multi-patient picker state for the New Session form. Patients are
+    // bulk-enrolled at create time so the clinician doesn't have to chase
+    // them down to "Join" individually afterwards.
+    const [allPatients, setAllPatients] = useState<PatientLite[]>([]);
+    const [selectedPatientIds, setSelectedPatientIds] = useState<string[]>([]);
+    const [pickerOpen, setPickerOpen] = useState(false);
 
     useEffect(() => {
         branchesApi.list().then(setBranches).catch(() => setBranches([]));
         apiClient.get<Array<{ id: string; fullName: string | null }>>("/api/user/list-therapists")
             .then(({ data }) => setTherapists(data)).catch(() => {});
     }, []);
+
+    // Load patient roster scoped to the active branch — keeps the picker tight
+    // for branch admins / therapists working on a single clinic.
+    useEffect(() => {
+        const params = branchId ? { branchId } : undefined;
+        apiClient.get<PatientLite[]>("/api/user/list-patients", params)
+            .then(({ data }) => setAllPatients(Array.isArray(data) ? data : []))
+            .catch(() => setAllPatients([]));
+    }, [branchId]);
+
+    const selectedPatients = useMemo(
+        () => selectedPatientIds.map((id) => allPatients.find((p) => p.id === id)).filter((p): p is PatientLite => !!p),
+        [selectedPatientIds, allPatients],
+    );
+    const togglePatient = (id: string) => {
+        setSelectedPatientIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    };
 
     // Admins (ADMIN, ADMIN_DOCTOR) drive scope from the navbar selector —
     // when "All Branches" is picked we fan out across the hospital. DOCTOR
@@ -65,12 +95,21 @@ export default function GroupSessionsPage() {
         if (branches[0] && !branchId) setBranchId(branches[0].id);
     }, [branchIdParam, branches, branchId, isAdmin]);
 
+    // Track room loading so the New Session dialog can render a skeleton
+    // hint instead of a confusing empty dropdown.
+    const [roomsLoading, setRoomsLoading] = useState(false);
     useEffect(() => {
-        // Room list drives the create dialog — only fetch when a concrete
-        // branch is scoped.
-        if (!branchId) { setRooms([]); return; }
-        iwisApi.listRooms(branchId).then(setRooms).catch(() => {});
-    }, [branchId]);
+        // For branch-pinned roles we wait for branchId to resolve. ADMIN /
+        // ADMIN_DOCTOR cross-branch view passes branchId=undefined and the
+        // backend falls back to hospital scope — without this fanout admin
+        // doctors saw an empty rooms dropdown even when rooms existed.
+        if (!isAdmin && !branchId) { setRooms([]); return; }
+        setRoomsLoading(true);
+        iwisApi.listRooms(branchId || undefined)
+            .then((list) => setRooms(Array.isArray(list) ? list : []))
+            .catch(() => setRooms([]))
+            .finally(() => setRoomsLoading(false));
+    }, [branchId, isAdmin]);
 
     const reload = useCallback(async () => {
         if (!branchId && !isAdmin) return;
@@ -90,9 +129,15 @@ export default function GroupSessionsPage() {
                 title: form.title, sessionType: form.sessionType,
                 date: form.date, startTime: form.startTime, endTime: form.endTime,
                 maxCapacity: Number(form.maxCapacity),
+                patientIds: selectedPatientIds.length > 0 ? selectedPatientIds : undefined,
             });
-            toast({ title: "Group session scheduled" });
+            toast({
+                title: selectedPatientIds.length > 0
+                    ? `Group session scheduled with ${selectedPatientIds.length} patient${selectedPatientIds.length === 1 ? "" : "s"} pre-enrolled`
+                    : "Group session scheduled",
+            });
             setDialogOpen(false);
+            setSelectedPatientIds([]);
             reload();
         } catch (err: unknown) {
             toast({ title: "Error", description: err instanceof Error ? err.message : "Save failed", variant: "destructive" });
@@ -234,13 +279,112 @@ export default function GroupSessionsPage() {
                                     value={form.roomId || "__none__"}
                                     onValueChange={(v) => setForm({ ...form, roomId: v === "__none__" ? "" : v })}
                                 >
-                                    <SelectTrigger><SelectValue placeholder="No room assigned" /></SelectTrigger>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={roomsLoading ? "Loading rooms…" : "No room assigned"} />
+                                    </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="__none__">No room</SelectItem>
-                                        {rooms.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                                        {roomsLoading && (
+                                            <div className="px-2 py-1.5 text-xs text-muted-foreground italic">Loading rooms…</div>
+                                        )}
+                                        {!roomsLoading && rooms.length === 0 && (
+                                            <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
+                                                No therapy rooms found. Create rooms in Therapy Rooms.
+                                            </div>
+                                        )}
+                                        {rooms.map((r) => (
+                                            <SelectItem key={r.id} value={r.id}>
+                                                {r.name} <span className="text-muted-foreground">— {r.type} (Cap: {r.capacity})</span>
+                                            </SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
                             </div>
+
+                            {/* Multi-patient picker — combobox with chips below.
+                                Selected items toggle on click without closing the
+                                dropdown so adding several in a row stays fast. */}
+                            <div className="space-y-2">
+                                <Label>Pre-enrol patients (optional)</Label>
+                                <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            role="combobox"
+                                            aria-expanded={pickerOpen}
+                                            className="w-full justify-between font-normal"
+                                        >
+                                            <span className="flex items-center gap-2 truncate">
+                                                <Users className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                                                <span className="truncate">
+                                                    {selectedPatientIds.length === 0
+                                                        ? "Search patients to add…"
+                                                        : `${selectedPatientIds.length} selected — click to add more`}
+                                                </span>
+                                            </span>
+                                            <ChevronsUpDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                                        <Command
+                                            filter={(itemValue, search) =>
+                                                itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+                                            }
+                                        >
+                                            <CommandInput placeholder="Search by name or phone…" />
+                                            <CommandList>
+                                                <CommandEmpty>No patients match.</CommandEmpty>
+                                                <CommandGroup>
+                                                    {allPatients.map((p) => {
+                                                        const haystack = [p.fullName ?? "", p.phoneNumber ?? "", p.id].join(" ");
+                                                        const checked = selectedPatientIds.includes(p.id);
+                                                        return (
+                                                            <CommandItem
+                                                                key={p.id}
+                                                                value={haystack}
+                                                                onSelect={() => togglePatient(p.id)}
+                                                            >
+                                                                <Check className={cn("mr-2 h-4 w-4", checked ? "opacity-100" : "opacity-0")} />
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-sm">{p.fullName || "Unnamed"}</span>
+                                                                    {p.phoneNumber && (
+                                                                        <span className="text-xs text-muted-foreground">{p.phoneNumber}</span>
+                                                                    )}
+                                                                </div>
+                                                            </CommandItem>
+                                                        );
+                                                    })}
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
+
+                                {selectedPatients.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 pt-1">
+                                        {selectedPatients.map((p) => (
+                                            <Badge key={p.id} variant="secondary" className="gap-1.5 pl-2 pr-1 py-1">
+                                                <span>{p.fullName || "Unnamed"}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => togglePatient(p.id)}
+                                                    aria-label={`Remove ${p.fullName || "patient"}`}
+                                                    className="rounded-sm hover:bg-muted-foreground/20 p-0.5"
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
+                                {selectedPatientIds.length > Number(form.maxCapacity || 0) && (
+                                    <p className="text-[11px] text-amber-700">
+                                        {selectedPatientIds.length} selected exceeds capacity ({form.maxCapacity}). Only the first {form.maxCapacity} will be enrolled.
+                                    </p>
+                                )}
+                            </div>
+
                             <DialogFooter>
                                 <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
                                 <Button type="submit">Create Session</Button>

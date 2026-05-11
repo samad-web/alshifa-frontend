@@ -19,10 +19,10 @@ import { DashboardSkeleton } from "@/components/ui/page-skeletons";
 import { PageTransition } from "@/components/ui/page-transition";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Calendar, Users, Heart, Trophy, Play, Bell, AlertTriangle, Sparkles, Activity, Video,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Clock, ArrowRight,
 } from "lucide-react";
 import {
   dashboardSummaryApi,
@@ -30,6 +30,8 @@ import {
   DoctorAppointmentCard,
 } from "@/services/dashboardSummary.service";
 import { appointmentsApi } from "@/services/appointments.service";
+import { therapySessionApi } from "@/services/therapySession.service";
+import type { TherapySession } from "@/types";
 import TodoPanel from "@/components/todo/TodoPanel";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
@@ -48,11 +50,21 @@ function greetingPrefix(d = new Date()) {
 export default function TherapistDashboard() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { branchIdParam } = useBranchScope();
   const [summary, setSummary] = useState<TherapistDashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"pending" | "today">("pending");
   const [availableToday, setAvailableToday] = useState(true);
+  // Active in-progress therapy session (Phase A workspace). Resolves to null
+  // when the therapist has no resumable session — surfaces a banner above the
+  // session queue so they can jump back in with one click.
+  const [activeSession, setActiveSession] = useState<TherapySession | null>(null);
+  // Tracks which appointment is mid-START so we can disable the button
+  // while the POST is in flight (and avoid double-creates if the user
+  // clicks twice — though the backend's @unique on appointmentId is the
+  // authoritative guard).
+  const [startingAppointmentId, setStartingAppointmentId] = useState<string | null>(null);
   // Per-card expand state for triage details / pre-consultation kit on pending
   // session cards. Mirrors the doctor dashboard pattern so the therapist sees
   // the same depth of context before approving a session.
@@ -97,6 +109,32 @@ export default function TherapistDashboard() {
     } finally { setLoading(false); }
   }
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [branchIdParam]);
+
+  // Resume banner: poll once on mount for any IN_PROGRESS session owned by
+  // the caller. Branch scope doesn't apply — a therapist only ever has one
+  // session in flight, regardless of which branch the navbar is filtered to.
+  useEffect(() => {
+    let cancelled = false;
+    therapySessionApi.getActive()
+      .then((s) => { if (!cancelled) setActiveSession(s); })
+      .catch(() => { /* silent — banner just won't render */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function startSession(appointmentId: string) {
+    setStartingAppointmentId(appointmentId);
+    try {
+      const session = await therapySessionApi.start(appointmentId);
+      navigate(`/therapist/sessions/${session.id}`);
+    } catch (err) {
+      toast({
+        title: "Couldn't start session",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+      setStartingAppointmentId(null);
+    }
+  }
 
   async function approveAppointment(id: string, approve: boolean) {
     try {
@@ -149,6 +187,36 @@ export default function TherapistDashboard() {
           </div>
         </header>
 
+        {/* Resume in-progress session banner — only renders if the therapist
+            walked away from a workspace with status IN_PROGRESS. Clicking
+            "Resume" re-opens the workspace; the session keeps ticking from
+            its original startedAt regardless of where they were. */}
+        {activeSession && activeSession.status === "IN_PROGRESS" && (
+          <section
+            className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-3 flex items-center justify-between gap-3"
+            role="status"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <Clock className="w-5 h-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-sm font-medium">
+                  Session in progress
+                  {activeSession.patient?.fullName && ` — ${activeSession.patient.fullName}`}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Started {new Date(activeSession.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => navigate(`/therapist/sessions/${activeSession.id}`)}
+            >
+              Resume <ArrowRight className="w-3 h-3 ml-1" />
+            </Button>
+          </section>
+        )}
+
         {/* SECTION B — Today at a Glance */}
         <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard title="Sessions Today" value={summary.stats.sessionsToday} icon={Calendar} />
@@ -194,7 +262,22 @@ export default function TherapistDashboard() {
             ) : (
               summary.sessions.today.length === 0 ? (
                 <EmptyState text="No sessions today." />
-              ) : summary.sessions.today.map(s => <TodaySessionCard key={s.id} appt={s} />)
+              ) : summary.sessions.today.map(s => (
+                <TodaySessionCard
+                  key={s.id}
+                  appt={s}
+                  starting={startingAppointmentId === s.id}
+                  // Pass the active session id only when it points at this
+                  // card's appointment, so the card can swap "Start" for
+                  // "Resume" without each card needing its own fetch.
+                  resumeSessionId={
+                    activeSession?.appointmentId === s.id && activeSession.status === "IN_PROGRESS"
+                      ? activeSession.id
+                      : null
+                  }
+                  onStartSession={() => startSession(s.id)}
+                />
+              ))
             )}
           </div>
         </section>
@@ -376,10 +459,27 @@ function PendingSessionCard({
   );
 }
 
-function TodaySessionCard({ appt }: { appt: DoctorAppointmentCard }) {
+function TodaySessionCard({
+  appt,
+  starting,
+  resumeSessionId,
+  onStartSession,
+}: {
+  appt: DoctorAppointmentCard;
+  starting: boolean;
+  /** When non-null, this card renders a "Resume" link to the workspace
+   *  instead of "Start" / "Open" — i.e. an in-progress session is keyed
+   *  to this appointment. */
+  resumeSessionId: string | null;
+  onStartSession: () => void;
+}) {
   const t = new Date(appt.date);
   const diffMin = (t.getTime() - Date.now()) / 60_000;
   const canJoin = appt.consultationMode === "ONLINE" && diffMin >= -15 && diffMin <= 15;
+  // CONFIRMED + SCHEDULED are the dashboard's "ready to start" states.
+  // IN_PROGRESS gets the Resume link via `resumeSessionId`. Anything else
+  // (COMPLETED, CANCELLED) falls through to a generic "Open" link.
+  const canStartSession = appt.status === "CONFIRMED" || appt.status === "SCHEDULED";
   const tri = appt.triageSession;
   const [expanded, setExpanded] = useState(false);
 
@@ -401,9 +501,24 @@ function TodaySessionCard({ appt }: { appt: DoctorAppointmentCard }) {
               <Button size="sm" className="h-8 text-xs"><Video className="w-3 h-3 mr-1" /> Join</Button>
             </a>
           )}
-          <Link to={`/appointments/${appt.id}`}>
-            <Button size="sm" variant="outline" className="h-8 text-xs">Start</Button>
-          </Link>
+          {resumeSessionId ? (
+            <Link to={`/therapist/sessions/${resumeSessionId}`}>
+              <Button size="sm" className="h-8 text-xs">Resume</Button>
+            </Link>
+          ) : canStartSession ? (
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              disabled={starting}
+              onClick={onStartSession}
+            >
+              {starting ? "Starting…" : "Start Session"}
+            </Button>
+          ) : (
+            <Link to={`/appointments/${appt.id}`}>
+              <Button size="sm" variant="outline" className="h-8 text-xs">Open</Button>
+            </Link>
+          )}
         </div>
       </div>
       <button
