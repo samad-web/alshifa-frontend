@@ -14,8 +14,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  ArrowRightLeft, Plus, X, Pill, ChevronDown, ChevronUp,
-  Clock, Wand2, AlertTriangle, AlertCircle, Info, Circle, Send, Pencil, Sparkles,
+  ArrowRightLeft, Plus, Pill, ChevronDown, ChevronUp,
+  Clock, AlertTriangle, AlertCircle, Info, Circle, Send, Pencil, Sparkles,
 } from "lucide-react";
 import { communicationApi } from "@/services/communication.service";
 import { apiClient } from "@/lib/api-client";
@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import type { HandoffNoteEntry } from "@/types";
 import { PatientPicker, type PatientLite } from "@/components/clinical/PatientPicker";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { DateInput, toDDMMYYYY } from "@/components/common/DateInput";
 
 interface ClinicianLite {
   id: string;       // User.id (used as toClinicianId)
@@ -32,6 +33,20 @@ interface ClinicianLite {
   specialization?: string | null;
   branchId?: string | null;
   branchName?: string | null;
+}
+
+// Returned by GET /api/patients/:patientId/handoff-summary. Powers the
+// auto-loaded patient history panel and gates the "Create Handoff" button.
+interface HandoffSummary {
+  patient: { id: string; name: string | null; age: number | null; gender: string | null; phone: string | null };
+  assignedDoctor: { fullName: string | null; specialization: string | null } | null;
+  activeMedications: Array<{ id: string; medicationName: string; dosage: string | null; frequency: string | null; duration: string | null }>;
+  activeConditions: string[];
+  activeJourneys: Array<{ id: string; title: string; condition: string }>;
+  activeDiet: { id: string; title: string; doshaTarget: string } | null;
+  lastAppointment: { id: string; date: string; notes: string | null; doctor: { fullName: string | null } | null } | null;
+  upcomingAppointment: { id: string; date: string; status: string; doctor: { fullName: string | null } | null } | null;
+  lastCheckIn: { painLevel: number; mood: string | null; sleepHours: number | null; createdAt: string } | null;
 }
 
 const URGENCY_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
@@ -53,12 +68,6 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-interface MedicationRow {
-  name: string;
-  dosage: string;
-  frequency: string;
-}
-
 export default function HandoffNotes() {
   const { role, user } = useAuth();
   const [activeTab, setActiveTab] = useState("received");
@@ -74,22 +83,55 @@ export default function HandoffNotes() {
   const [clinicians, setClinicians] = useState<ClinicianLite[]>([]);
   const [branchOptions, setBranchOptions] = useState<{ id: string; name: string }[]>([]);
 
-  // Form state
+  // Form state. Medications / active conditions / appointment-id auto-populate
+  // were retired from the create form — clinicians now rely on the auto-loaded
+  // patient-history panel (Feature 18) for that context, so the form only
+  // captures the routing fields plus summary / next-steps / urgency.
   const [patientId, setPatientId] = useState("");
   const [toClinicianId, setToClinicianId] = useState("");
   const [toBranchId, setToBranchId] = useState("");
+  const [handoffDate, setHandoffDate] = useState(""); // DD/MM/YYYY — required, must not be in the past.
   const [summary, setSummary] = useState("");
-  const [medications, setMedications] = useState<MedicationRow[]>([{ name: "", dosage: "", frequency: "" }]);
-  const [conditions, setConditions] = useState("");
   const [nextSteps, setNextSteps] = useState("");
   const [urgency, setUrgency] = useState("Normal");
-  const [appointmentId, setAppointmentId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [autoPopulating, setAutoPopulating] = useState(false);
+  const todayDDMM = toDDMMYYYY(new Date());
   // When set, the form is editing an existing DRAFT rather than creating fresh.
   // Two flows converge on one Dialog — submit branches on this state.
   const [editingDraft, setEditingDraft] = useState<HandoffNoteEntry | null>(null);
   const [sendAfterSave, setSendAfterSave] = useState(false);
+
+  // Auto-loaded patient history panel (FIX 18). Replaces the manual
+  // medications / conditions inputs the form used to ask for. Submit is
+  // gated on this loading successfully — until then we don't trust that the
+  // receiving doctor will see the correct context.
+  const [summaryData, setSummaryData] = useState<HandoffSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryRetryNonce, setSummaryRetryNonce] = useState(0);
+
+  useEffect(() => {
+    if (!formOpen) return;
+    const id = patientId.trim();
+    if (!id) {
+      setSummaryData(null);
+      setSummaryError(null);
+      setSummaryLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSummaryLoading(true);
+    setSummaryError(null);
+    apiClient.get<{ data: HandoffSummary }>(`/api/patients/${id}/handoff-summary`)
+      .then(({ data }) => { if (!cancelled) setSummaryData(data.data); })
+      .catch((err) => {
+        if (cancelled) return;
+        setSummaryData(null);
+        setSummaryError(err?.message || "Could not load patient history");
+      })
+      .finally(() => { if (!cancelled) setSummaryLoading(false); });
+    return () => { cancelled = true; };
+  }, [patientId, formOpen, summaryRetryNonce]);
 
   // Resolve the selected patient's display name from the loaded list. Used
   // both in the auto-populate badge and in the read-only confirmation label.
@@ -111,23 +153,24 @@ export default function HandoffNotes() {
         .catch(() => setPatients([]));
     }
     if (clinicians.length === 0) {
-      Promise.all([
-        apiClient.get<any[]>("/api/user/list-doctors").catch(() => ({ data: [] as any[] })),
-        apiClient.get<any[]>("/api/user/list-therapists").catch(() => ({ data: [] as any[] })),
-      ]).then(([docs, therapists]) => {
-        const norm = (raw: any[], roleLabel: string): ClinicianLite[] =>
-          (Array.isArray(raw) ? raw : []).map((r) => ({
-            id: r.userId || r.user?.id || r.id,
-            fullName: r.fullName ?? r.user?.fullName ?? null,
-            email: r.email ?? r.user?.email ?? null,
-            role: r.user?.role || roleLabel,
-            specialization: r.specialization ?? null,
-            branchId: r.branchId ?? r.user?.branchId ?? null,
-            branchName: r.branch?.name ?? r.user?.branch?.name ?? null,
-          })).filter((c) => c.id && c.id !== user?.id); // exclude self
-        const combined = [...norm(docs.data, "DOCTOR"), ...norm(therapists.data, "THERAPIST")];
-        setClinicians(combined);
-      });
+      // Receiving DOCTOR only (per spec). Therapists are no longer surfaced
+      // as handoff recipients — handoffs flow doctor → doctor.
+      apiClient.get<any[]>("/api/user/list-doctors")
+        .then(({ data }) => {
+          const docs: ClinicianLite[] = (Array.isArray(data) ? data : [])
+            .map((r) => ({
+              id: r.userId || r.user?.id || r.id,
+              fullName: r.fullName ?? r.user?.fullName ?? null,
+              email: r.email ?? r.user?.email ?? null,
+              role: r.user?.role || "DOCTOR",
+              specialization: r.specialization ?? null,
+              branchId: r.branchId ?? r.user?.branchId ?? null,
+              branchName: r.branch?.name ?? r.user?.branch?.name ?? null,
+            }))
+            .filter((c) => c.id && c.id !== user?.id); // exclude self
+          setClinicians(docs);
+        })
+        .catch(() => setClinicians([]));
     }
     if (branchOptions.length === 0) {
       apiClient.get<{ id: string; name: string }[]>("/api/branches")
@@ -161,32 +204,42 @@ export default function HandoffNotes() {
   };
 
   const handleCreate = async () => {
-    if (!patientId.trim() || !summary.trim()) {
-      toast.error("Patient and summary are required");
+    if (!patientId.trim()) {
+      toast.error("Please select a patient");
       return;
     }
-    // SENT handoffs need somewhere to go — either a specific clinician or a
-    // branch fan-out. DRAFTs are allowed to be addressless. We treat the
-    // top-level "Create Handoff" path as SENT, mirroring the API default.
-    const goingLive = !editingDraft || sendAfterSave;
-    if (goingLive && !toClinicianId.trim() && !toBranchId.trim()) {
-      toast.error("Pick a receiving clinician or branch before sending");
+    if (!summary.trim()) {
+      toast.error("Summary is required");
       return;
+    }
+    // Drafts are allowed to be addressless. Anything actually leaving the
+    // outbox (new SENT handoff, or draft → send) requires a doctor + date.
+    const goingLive = !editingDraft || sendAfterSave;
+    if (goingLive) {
+      if (!toClinicianId.trim()) {
+        toast.error("Please select a receiving doctor");
+        return;
+      }
+      if (!handoffDate.trim() || !/^\d{2}\/\d{2}\/\d{4}$/.test(handoffDate)) {
+        toast.error("Please enter a valid handoff date (DD/MM/YYYY)");
+        return;
+      }
+      // Block past dates so a clinician can't accidentally schedule in the past.
+      const [dd, mm, yyyy] = handoffDate.split("/").map((p) => parseInt(p, 10));
+      const entered = new Date(Date.UTC(yyyy, mm - 1, dd));
+      const todayUTC = new Date();
+      todayUTC.setUTCHours(0, 0, 0, 0);
+      if (entered.getTime() < todayUTC.getTime()) {
+        toast.error("Handoff date cannot be in the past");
+        return;
+      }
     }
     try {
       setSubmitting(true);
-      const filteredMeds = medications.filter((m) => m.name.trim());
-      const conditionsList = conditions
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-
       if (editingDraft) {
         // Draft edit path: save fields, then optionally promote to SENT.
         await communicationApi.updateHandoffNote(editingDraft.id, {
           summary: summary.trim(),
-          currentMedications: filteredMeds.length > 0 ? filteredMeds : [],
-          activeConditions: conditionsList,
           nextSteps: nextSteps.trim() || "",
           urgency,
           toClinicianId: toClinicianId.trim() || null,
@@ -194,22 +247,25 @@ export default function HandoffNotes() {
         });
         if (sendAfterSave) {
           await communicationApi.sendHandoffDraft(editingDraft.id);
-          toast.success("Handoff sent");
+          const recipientName =
+            clinicians.find((c) => c.id === toClinicianId)?.fullName || "the receiving doctor";
+          toast.success(`Handoff note sent and Dr. ${recipientName} has been notified`);
         } else {
           toast.success("Draft saved");
         }
       } else {
         await communicationApi.createHandoffNote({
           patientId: patientId.trim(),
-          toClinicianId: toClinicianId.trim() || undefined,
+          toClinicianId: toClinicianId.trim(),
           toBranchId: toBranchId.trim() || undefined,
+          handoffDate,
           summary: summary.trim(),
-          currentMedications: filteredMeds.length > 0 ? filteredMeds : undefined,
-          activeConditions: conditionsList.length > 0 ? conditionsList : undefined,
           nextSteps: nextSteps.trim() || undefined,
           urgency,
         });
-        toast.success("Handoff note created");
+        const recipientName =
+          clinicians.find((c) => c.id === toClinicianId)?.fullName || "the receiving doctor";
+        toast.success(`Handoff note created and Dr. ${recipientName} has been notified`);
       }
       resetForm();
       setFormOpen(false);
@@ -227,45 +283,13 @@ export default function HandoffNotes() {
     setPatientId(h.patientId);
     setToClinicianId(h.toClinicianId || "");
     setToBranchId(h.toBranchId || "");
+    setHandoffDate(toDDMMYYYY((h as { handoffDate?: string | null }).handoffDate ?? null));
     setSummary(h.summary || "");
-    setMedications(
-      h.currentMedications && h.currentMedications.length > 0
-        ? h.currentMedications
-        : [{ name: "", dosage: "", frequency: "" }],
-    );
-    setConditions((h.activeConditions || []).join(", "));
     setNextSteps(h.nextSteps || "");
     // Form's Select uses TitleCase values; backend stores UPPER. Map defensively.
     const u = (h.urgency || "Normal").toLowerCase();
     setUrgency(u.charAt(0).toUpperCase() + u.slice(1));
-    setAppointmentId("");
     setFormOpen(true);
-  };
-
-  const handleAutoPopulate = async () => {
-    if (!appointmentId.trim()) {
-      toast.error("Enter an appointment ID first");
-      return;
-    }
-    try {
-      setAutoPopulating(true);
-      const data = await communicationApi.autoPopulateHandoff(appointmentId.trim());
-      if (data.patientId) setPatientId(data.patientId);
-      if (data.summary) setSummary(data.summary);
-      if (data.currentMedications && data.currentMedications.length > 0) {
-        setMedications(data.currentMedications);
-      }
-      if (data.activeConditions && data.activeConditions.length > 0) {
-        setConditions(data.activeConditions.join(", "));
-      }
-      if (data.nextSteps) setNextSteps(data.nextSteps);
-      if (data.urgency) setUrgency(data.urgency);
-      toast.success("Form populated from appointment data");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to auto-populate");
-    } finally {
-      setAutoPopulating(false);
-    }
   };
 
   const handleMarkRead = async (id: string) => {
@@ -280,32 +304,19 @@ export default function HandoffNotes() {
     }
   };
 
-  const addMedRow = () => {
-    setMedications((prev) => [...prev, { name: "", dosage: "", frequency: "" }]);
-  };
-
-  const removeMedRow = (idx: number) => {
-    setMedications((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  const updateMedRow = (idx: number, field: keyof MedicationRow, value: string) => {
-    setMedications((prev) =>
-      prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m))
-    );
-  };
-
   const resetForm = () => {
     setPatientId("");
     setToClinicianId("");
     setToBranchId("");
+    setHandoffDate("");
     setSummary("");
-    setMedications([{ name: "", dosage: "", frequency: "" }]);
-    setConditions("");
     setNextSteps("");
     setUrgency("Normal");
-    setAppointmentId("");
     setEditingDraft(null);
     setSendAfterSave(false);
+    setSummaryData(null);
+    setSummaryError(null);
+    setSummaryLoading(false);
   };
 
   const renderHandoffCard = (h: HandoffNoteEntry, type: "received" | "sent") => {
@@ -504,30 +515,6 @@ export default function HandoffNotes() {
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4 mt-2">
-                {/* Auto-populate */}
-                <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-                  <Label className="text-xs text-muted-foreground">Auto-populate from appointment</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Appointment ID"
-                      value={appointmentId}
-                      onChange={(e) => setAppointmentId(e.target.value)}
-                      className="flex-1"
-                    />
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleAutoPopulate}
-                      disabled={autoPopulating}
-                    >
-                      <Wand2 className="h-4 w-4 mr-1" />
-                      {autoPopulating ? "Loading..." : "Auto-populate"}
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Patient *</Label>
@@ -567,20 +554,123 @@ export default function HandoffNotes() {
                   </div>
                 </div>
 
+                {/* Auto-loaded patient history. The receiving doctor sees this
+                    inline so they don't have to flip back to the patient
+                    profile, and "Create Handoff" stays disabled until it
+                    loads (or until the clinician retries past an error). */}
+                {patientId && !editingDraft && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold flex items-center gap-1.5">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        Patient history (auto-loaded)
+                      </div>
+                      {summaryLoading && (
+                        <span className="text-xs text-muted-foreground">Loading…</span>
+                      )}
+                    </div>
+
+                    {summaryError && (
+                      <div className="flex items-center justify-between gap-2 rounded border border-destructive/40 bg-destructive/5 px-3 py-2">
+                        <div className="text-xs text-destructive">{summaryError}</div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSummaryRetryNonce((n) => n + 1)}
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    )}
+
+                    {summaryData && !summaryLoading && (
+                      <div className="space-y-3 text-xs">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                          {summaryData.patient.age != null && <span>Age: <span className="font-semibold text-foreground">{summaryData.patient.age}</span></span>}
+                          {summaryData.patient.gender && <span>Gender: <span className="font-semibold text-foreground">{summaryData.patient.gender}</span></span>}
+                          {summaryData.assignedDoctor?.fullName && <span>Primary: <span className="font-semibold text-foreground">Dr. {summaryData.assignedDoctor.fullName}</span></span>}
+                        </div>
+
+                        {summaryData.activeConditions.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground">Active conditions</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {summaryData.activeConditions.map((c, i) => (
+                                <Badge key={i} variant="secondary" className="text-[11px]">{c}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {summaryData.activeMedications.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground flex items-center gap-1.5">
+                              <Pill className="h-3 w-3" /> Current medications
+                            </div>
+                            <div className="space-y-0.5">
+                              {summaryData.activeMedications.slice(0, 5).map((m) => (
+                                <div key={m.id} className="text-foreground">
+                                  {m.medicationName}
+                                  {(m.dosage || m.frequency) && (
+                                    <span className="text-muted-foreground"> — {[m.dosage, m.frequency].filter(Boolean).join(" · ")}</span>
+                                  )}
+                                </div>
+                              ))}
+                              {summaryData.activeMedications.length > 5 && (
+                                <div className="italic text-muted-foreground">+{summaryData.activeMedications.length - 5} more</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {summaryData.activeDiet && (
+                          <div className="space-y-0.5">
+                            <div className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground">Active diet plan</div>
+                            <div>{summaryData.activeDiet.title} <span className="text-muted-foreground">({summaryData.activeDiet.doshaTarget})</span></div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {summaryData.lastAppointment && (
+                            <div>
+                              <div className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground">Last visit</div>
+                              <div>{new Date(summaryData.lastAppointment.date).toLocaleDateString()}{summaryData.lastAppointment.doctor?.fullName ? ` · Dr. ${summaryData.lastAppointment.doctor.fullName}` : ""}</div>
+                            </div>
+                          )}
+                          {summaryData.upcomingAppointment && (
+                            <div>
+                              <div className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground">Upcoming visit</div>
+                              <div>{new Date(summaryData.upcomingAppointment.date).toLocaleDateString()}{summaryData.upcomingAppointment.doctor?.fullName ? ` · Dr. ${summaryData.upcomingAppointment.doctor.fullName}` : ""}</div>
+                            </div>
+                          )}
+                          {summaryData.lastCheckIn && (
+                            <div>
+                              <div className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground">Latest check-in</div>
+                              <div>Pain {summaryData.lastCheckIn.painLevel}/10{summaryData.lastCheckIn.mood ? ` · ${summaryData.lastCheckIn.mood}` : ""}</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {summaryData.activeConditions.length === 0 && summaryData.activeMedications.length === 0 && !summaryData.activeDiet && (
+                          <div className="text-muted-foreground italic">No active medications, conditions or diet plans on file.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Receiving Clinician (optional)</Label>
+                    <Label>
+                      Receiving Doctor <span className="text-rose-600">*</span>
+                    </Label>
                     <SearchableSelect
                       value={toClinicianId}
                       onChange={setToClinicianId}
-                      placeholder="Pick a doctor or therapist"
-                      searchPlaceholder="Search clinicians…"
+                      placeholder="Select a doctor"
+                      searchPlaceholder="Search doctors…"
                       items={clinicians.map((c) => {
-                        const roleLabel = c.role === "DOCTOR"
-                          ? "Doctor"
-                          : c.role === "ADMIN_DOCTOR"
-                            ? "Admin Doctor"
-                            : c.role === "THERAPIST" ? "Therapist" : c.role;
+                        const roleLabel = c.role === "ADMIN_DOCTOR" ? "Admin Doctor" : "Doctor";
                         const subBits = [
                           roleLabel,
                           c.specialization || null,
@@ -588,29 +678,37 @@ export default function HandoffNotes() {
                         ].filter(Boolean) as string[];
                         return {
                           value: c.id,
-                          label: c.fullName || c.email || "Unnamed clinician",
+                          label: c.fullName || c.email || "Unnamed doctor",
                           sub: subBits.join(" · ") || undefined,
                         };
                       })}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Receiving Branch (optional)</Label>
-                    <Select
-                      value={toBranchId || undefined}
-                      onValueChange={(v) => setToBranchId(v === "__none__" ? "" : v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="No specific branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">No specific branch</SelectItem>
-                        {branchOptions.map((b) => (
-                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <DateInput
+                    label="Handoff Date"
+                    required
+                    value={handoffDate}
+                    onChange={setHandoffDate}
+                    minDate={todayDDMM}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Receiving Branch (optional)</Label>
+                  <Select
+                    value={toBranchId || undefined}
+                    onValueChange={(v) => setToBranchId(v === "__none__" ? "" : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="No specific branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No specific branch</SelectItem>
+                      {branchOptions.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -620,59 +718,6 @@ export default function HandoffNotes() {
                     rows={3}
                     value={summary}
                     onChange={(e) => setSummary(e.target.value)}
-                  />
-                </div>
-
-                {/* Medications */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Current Medications</Label>
-                    <Button variant="ghost" size="sm" onClick={addMedRow}>
-                      <Plus className="h-3 w-3 mr-1" /> Add
-                    </Button>
-                  </div>
-                  <div className="space-y-2">
-                    {medications.map((med, idx) => (
-                      <div key={idx} className="flex gap-2 items-start">
-                        <Input
-                          placeholder="Medication"
-                          value={med.name}
-                          onChange={(e) => updateMedRow(idx, "name", e.target.value)}
-                          className="flex-1"
-                        />
-                        <Input
-                          placeholder="Dosage"
-                          value={med.dosage}
-                          onChange={(e) => updateMedRow(idx, "dosage", e.target.value)}
-                          className="w-28"
-                        />
-                        <Input
-                          placeholder="Frequency"
-                          value={med.frequency}
-                          onChange={(e) => updateMedRow(idx, "frequency", e.target.value)}
-                          className="w-28"
-                        />
-                        {medications.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-9 w-9 flex-shrink-0"
-                            onClick={() => removeMedRow(idx)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Active Conditions</Label>
-                  <Input
-                    placeholder="Comma-separated (e.g., Diabetes, Hypertension)"
-                    value={conditions}
-                    onChange={(e) => setConditions(e.target.value)}
                   />
                 </div>
 
@@ -691,7 +736,21 @@ export default function HandoffNotes() {
                   <Button variant="outline" onClick={() => { setFormOpen(false); resetForm(); }}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreate} disabled={submitting}>
+                  {/* Gate the create flow on the patient-history panel
+                      successfully loading. Drafts (editingDraft) bypass — those
+                      are pre-populated and don't need the auto-load. */}
+                  <Button
+                    onClick={handleCreate}
+                    disabled={
+                      submitting ||
+                      (!editingDraft && !!patientId && (summaryLoading || !!summaryError || !summaryData))
+                    }
+                    title={
+                      !editingDraft && patientId && (summaryLoading || summaryError || !summaryData)
+                        ? "Waiting for patient history to load…"
+                        : undefined
+                    }
+                  >
                     {submitting
                       ? "Saving..."
                       : editingDraft

@@ -81,8 +81,12 @@ export default function LiveQueueBoard() {
 
   // BRANCH_ADMIN is fixed to their assigned branch; ADMIN / ADMIN_DOCTOR
   // pick via the navbar branch selector. SUPER_ADMIN follows the same
-  // pattern as ADMIN.
-  const branchId = role === "BRANCH_ADMIN" ? (profile?.branchId ?? null) : (branchIdParam || null);
+  // pattern as ADMIN. When the admin selects "All Branches", branchIdParam
+  // is empty — pass null and let the backend return cross-branch data.
+  const isCrossBranchAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "SUPER_ADMIN";
+  const branchId = role === "BRANCH_ADMIN"
+    ? (profile?.branchId ?? null)
+    : (branchIdParam || null);
 
   const [board, setBoard] = useState<LiveBoardResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,21 +94,27 @@ export default function LiveQueueBoard() {
   const [absentTarget, setAbsentTarget] = useState<QueueEntry | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!branchId) {
+    // Cross-branch admins are allowed to load the board with no branch filter
+    // — the backend treats null branchId as "all branches" for those roles.
+    if (!branchId && !isCrossBranchAdmin) {
       setLoading(false);
       setBoard(null);
       return;
     }
     setError(null);
     try {
-      const data = await queueApi.getLiveBoard({ branchId });
+      // When branchId is null we omit it from the params; the backend treats
+      // an absent branchId as cross-branch for ADMIN / ADMIN_DOCTOR /
+      // SUPER_ADMIN. Sending the literal string "all" used to confuse the
+      // empty-state ("No doctors on duty in this branch today").
+      const data = await queueApi.getLiveBoard(branchId ? { branchId } : {});
       setBoard(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load queue board");
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, [branchId, isCrossBranchAdmin]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -144,7 +154,7 @@ export default function LiveQueueBoard() {
           />
         </div>
 
-        {!branchId ? (
+        {!branchId && !isCrossBranchAdmin ? (
           <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
             Select a branch to view its live queue.
           </div>
@@ -161,7 +171,9 @@ export default function LiveQueueBoard() {
             <SummaryBar summary={board.summary} />
             {board.doctors.length === 0 ? (
               <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">
-                No doctors on duty in this branch today.
+                {branchId
+                  ? "No doctors on duty in this branch today."
+                  : "No doctors on duty in any branch today."}
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">

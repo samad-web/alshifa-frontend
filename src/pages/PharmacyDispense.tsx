@@ -5,11 +5,13 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/common/input";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Search, Plus, Trash2, ShoppingCart, Loader2, CheckCircle2, X, User, AlertTriangle, Stethoscope, FileText } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Search, Plus, Trash2, ShoppingCart, Loader2, CheckCircle2, X, User, AlertTriangle, Stethoscope, FileText, Pill, History, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { formatDate, expiryTone } from "@/lib/format-date";
+import { useDebounce } from "@/hooks/useDebounce";
 
 export default function PharmacyDispense() {
     const [patients, setPatients] = useState([]);
@@ -222,8 +224,20 @@ export default function PharmacyDispense() {
             <div className="container max-w-7xl mx-auto px-4 py-6 md:py-8 space-y-8">
                 <PageHeader
                     title="Dispense Medicines"
-                    subtitle="Record medicine sales and deduct inventory"
+                    subtitle="Record medicine sales and view past dispensing"
                 />
+
+                <Tabs defaultValue="dispense">
+                    <TabsList className="mb-6">
+                        <TabsTrigger value="dispense" className="gap-2">
+                            <Pill className="w-4 h-4" /> Dispense
+                        </TabsTrigger>
+                        <TabsTrigger value="history" className="gap-2">
+                            <History className="w-4 h-4" /> Dispense History
+                        </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="dispense">
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Left: Patient & Medicine Selection */}
@@ -626,7 +640,165 @@ export default function PharmacyDispense() {
                         </Panel>
                     </div>
                 </div>
+                    </TabsContent>
+
+                    <TabsContent value="history">
+                        <DispenseHistorySection />
+                    </TabsContent>
+                </Tabs>
             </div>
         </AppLayout>
+    );
+}
+
+// Inline dispense history table — keeps the create form and the historical
+// audit trail on the same page so pharmacists never have to switch routes
+// just to confirm a recent dispense. Powered by GET /api/pharmacy/dispenses.
+const HISTORY_PAGE_SIZE = 20;
+function DispenseHistorySection() {
+    const [searchInput, setSearchInput] = useState("");
+    const debouncedSearch = useDebounce(searchInput, 300);
+    const [date, setDate] = useState("");
+    const [page, setPage] = useState(1);
+    const [rows, setRows] = useState<any[]>([]);
+    const [total, setTotal] = useState(0);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        // Reset to page 1 whenever the filters change so the user doesn't
+        // get stranded on a stale page index of the previous result set.
+        setPage(1);
+    }, [debouncedSearch, date]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        const params: Record<string, string> = {
+            page: String(page),
+            limit: String(HISTORY_PAGE_SIZE),
+        };
+        if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+        if (date) params.date = date;
+        apiClient.get<any>("/api/pharmacy/dispenses", params)
+            .then(({ data }) => {
+                if (cancelled) return;
+                const items = Array.isArray(data) ? data
+                    : Array.isArray(data?.data) ? data.data
+                    : Array.isArray(data?.dispenses) ? data.dispenses
+                    : Array.isArray(data?.data?.dispenses) ? data.data.dispenses
+                    : [];
+                const totalCount = Number(
+                    data?.pagination?.total
+                    ?? data?.total
+                    ?? data?.data?.pagination?.total
+                    ?? items.length,
+                );
+                setRows(items);
+                setTotal(Number.isFinite(totalCount) ? totalCount : items.length);
+            })
+            .catch(() => { if (!cancelled) { setRows([]); setTotal(0); } })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, [debouncedSearch, date, page]);
+
+    const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
+    const rangeStart = total === 0 ? 0 : (page - 1) * HISTORY_PAGE_SIZE + 1;
+    const rangeEnd = Math.min(page * HISTORY_PAGE_SIZE, total);
+
+    return (
+        <Panel title="Dispense History" subtitle="Past dispensing records — searchable by patient, filterable by date">
+            <div className="flex flex-wrap gap-3 items-center mb-4">
+                <div className="relative flex-1 min-w-[220px] max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                        type="text"
+                        placeholder="Search patient name or ID…"
+                        className="w-full pl-9 pr-3 py-2 rounded-lg border bg-background focus:ring-2 focus:ring-primary outline-none transition text-sm"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                    />
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="text-xs uppercase font-bold text-muted-foreground tracking-widest">Date</span>
+                    <input
+                        type="date"
+                        className="px-3 py-2 rounded-lg border bg-background text-sm focus:ring-2 focus:ring-primary outline-none transition"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                    />
+                </div>
+                {(searchInput || date) && (
+                    <Button variant="ghost" size="sm" onClick={() => { setSearchInput(""); setDate(""); }}>
+                        <X className="w-3.5 h-3.5 mr-1" /> Clear
+                    </Button>
+                )}
+            </div>
+
+            {loading ? (
+                <div className="space-y-2">
+                    {[...Array(4)].map((_, i) => (
+                        <div key={i} className="h-12 rounded-md bg-muted/40 animate-pulse" />
+                    ))}
+                </div>
+            ) : rows.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground">No dispense records found.</div>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="border-b">
+                            <tr>
+                                <th className="pb-3 pt-2 font-semibold">Patient</th>
+                                <th className="pb-3 pt-2 font-semibold">Items</th>
+                                <th className="pb-3 pt-2 font-semibold text-center">Total</th>
+                                <th className="pb-3 pt-2 font-semibold">Dispensed By</th>
+                                <th className="pb-3 pt-2 font-semibold">Date &amp; Time</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                            {rows.map((d) => (
+                                <tr key={d.id} className="hover:bg-secondary/40 transition">
+                                    <td className="py-3">
+                                        <div className="font-medium">{d.patient?.fullName || "—"}</div>
+                                        <div className="text-[11px] text-muted-foreground">{d.patient?.patientId || d.patientId?.slice(0, 8)}</div>
+                                    </td>
+                                    <td className="py-3 max-w-[260px]">
+                                        <div className="flex flex-wrap gap-1">
+                                            {(d.items || []).slice(0, 3).map((it: any, idx: number) => (
+                                                <span key={idx} className="px-2 py-0.5 rounded-md bg-secondary text-[11px]">
+                                                    {it.medicine?.name || it.medicineName} ×{it.quantity}
+                                                </span>
+                                            ))}
+                                            {(d.items || []).length > 3 && (
+                                                <span className="text-[11px] text-muted-foreground italic">+{d.items.length - 3} more</span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="py-3 text-center font-semibold text-accent">₹{d.totalAmount ?? "—"}</td>
+                                    <td className="py-3 text-xs text-muted-foreground">{d.dispenser?.email?.split("@")[0] || "—"}</td>
+                                    <td className="py-3 text-xs">{d.createdAt ? formatDate(d.createdAt) : "—"}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {!loading && total > 0 && (
+                <div className="flex items-center justify-between gap-3 pt-4 mt-4 border-t border-border/40">
+                    <p className="text-xs text-muted-foreground">
+                        Showing {rangeStart}–{rangeEnd} of {total}
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                            <ChevronLeft className="w-4 h-4" />
+                        </Button>
+                        <span className="text-xs tabular-nums px-2">Page {page} of {totalPages}</span>
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                            <ChevronRight className="w-4 h-4" />
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </Panel>
     );
 }

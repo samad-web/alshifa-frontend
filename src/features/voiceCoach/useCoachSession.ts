@@ -144,9 +144,27 @@ export function useCoachSession(language: CoachLanguage = "ta"): UseCoachSession
                 if (result.escalated) setEscalated(true);
                 setStatus("idle");
             } catch (err: unknown) {
-                const message =
-                    err instanceof Error ? err.message : "Coach couldn't hear you. Try again.";
-                toast.error(message);
+                // The /audio-message endpoint is multipart audio in → JSON
+                // (transcript + base64 mp3) out. Whisper runs server-side; the
+                // 422 response (code: 'STT_EMPTY') means the upload succeeded
+                // but the audio contained no intelligible speech (silent /
+                // too quiet / picked up only background noise / matched a
+                // known Whisper hallucination phrase). Surface that
+                // explicitly so the patient knows to retry.
+                const code = (err as { code?: string })?.code;
+                const message = err instanceof Error ? err.message : "Voice coach error";
+                if (code === "STT_EMPTY") {
+                    toast.error("Couldn't make out what you said", {
+                        description: "Try speaking a little louder, closer to the mic, and for at least a second.",
+                        icon: "🎙",
+                    });
+                } else if (code === "STT_UPSTREAM_ERROR") {
+                    toast.error("Voice coach is busy", {
+                        description: "Speech recognition timed out. Please try again in a moment.",
+                    });
+                } else {
+                    toast.error(message || "Coach couldn't hear you. Try again.");
+                }
                 setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
                 setStatus("error");
             }

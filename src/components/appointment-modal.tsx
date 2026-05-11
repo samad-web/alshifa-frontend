@@ -351,8 +351,20 @@ Medications: ${resp.medications || 'None'}`;
                 return;
             }
 
+            // Drop any "" values from the form before submit. The backend
+            // schema uses z.enum / z.string().optional() — both reject ""
+            // (status enum hard-rejects, FK fields reject at the Prisma
+            // layer). Radix Select can momentarily set status="" when the
+            // current DB value isn't in the visible SelectItems list and
+            // the dropdown is dismissed, which would otherwise trigger
+            // "Invalid enum value … received ''" on save.
+            const cleanFormData: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(formData)) {
+                if (value !== "") cleanFormData[key] = value;
+            }
+
             const body: Record<string, unknown> = {
-                ...formData,
+                ...cleanFormData,
                 date: combinedDateTime.toISOString(),
                 therapistDate: combinedTherapistDateTime?.toISOString() || null,
                 contactDetails,

@@ -13,6 +13,7 @@ interface AppointmentCardProps {
     consultationMode?: string;
     meetingLink?: string;
     notes?: string;
+    isWalkIn?: boolean;
     doctor?: { fullName?: string };
     therapist?: { fullName?: string };
     patient?: { fullName?: string };
@@ -82,9 +83,16 @@ export function AppointmentCard({
               {appointmentDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
-          <Badge variant="outline" className={cn('text-xs', config.color)}>
-            {config.label}
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            {appointment.isWalkIn && (
+              <Badge variant="outline" className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">
+                Walk-In
+              </Badge>
+            )}
+            <Badge variant="outline" className={cn('text-xs', config.color)}>
+              {config.label}
+            </Badge>
+          </div>
         </div>
 
         {/* Status timeline stepper */}

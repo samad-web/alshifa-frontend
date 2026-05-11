@@ -94,10 +94,18 @@ export const queueApi = {
       .then((r) => r.data);
   },
 
-  /** Branch-wide snapshot grouped by doctor — Live Queue Board. */
-  getLiveBoard(params: { branchId: string; date?: string }): Promise<LiveBoardResponse> {
+  /**
+   * Branch-wide snapshot grouped by doctor — Live Queue Board.
+   * Pass branchId for a single-branch view; omit it when the cross-branch
+   * admin has selected "All Branches" (the backend treats absent branchId
+   * as cross-branch when the caller is ADMIN / ADMIN_DOCTOR / SUPER_ADMIN).
+   */
+  getLiveBoard(params: { branchId?: string | null; date?: string } = {}): Promise<LiveBoardResponse> {
+    const cleaned: Record<string, string> = {};
+    if (params.branchId) cleaned.branchId = params.branchId;
+    if (params.date) cleaned.date = params.date;
     return apiClient
-      .get<LiveBoardResponse>("/api/queue/live-board", params as Record<string, string>)
+      .get<LiveBoardResponse>("/api/queue/live-board", cleaned)
       .then((r) => r.data);
   },
 

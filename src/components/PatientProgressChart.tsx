@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Users, TrendingUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, Users, TrendingUp, AlertTriangle, RefreshCw } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { apiClient } from "@/lib/api-client";
-import { toast } from "sonner";
 
 interface PatientProgress {
   patientName: string;
@@ -22,23 +22,51 @@ interface PatientProgressChartProps {
 export function PatientProgressChart({ branchId }: PatientProgressChartProps = {}) {
   const [data, setData] = useState<PatientProgress[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     setLoading(true);
+    setError(null);
     apiClient
       .get<{ data: PatientProgress[] }>(
         "/api/reports/patient-progress",
         branchId ? { branchId } : undefined,
       )
-      .then(({ data: result }) => setData(result.data))
-      .catch(() => toast.error("Failed to load patient progress data"))
+      .then(({ data: result }) => {
+        // Backend returns { success, data: [...] }; some older builds returned the array
+        // directly. Normalise so the chart never sees `undefined.length`.
+        const rows = Array.isArray(result?.data) ? result.data
+          : Array.isArray(result as unknown) ? (result as unknown as PatientProgress[])
+          : [];
+        setData(rows);
+      })
+      .catch((err) => {
+        const message = err instanceof Error && err.message
+          ? err.message
+          : "Failed to load patient progress data";
+        setError(message);
+      })
       .finally(() => setLoading(false));
   }, [branchId]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <AlertTriangle className="h-10 w-10 text-rose-500" />
+        <p className="text-sm text-rose-700 text-center max-w-md">{error}</p>
+        <Button variant="outline" size="sm" onClick={fetchData} className="gap-1.5">
+          <RefreshCw className="h-3.5 w-3.5" /> Retry
+        </Button>
       </div>
     );
   }

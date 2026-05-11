@@ -103,21 +103,31 @@ export default function RewardStore() {
 
   async function handleCreateReward(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
+    const cost = Number(form.pointsCost);
+    if (!Number.isFinite(cost) || cost <= 0) {
+      setError("Points cost must be a positive number.");
+      return;
+    }
     setSubmitting(true);
     try {
+      // Backend enum is uppercase ('PERK', 'LEAVE'…) — normalise here so
+      // the user can type any case in the form. The backend also coerces,
+      // but doing it client-side surfaces a cleaner request.
       const created = await clinicianGamificationApi.createReward({
-        name: form.name,
-        description: form.description,
+        name: form.name.trim(),
+        description: form.description.trim(),
         icon: form.icon || undefined,
-        category: form.category,
-        pointsCost: Number(form.pointsCost),
+        category: form.category.trim().toUpperCase(),
+        pointsCost: cost,
         stock: form.stock ? Number(form.stock) : undefined,
       });
       setRewards((prev) => [created, ...prev]);
       setShowForm(false);
       setForm({ name: "", description: "", icon: "", category: "Perk", pointsCost: "", stock: "" });
-    } catch {
-      setError("Failed to create reward");
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : "Failed to create reward";
+      setError(message);
     } finally {
       setSubmitting(false);
     }

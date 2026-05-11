@@ -19,7 +19,8 @@ import {
     TrendingDown,
     Minus,
     Loader2,
-    RefreshCw
+    RefreshCw,
+    AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -52,11 +53,13 @@ export function MonthlyCompletedAppointments({ branchId }: MonthlyCompletedAppoi
     const [data, setData] = useState<AppointmentRecord[]>([]);
     const [meta, setMeta] = useState<MetaData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const limit = 10;
 
     const fetchData = async (targetPage: number) => {
         setLoading(true);
+        setError(null);
         try {
             const params: Record<string, string | number> = { page: targetPage, limit };
             if (branchId) params.branchId = branchId;
@@ -64,11 +67,15 @@ export function MonthlyCompletedAppointments({ branchId }: MonthlyCompletedAppoi
                 '/api/reports/monthly-completed-appointments',
                 params
             );
-            setData(result.data);
-            setMeta(result.meta);
-        } catch (error) {
-            console.error("Error fetching report:", error);
-            toast.error("Failed to fetch monthly report");
+            setData(Array.isArray(result?.data) ? result.data : []);
+            setMeta(result?.meta ?? null);
+        } catch (err) {
+            console.error("Error fetching report:", err);
+            const message = err instanceof Error && err.message
+                ? err.message
+                : "Failed to fetch monthly report";
+            setError(message);
+            toast.error(message);
         } finally {
             setLoading(false);
         }
@@ -78,6 +85,18 @@ export function MonthlyCompletedAppointments({ branchId }: MonthlyCompletedAppoi
         fetchData(page);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [page, branchId]);
+
+    if (error && !data.length && !loading) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <AlertTriangle className="w-10 h-10 text-rose-500" />
+                <p className="text-sm text-rose-700 text-center max-w-md">{error}</p>
+                <Button variant="outline" size="sm" onClick={() => fetchData(page)} className="gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5" /> Retry
+                </Button>
+            </div>
+        );
+    }
 
     const formatDateTime = (dateString: string) => {
         const date = new Date(dateString);

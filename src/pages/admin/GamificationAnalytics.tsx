@@ -127,8 +127,10 @@ export default function GamificationAnalytics() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {scoreTrend.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No trend data yet</p>
+              {scoreTrend.length === 0 || scoreTrend.every(w => w.avgScore === 0) ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No score data yet. Scores will appear as clinicians complete appointments.
+                </p>
               ) : (
                 <div className="flex items-end justify-between h-40 px-2 gap-1">
                   {scoreTrend.map((week, i) => {

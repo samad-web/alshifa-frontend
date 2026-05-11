@@ -190,12 +190,18 @@ export default function PrescriptionManagement() {
         setRxSortBy("createdAt"); setRxSortOrder("desc");
     };
 
-    // Fetch patients and available branches in parallel
+    // Fetch patients and available branches in parallel.
+    // For DOCTOR / THERAPIST roles we pass assignedToMe=true so the picker
+    // only lists patients assigned to the calling clinician — driven by the
+    // canonical PatientAssignment table on the backend, with a fallback to
+    // confirmed/completed appointments for clinics on the legacy data path.
+    // ADMIN / ADMIN_DOCTOR / BRANCH_ADMIN roles bypass the filter on the
+    // server and continue to see every patient in their scope.
     useEffect(() => {
         async function fetchInitialData() {
             try {
                 const [{ data: patientsData }, { data: branchesData }] = await Promise.all([
-                    apiClient.get<any[]>('/api/user/list-patients'),
+                    apiClient.get<any[]>('/api/user/list-patients', { assignedToMe: 'true' }),
                     apiClient.get<any[]>('/api/branches'),
                 ]);
                 setPatients(patientsData);

@@ -1,0 +1,336 @@
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { FileText, Download, ExternalLink, Loader2, TrendingUp } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useWebSocket } from "@/contexts/WebSocketContext";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
+import {
+    healthReportService,
+    type HealthReportListItem,
+    type PhaseProgressReportData,
+} from "@/services/healthReport.service";
+
+interface HealthReportsTabProps {
+    /** Optional override — when omitted, the tab resolves the calling
+     *  patient's id via /api/user/me. PatientPortal calls this without props. */
+    patientId?: string;
+}
+
+interface UserMe {
+    patient?: { id?: string | null } | null;
+}
+
+/** Inline WhatsApp glyph — matches the Send-on-WhatsApp brand colour. */
+function WhatsAppIcon({ className }: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className={className}
+            aria-hidden
+        >
+            <path d="M19.05 4.91A9.82 9.82 0 0 0 12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.74.46 3.45 1.32 4.95L2 22l5.32-1.4a9.9 9.9 0 0 0 4.72 1.2h.01c5.46 0 9.91-4.45 9.91-9.91a9.84 9.84 0 0 0-2.91-7zm-7.01 15.24h-.01a8.23 8.23 0 0 1-4.2-1.15l-.3-.18-3.16.83.84-3.08-.2-.32a8.21 8.21 0 0 1-1.26-4.36c0-4.54 3.7-8.24 8.24-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 0 1 2.41 5.82c0 4.54-3.7 8.24-8.24 8.24zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.12s-.64.81-.79.97c-.14.16-.29.18-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.49-.41-.42-.56-.43h-.48c-.16 0-.43.06-.66.31-.23.25-.86.84-.86 2.05 0 1.21.88 2.38 1 2.55.12.16 1.74 2.66 4.21 3.73.59.25 1.05.4 1.4.51.59.19 1.13.16 1.55.1.47-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.11-.23-.18-.48-.31z" />
+        </svg>
+    );
+}
+
+function formatReportDate(iso: string): string {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return (
+        d.toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+        }) +
+        " at " +
+        d.toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        })
+    );
+}
+
+function formatSize(bytes: number | null): string {
+    if (!bytes || bytes <= 0) return "—";
+    return `${Math.round(bytes / 1024)} KB`;
+}
+
+function dateStampForFilename(iso: string): string {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+    return d.toISOString().slice(0, 10);
+}
+
+export function HealthReportsTab({ patientId: overridePatientId }: HealthReportsTabProps = {}) {
+    const { user } = useAuth();
+    const { socket } = useWebSocket();
+
+    // Resolve the calling patient's id if the parent didn't pass one.
+    // PatientPortal renders this tab generically — every other tab here
+    // does the same /api/user/me dance internally (see PatientDiet.tsx).
+    const [resolvedPatientId, setResolvedPatientId] = useState<string | null>(
+        overridePatientId ?? null,
+    );
+    useEffect(() => {
+        if (overridePatientId) {
+            setResolvedPatientId(overridePatientId);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const { data } = await apiClient.get<UserMe>("/api/user/me");
+                if (!cancelled) setResolvedPatientId(data?.patient?.id || user?.id || null);
+            } catch {
+                if (!cancelled) setResolvedPatientId(user?.id || null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [overridePatientId, user?.id]);
+
+    const patientId = resolvedPatientId;
+
+    // Reports list query — polled every 30s as a low-cost fallback in case
+    // the socket misses the 'health_report_ready' event.
+    const { data, isLoading, refetch, isFetching } = useQuery({
+        queryKey: ["health-reports", patientId],
+        queryFn: () => {
+            if (!patientId) return Promise.resolve([]);
+            return healthReportService.getPatientReports(patientId);
+        },
+        enabled: !!patientId,
+        refetchInterval: 30_000,
+    });
+
+    const reports: HealthReportListItem[] = useMemo(() => data ?? [], [data]);
+
+    // Realtime: backend emits 'health_report_ready' to the patient's user
+    // room when a new consultation report is generated by the doctor.
+    // Feature 4 adds 'progress_report_ready' for end-of-phase summaries —
+    // both events refresh the list; the toast wording differs.
+    useEffect(() => {
+        if (!socket) return;
+        const onConsultationReady = () => {
+            toast.success("Your new health report is ready!");
+            refetch();
+        };
+        const onProgressReady = (payload: { phaseName?: string | null }) => {
+            const label = payload?.phaseName ? `${payload.phaseName} ` : "";
+            toast.success(`Phase complete! Your ${label}progress report is ready.`);
+            refetch();
+        };
+        socket.on("health_report_ready", onConsultationReady);
+        socket.on("progress_report_ready", onProgressReady);
+        return () => {
+            socket.off("health_report_ready", onConsultationReady);
+            socket.off("progress_report_ready", onProgressReady);
+        };
+    }, [socket, refetch]);
+
+    const [actionId, setActionId] = useState<string | null>(null);
+
+    async function handleView(reportId: string) {
+        setActionId(reportId + ":view");
+        try {
+            const blob = await healthReportService.downloadBlob(reportId);
+            const url = window.URL.createObjectURL(
+                new Blob([blob], { type: "application/pdf" }),
+            );
+            window.open(url, "_blank", "noopener,noreferrer");
+            // Don't revoke immediately — the new tab needs the URL alive while
+            // it loads. Revoke after a short grace window.
+            setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to open report");
+        } finally {
+            setActionId(null);
+        }
+    }
+
+    async function handleDownload(reportId: string, createdAt: string) {
+        setActionId(reportId + ":download");
+        try {
+            const blob = await healthReportService.downloadBlob(reportId);
+            const url = window.URL.createObjectURL(
+                new Blob([blob], { type: "application/pdf" }),
+            );
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `AlShifa-Health-Report-${dateStampForFilename(createdAt)}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to download report");
+        } finally {
+            setActionId(null);
+        }
+    }
+
+    if (!patientId) {
+        return (
+            <div className="py-10 text-center text-sm text-muted-foreground">
+                <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin" />
+                Loading your account…
+            </div>
+        );
+    }
+
+    if (isLoading) {
+        return (
+            <div className="space-y-3">
+                {Array.from({ length: 2 }).map((_, i) => (
+                    <Card key={i}>
+                        <CardContent className="p-4">
+                            <div className="flex items-start gap-3">
+                                <Skeleton className="w-10 h-10 rounded-lg" />
+                                <div className="flex-1 space-y-2">
+                                    <Skeleton className="h-4 w-2/3" />
+                                    <Skeleton className="h-3 w-1/2" />
+                                    <Skeleton className="h-3 w-1/3" />
+                                </div>
+                                <Skeleton className="h-8 w-24" />
+                            </div>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+        );
+    }
+
+    if (reports.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+                <FileText className="w-12 h-12 text-primary mb-4" aria-hidden />
+                <h3 className="text-base font-semibold text-foreground">No health reports yet</h3>
+                <p className="mt-1 text-sm text-muted-foreground max-w-md">
+                    Your doctor will generate a report after your consultation.
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-3">
+            {isFetching && !isLoading && (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Refreshing…
+                </p>
+            )}
+            {reports.map((r) => {
+                const isNew = !r.viewedByPatient;
+                const viewBusy = actionId === r.id + ":view";
+                const dlBusy   = actionId === r.id + ":download";
+                const isProgress = r.reportType === "PHASE_PROGRESS";
+                const progressData = isProgress ? (r.reportData as PhaseProgressReportData | null) : null;
+                const stats = progressData?.stats ?? null;
+
+                return (
+                    <Card key={r.id} className="border-border/60">
+                        <CardContent className="p-4">
+                            <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                                    {isProgress ? (
+                                        <TrendingUp className="w-5 h-5 text-primary" aria-hidden />
+                                    ) : (
+                                        <FileText className="w-5 h-5 text-primary" aria-hidden />
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-foreground">
+                                                {isProgress ? "Phase Progress Report" : "Health Report"}
+                                            </h4>
+                                            {isProgress && progressData?.phaseName && (
+                                                <p className="text-xs text-primary font-medium mt-0.5">{progressData.phaseName}</p>
+                                            )}
+                                        </div>
+                                        {isNew && (
+                                            <Badge className="bg-primary text-primary-foreground hover:bg-primary uppercase text-[10px] tracking-wider">
+                                                New
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    {r.doctorName && (
+                                        <p className="text-sm text-foreground mt-0.5">Dr. {r.doctorName}</p>
+                                    )}
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                        {[r.branchName, formatReportDate(r.createdAt)].filter(Boolean).join(" · ")}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatSize(r.pdfSizeBytes)}</p>
+
+                                    {isProgress && stats && (
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            {stats.painReduction !== null && (
+                                                <span className="text-xs bg-green-50 text-green-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                                    Pain ↓{stats.painReduction}%
+                                                </span>
+                                            )}
+                                            {stats.tasksTotal > 0 && (
+                                                <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                                    Tasks {stats.tasksDone}/{stats.tasksTotal}
+                                                </span>
+                                            )}
+                                            {stats.dietAdherencePercent !== null && (
+                                                <span className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                                    Diet {stats.dietAdherencePercent}%
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {r.sentViaWhatsApp && (
+                                        <p className="flex items-center gap-1 text-[11px] mt-1.5" style={{ color: "#25D366" }}>
+                                            <WhatsAppIcon className="w-3.5 h-3.5" />
+                                            Sent via WhatsApp
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleView(r.id)}
+                                        disabled={viewBusy || dlBusy}
+                                    >
+                                        {viewBusy ? (
+                                            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                                        ) : (
+                                            <ExternalLink className="w-4 h-4 mr-1.5" />
+                                        )}
+                                        View
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        onClick={() => handleDownload(r.id, r.createdAt)}
+                                        disabled={viewBusy || dlBusy}
+                                        className="bg-primary hover:bg-primary/90"
+                                    >
+                                        {dlBusy ? (
+                                            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                                        ) : (
+                                            <Download className="w-4 h-4 mr-1.5" />
+                                        )}
+                                        Download
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                );
+            })}
+        </div>
+    );
+}
+
+export default HealthReportsTab;

@@ -41,7 +41,7 @@ interface PatientRow {
   gender: string | null;
   branchId: string | null;
   branchName: string | null;
-  therapyType: string | null;
+  therapyTypes: string[];
 }
 
 export default function PatientsPage() {
@@ -202,11 +202,13 @@ export default function PatientsPage() {
                                   </span>
                                 )}
                                 {p.age != null && <span>· {p.age} yrs</span>}
-                                {p.therapyType && (
-                                  <Badge variant="outline" className="text-[10px] py-0 h-4 ml-1">
-                                    {p.therapyType}
-                                  </Badge>
-                                )}
+                                {Array.isArray(p.therapyTypes) && p.therapyTypes.length > 0 &&
+                                  p.therapyTypes.map((t) => (
+                                    <Badge key={t} variant="outline" className="text-[10px] py-0 h-4 ml-1">
+                                      {t}
+                                    </Badge>
+                                  ))
+                                }
                               </div>
                             </div>
                           </Link>

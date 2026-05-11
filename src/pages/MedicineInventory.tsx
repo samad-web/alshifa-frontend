@@ -5,17 +5,22 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import {
     Plus, Search, Edit2, Upload, ChevronLeft, ChevronRight,
-    Filter, X, Youtube, AlertTriangle, ArrowUpDown,
+    Filter, X, Youtube, AlertTriangle, ArrowUpDown, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MedicineModal } from "@/components/pharmacy/MedicineModal";
 import { MedicineImportModal } from "@/components/pharmacy/MedicineImportModal";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useAuth } from "@/hooks/useAuth";
 
 type Availability = "ALL" | "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
 
@@ -151,6 +156,35 @@ export default function MedicineInventory() {
     const handleEdit = (med: Medicine) => {
         setSelectedMedicine(med);
         setIsModalOpen(true);
+    };
+
+    // Delete-medicine flow — admin-only on the backend, gated through an
+    // AlertDialog confirmation so a stray click can't wipe a row.
+    const { role } = useAuth();
+    const canDelete = role === "ADMIN" || role === "ADMIN_DOCTOR";
+    const [medicineToDelete, setMedicineToDelete] = useState<Medicine | null>(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const confirmDeleteMedicine = async () => {
+        if (!medicineToDelete) return;
+        setDeleting(true);
+        try {
+            await apiClient.delete(`/api/pharmacy/medicines/${medicineToDelete.id}`);
+            toast.success(`${medicineToDelete.name} deleted`);
+            setMedicineToDelete(null);
+            await fetchMedicines();
+        } catch (err: unknown) {
+            // Backend wraps the in-use case as { error: { code: 'MEDICINE_IN_USE', message } }
+            // and surfaces it as a 409 — show that copy verbatim.
+            if (err instanceof ApiClientError && err.status === 409) {
+                const payload = err.payload as { error?: { message?: string } } | undefined;
+                toast.error(payload?.error?.message || "Cannot delete: medicine is in use.");
+            } else {
+                toast.error(err instanceof Error ? err.message : "Failed to delete medicine");
+            }
+        } finally {
+            setDeleting(false);
+        }
     };
 
     const clearFilters = () => {
@@ -349,7 +383,12 @@ export default function MedicineInventory() {
                         ) : medicines.length === 0 ? (
                             <div className="py-12 text-center text-muted-foreground">No medicines match the current filters.</div>
                         ) : medicines.map((med) => (
-                            <MedicineCard key={med.id} med={med} onEdit={() => handleEdit(med)} />
+                            <MedicineCard
+                                key={med.id}
+                                med={med}
+                                onEdit={() => handleEdit(med)}
+                                onDelete={canDelete ? () => setMedicineToDelete(med) : undefined}
+                            />
                         ))}
                     </div>
 
@@ -377,7 +416,12 @@ export default function MedicineInventory() {
                                         <td colSpan={7} className="py-12 text-center text-muted-foreground">No medicines match the current filters.</td>
                                     </tr>
                                 ) : medicines.map((med) => (
-                                    <MedicineRow key={med.id} med={med} onEdit={() => handleEdit(med)} />
+                                    <MedicineRow
+                                        key={med.id}
+                                        med={med}
+                                        onEdit={() => handleEdit(med)}
+                                        onDelete={canDelete ? () => setMedicineToDelete(med) : undefined}
+                                    />
                                 ))}
                             </tbody>
                         </table>
@@ -419,6 +463,31 @@ export default function MedicineInventory() {
                 onClose={() => setIsImportOpen(false)}
                 onSuccess={fetchMedicines}
             />
+
+            <AlertDialog
+                open={!!medicineToDelete}
+                onOpenChange={(open) => { if (!open) setMedicineToDelete(null); }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Medicine</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Are you sure you want to delete "{medicineToDelete?.name}"? This cannot be undone.
+                            Medicines with active prescriptions cannot be deleted — discontinue them first.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-red-600 hover:bg-red-700"
+                            disabled={deleting}
+                            onClick={(e) => { e.preventDefault(); confirmDeleteMedicine(); }}
+                        >
+                            {deleting ? "Deleting…" : "Delete"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </AppLayout>
     );
 }
@@ -504,7 +573,7 @@ function StockBadge({ status, count }: { status?: string; count: number }) {
     );
 }
 
-function MedicineRow({ med, onEdit }: { med: Medicine; onEdit: () => void }) {
+function MedicineRow({ med, onEdit, onDelete }: { med: Medicine; onEdit: () => void; onDelete?: () => void }) {
     return (
         <tr className="group hover:bg-secondary/50 transition">
             <td className="py-4">
@@ -552,13 +621,18 @@ function MedicineRow({ med, onEdit }: { med: Medicine; onEdit: () => void }) {
                     <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary" title="Edit Medicine" onClick={onEdit}>
                         <Edit2 className="h-4 w-4" />
                     </Button>
+                    {onDelete && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-600 hover:bg-red-50" title="Delete Medicine" onClick={onDelete}>
+                            <Trash2 className="h-4 w-4" />
+                        </Button>
+                    )}
                 </div>
             </td>
         </tr>
     );
 }
 
-function MedicineCard({ med, onEdit }: { med: Medicine; onEdit: () => void }) {
+function MedicineCard({ med, onEdit, onDelete }: { med: Medicine; onEdit: () => void; onDelete?: () => void }) {
     return (
         <div className="p-4 rounded-xl border border-border/50 bg-card space-y-4">
             <div className="flex justify-between items-start">
@@ -596,6 +670,11 @@ function MedicineCard({ med, onEdit }: { med: Medicine; onEdit: () => void }) {
                 <Button variant="outline" size="sm" className="h-8 gap-2" onClick={onEdit}>
                     <Edit2 className="h-3.5 w-3.5" /> Edit
                 </Button>
+                {onDelete && (
+                    <Button variant="outline" size="sm" className="h-8 gap-2 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700" onClick={onDelete}>
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </Button>
+                )}
             </div>
         </div>
     );
