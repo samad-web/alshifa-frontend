@@ -750,12 +750,22 @@ function DispenseHistorySection() {
                                 <th className="pb-3 pt-2 font-semibold">Patient</th>
                                 <th className="pb-3 pt-2 font-semibold">Items</th>
                                 <th className="pb-3 pt-2 font-semibold text-center">Total</th>
+                                <th className="pb-3 pt-2 font-semibold">Prescribed By</th>
                                 <th className="pb-3 pt-2 font-semibold">Dispensed By</th>
                                 <th className="pb-3 pt-2 font-semibold">Date &amp; Time</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
-                            {rows.map((d) => (
+                            {rows.map((d) => {
+                                // Prescribing clinician — sourced from the linked Rx
+                                // when the dispense was tied to one; falls back to
+                                // an em-dash for free-counter dispenses.
+                                const prescriber =
+                                    d.prescription?.doctor?.fullName
+                                    || d.prescription?.therapist?.fullName
+                                    || null;
+                                const prescriberPrefix = d.prescription?.doctor ? "Dr. " : "";
+                                return (
                                 <tr key={d.id} className="hover:bg-secondary/40 transition">
                                     <td className="py-3">
                                         <div className="font-medium">{d.patient?.fullName || "—"}</div>
@@ -774,10 +784,14 @@ function DispenseHistorySection() {
                                         </div>
                                     </td>
                                     <td className="py-3 text-center font-semibold text-accent">₹{d.totalAmount ?? "—"}</td>
+                                    <td className="py-3 text-xs text-muted-foreground">
+                                        {prescriber ? `${prescriberPrefix}${prescriber}` : "—"}
+                                    </td>
                                     <td className="py-3 text-xs text-muted-foreground">{d.dispenser?.email?.split("@")[0] || "—"}</td>
                                     <td className="py-3 text-xs">{d.createdAt ? formatDate(d.createdAt) : "—"}</td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
