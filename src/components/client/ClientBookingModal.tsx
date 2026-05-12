@@ -48,6 +48,12 @@ export function ClientBookingModal({
     const [triageSessionId, setTriageSessionId] = useState<string | null>(null);
     const [triageResult, setTriageResult] = useState<any>(null);
     const [suggestedSlot, setSuggestedSlot] = useState<string | null>(null);
+    // Local DD/MM/YYYY draft for the date input. We can't derive the
+    // displayed string from formData.date alone because partial values
+    // ("1", "12/0", …) wouldn't survive a render cycle — formData.date
+    // only gets set when a complete date is typed. Holding the draft
+    // locally lets DateInput render every keystroke immediately.
+    const [dateDraft, setDateDraft] = useState("");
     // When true the patient has tapped "Change branch" — we expand the
     // full branch grid. Default false so the Branch step shows only the
     // registered branch with a "Change branch" affordance below it.
@@ -92,6 +98,7 @@ export function ClientBookingModal({
             });
             setSuggestedSlot(null);
             setChangingBranch(false);
+            setDateDraft("");
         }
     }, [isOpen, initialBranchId, profile?.branchId]);
 
@@ -501,28 +508,35 @@ export function ClientBookingModal({
                                                     return;
                                                 }
                                                 setFormData({ ...formData, doctorId: staff.id });
-                                                // Real-time availability sniff. Best-effort — failure
-                                                // here just means no toast, never blocks the booking.
-                                                const dateParam = (formData.date ?? new Date()).toISOString().slice(0, 10);
-                                                apiClient
-                                                    .get<{ hasAvailableSlots: boolean; nextAvailable: string | null }>(
-                                                        '/api/availability/check',
-                                                        { doctorId: staff.id, date: dateParam },
-                                                    )
-                                                    .then(({ data }) => {
-                                                        if (!data.hasAvailableSlots) {
-                                                            const next = data.nextAvailable
-                                                                ? new Date(data.nextAvailable).toLocaleDateString()
-                                                                : 'No upcoming slots found';
-                                                            toast.error(
-                                                                `Dr. ${staff.fullName || 'Selected'} is not available on this date. Next available: ${next}`,
-                                                            );
-                                                            // Wipe any stale slots so the time picker doesn't suggest
-                                                            // a slot the patient can't actually book.
-                                                            setAvailableSlots([]);
-                                                        }
-                                                    })
-                                                    .catch(() => { /* silent — backend will surface real errors at slot fetch */ });
+                                                // Real-time availability sniff. Only fires once the
+                                                // patient has actually picked a date — previously this
+                                                // fell back to "today" when formData.date was empty,
+                                                // which surfaced a misleading "not available on this
+                                                // date" toast the instant a doctor was tapped on a
+                                                // first visit (no date yet). Best-effort either way:
+                                                // a failure here never blocks the booking.
+                                                if (formData.date) {
+                                                    const dateParam = formData.date.toISOString().slice(0, 10);
+                                                    apiClient
+                                                        .get<{ hasAvailableSlots: boolean; nextAvailable: string | null }>(
+                                                            '/api/availability/check',
+                                                            { doctorId: staff.id, date: dateParam },
+                                                        )
+                                                        .then(({ data }) => {
+                                                            if (!data.hasAvailableSlots) {
+                                                                const next = data.nextAvailable
+                                                                    ? new Date(data.nextAvailable).toLocaleDateString()
+                                                                    : 'No upcoming slots found';
+                                                                toast.error(
+                                                                    `Dr. ${staff.fullName || 'Selected'} is not available on this date. Next available: ${next}`,
+                                                                );
+                                                                // Wipe any stale slots so the time picker doesn't suggest
+                                                                // a slot the patient can't actually book.
+                                                                setAvailableSlots([]);
+                                                            }
+                                                        })
+                                                        .catch(() => { /* silent — backend will surface real errors at slot fetch */ });
+                                                }
                                                 nextStep();
                                             }}
                                             className={cn(
@@ -566,12 +580,19 @@ export function ClientBookingModal({
                                     formData.date). */}
                                 <div className="w-full max-w-xs mb-5">
                                     <DateInput
-                                        value={formData.date ? toDDMMYYYY(formData.date) : ""}
+                                        value={dateDraft}
                                         onChange={(v) => {
+                                            // Always render whatever the patient just typed —
+                                            // DateInput is fully controlled, so the draft has to
+                                            // live in this component for partial values to survive.
+                                            setDateDraft(v);
                                             if (!v) {
                                                 setFormData({ ...formData, date: undefined, slot: "" });
                                                 return;
                                             }
+                                            // Only commit a parsed Date upstream once the full
+                                            // DD/MM/YYYY pattern is present; partial entries leave
+                                            // formData.date untouched.
                                             const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v);
                                             if (!m) return;
                                             const [, dd, mm, yyyy] = m;
