@@ -101,9 +101,14 @@ export const DateInput = forwardRef<HTMLInputElement, DateInputProps>(function D
   const inputId = id ?? name ?? (label ? `date-${label.replace(/\s+/g, "-").toLowerCase()}` : undefined);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let v = e.target.value.replace(/\D/g, "");
-    if (v.length >= 3) v = v.slice(0, 2) + "/" + v.slice(2);
-    if (v.length >= 6) v = v.slice(0, 5) + "/" + v.slice(5);
+    // Strip non-digit/non-slash characters but preserve existing slashes so
+    // the cursor doesn't jump to the end on every keystroke. Auto-insert a
+    // slash exactly once after DD and once after MM. The previous version
+    // re-derived the entire string from digits on every change, which made
+    // editing in the middle feel unresponsive on some keyboards.
+    let v = e.target.value.replace(/[^\d/]/g, "");
+    if (v.length === 2 && !v.includes("/")) v = v + "/";
+    if (v.length === 5 && v.split("/").length === 2) v = v + "/";
     v = v.slice(0, 10);
     onChange(v);
     if (blurError) setBlurError(null);

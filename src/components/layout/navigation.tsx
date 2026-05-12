@@ -47,7 +47,6 @@ import {
   Zap,
   AlertTriangle,
   Pill,
-  IndianRupee,
   LucideIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -254,14 +253,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
     case "ADMIN_DOCTOR":
       return [
         { path: "/doctor-admin", label: "Dashboard", icon: Stethoscope },
-        {
-          label: "Appointments",
-          icon: CalendarDays,
-          items: [
-            { path: "/appointments", label: "Appointments", icon: CalendarDays },
-            { path: "/admin/live-queue", label: "Live Queue", icon: Activity },
-          ],
-        },
+        { path: "/appointments", label: "Appointments", icon: CalendarDays },
         {
           label: "Clinical",
           icon: FilePlus2,
@@ -339,7 +331,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/reports", label: "Reports", icon: BarChart3 },
             { path: "/care-gaps", label: "Care Gaps", icon: AlertTriangle },
             { path: "/medication-adherence", label: "Medication Adherence", icon: Pill },
-            { path: "/revenue", label: "Revenue", icon: IndianRupee },
           ],
         },
       ];
