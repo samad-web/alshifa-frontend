@@ -1271,6 +1271,7 @@ function CareTeamMemberRow({
   member: CareTeamMember;
   emphasized: boolean;
 }) {
+  const navigate = useNavigate();
   const initials = (member.doctor.fullName || "Dr")
     .trim()
     .split(/\s+/)
@@ -1322,6 +1323,20 @@ function CareTeamMemberRow({
         <p className="text-xs text-muted-foreground truncate">
           {member.doctor.specialization || member.doctor.qualification || "Specialisation on file"}
         </p>
+        {/* Chat shortcut — /chat (patient view) auto-resolves to the
+            consultation doctor and opens the thread, so no partnerId
+            is needed. */}
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => navigate("/chat")}
+            aria-label={`Chat with Dr. ${member.doctor.fullName ?? "doctor"}`}
+            className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 hover:bg-primary/10 px-2 py-1 rounded-md transition-colors"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            Chat
+          </button>
+        </div>
       </div>
     </div>
   );
