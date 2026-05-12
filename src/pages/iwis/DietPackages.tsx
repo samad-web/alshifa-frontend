@@ -87,7 +87,14 @@ const initialForm = {
     durationDays: 7, notes: "",
 };
 
-export default function DietPackagesPage() {
+interface DietPackagesPageProps {
+    /** Render without AppLayout + outer PageHeader chrome. Used when the
+     *  packages list is embedded as a tab inside the combined Diet Plans &
+     *  Packages page. Defaults to false → standalone render. */
+    embedded?: boolean;
+}
+
+export default function DietPackagesPage({ embedded = false }: DietPackagesPageProps = {}) {
     const { toast } = useToast();
     const { user, role } = useAuth();
     // Role matrix:
@@ -371,9 +378,13 @@ export default function DietPackagesPage() {
 
     const pendingCount = useMemo(() => packages.filter((p) => p.status === "PENDING").length, [packages]);
 
-    return (
-        <AppLayout>
-            <div className="container max-w-6xl mx-auto px-4 py-8 space-y-8">
+    const bodyWrapperClass = embedded
+        ? "space-y-8"
+        : "container max-w-6xl mx-auto px-4 py-8 space-y-8";
+
+    const inner = (
+        <div className={bodyWrapperClass}>
+                {!embedded && (
                 <PageHeader
                     title="Diet Packages"
                     subtitle="Reusable Pathya-Apathya templates. Create and assign to patients directly — no approval needed."
@@ -384,6 +395,14 @@ export default function DietPackagesPage() {
                         </Button>
                     )}
                 </PageHeader>
+                )}
+                {embedded && isCreator && (
+                    <div className="flex justify-end">
+                        <Button onClick={openCreate}>
+                            <Plus className="w-4 h-4 mr-2" /> New Package
+                        </Button>
+                    </div>
+                )}
 
                 {/* Approver helper card — makes the review intent explicit */}
                 {isApprover && tab === "PENDING" && (
@@ -943,7 +962,9 @@ export default function DietPackagesPage() {
                     </DialogContent>
                 </Dialog>
                 {confirmDialog}
-            </div>
-        </AppLayout>
+        </div>
     );
+
+    if (embedded) return inner;
+    return <AppLayout>{inner}</AppLayout>;
 }

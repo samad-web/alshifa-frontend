@@ -10,8 +10,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { Plus, Salad, Loader2, Utensils, CheckCircle2, Package, AlertTriangle, Info, ChevronDown } from "lucide-react";
+import DietPackagesPage from "@/pages/iwis/DietPackages";
 import { iwisApi, type DietPrescription, type DoshaType, type DietCategory, type MealTime, type DietMealPlan, type DietPackage, type DietAssignContext } from "@/services/iwis.service";
 import { HoverActionCard } from "@/components/common/HoverActionCard";
 import { Switch } from "@/components/ui/switch";
@@ -55,7 +57,19 @@ type MealRow = {
 const parseFoods = (s: string) =>
     s.split(/[,\n]/).map((f) => f.trim()).filter(Boolean).map((name) => ({ name }));
 
-export default function DietPrescriptionsPage() {
+interface DietPrescriptionsInnerProps {
+    /** Render without AppLayout + outer PageHeader chrome. Used when the
+     *  plans list is embedded as a tab inside the combined Diet Plans &
+     *  Packages page. Defaults to false → standalone render. */
+    embedded?: boolean;
+}
+
+/**
+ * Diet plans (prescriptions) inner content. The default export at the
+ * bottom of the file wraps this in a Tabs shell so /diet-prescriptions
+ * shows both Diet Plans and Diet Packages.
+ */
+function DietPrescriptionsInner({ embedded = false }: DietPrescriptionsInnerProps = {}) {
     const { toast } = useToast();
     const { user, role } = useAuth();
     const { branchIdParam } = useBranchScope();
@@ -312,15 +326,30 @@ export default function DietPrescriptionsPage() {
         }
     };
 
-    return (
-        <AppLayout>
-            <div className="container max-w-6xl mx-auto px-4 py-8 space-y-8">
+    const bodyWrapperClass = embedded
+        ? "space-y-8"
+        : "container max-w-6xl mx-auto px-4 py-8 space-y-8";
+
+    const headerActions = (
+        <div className="flex gap-2">
+            <Button onClick={() => setDialogOpen(true)} disabled={!patientId}>
+                <Plus className="w-4 h-4 mr-2" /> New Diet Plan
+            </Button>
+        </div>
+    );
+
+    const inner = (
+        <div className={bodyWrapperClass}>
+                {!embedded && (
                 <PageHeader title="Diet Prescriptions" subtitle="Pathya-Apathya — structured meal-level guidance per Dosha target">
-                    <div className="flex gap-2">
-                        <Link to="/diet-packages"><Button variant="outline"><Package className="w-4 h-4 mr-2" /> Manage Packages</Button></Link>
-                        <Button onClick={() => setDialogOpen(true)} disabled={!patientId}><Plus className="w-4 h-4 mr-2" /> New Diet Plan</Button>
-                    </div>
+                    {headerActions}
                 </PageHeader>
+                )}
+                {embedded && (
+                    <div className="flex justify-end">
+                        {headerActions}
+                    </div>
+                )}
 
                 <div className="flex items-center gap-3 flex-wrap">
                     <div className="w-[320px]">
@@ -763,6 +792,44 @@ export default function DietPrescriptionsPage() {
                         </form>
                     </DialogContent>
                 </Dialog>
+        </div>
+    );
+
+    if (embedded) return inner;
+    return <AppLayout>{inner}</AppLayout>;
+}
+
+/**
+ * Default export — /diet-prescriptions page. Wraps Diet Plans (this file's
+ * inner component) and Diet Packages in shadcn Tabs so the doctor can
+ * switch between them without leaving the page. The /diet-packages route
+ * still exists for backwards compatibility and renders the standalone
+ * page — but the nav now points only to this combined view.
+ */
+export default function DietPlansAndPackagesPage() {
+    return (
+        <AppLayout>
+            <div className="container max-w-6xl mx-auto px-4 py-8 space-y-8">
+                <PageHeader
+                    title="Diet Plans & Packages"
+                    subtitle="Patient-specific Pathya-Apathya plans and reusable package templates."
+                />
+                <Tabs defaultValue="plans" className="space-y-6">
+                    <TabsList className="grid w-full max-w-md grid-cols-2">
+                        <TabsTrigger value="plans" className="gap-1.5">
+                            <Salad className="w-4 h-4" /> Diet Plans
+                        </TabsTrigger>
+                        <TabsTrigger value="packages" className="gap-1.5">
+                            <Package className="w-4 h-4" /> Diet Packages
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="plans" className="mt-0">
+                        <DietPrescriptionsInner embedded />
+                    </TabsContent>
+                    <TabsContent value="packages" className="mt-0">
+                        <DietPackagesPage embedded />
+                    </TabsContent>
+                </Tabs>
             </div>
         </AppLayout>
     );
