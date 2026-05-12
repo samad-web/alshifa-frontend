@@ -374,10 +374,14 @@ function CheckInModal({
   }, [open, initialStep]);
 
   const submit = async () => {
-    if (!mood || !sleep) return;
+    if (!sleep) return;
+    // When opened from "+ Add Pain Point" (initialStep === 2) the patient
+    // never saw the mood picker — default to OKAY so the backend (which
+    // requires a mood) still accepts the check-in.
+    const effectiveMood = mood ?? "OKAY";
     setSubmitting(true);
     try {
-      await onSubmit({ mood: mood as never, painRegions, sleepQuality: sleep as never });
+      await onSubmit({ mood: effectiveMood as never, painRegions, sleepQuality: sleep as never });
       toast.success("+20 Zen Points · Check-in saved");
       close();
     } catch (err) {
@@ -491,12 +495,21 @@ function CheckInModal({
             <Button
               size="sm"
               onClick={() => setStep((step + 1) as 1 | 2 | 3)}
-              disabled={step === 1 && !mood}
+              disabled={(step === 1 && !mood) || (step === 2 && painRegions.length === 0)}
             >
               Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           ) : (
-            <Button size="sm" onClick={submit} disabled={!mood || !sleep || submitting}>
+            // Mood is only required when the patient walked through Step 1.
+            // When the modal is opened directly from "+ Add Pain Point"
+            // (initialStep === 2), they never saw the mood picker — keeping
+            // mood in the disabled gate would leave Submit permanently
+            // disabled even after pain regions + sleep were entered.
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={(initialStep === 1 && !mood) || !sleep || submitting}
+            >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
               Submit
             </Button>

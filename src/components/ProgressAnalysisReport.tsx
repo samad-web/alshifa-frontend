@@ -114,37 +114,53 @@ export function ProgressAnalysisReport({ data }: ProgressReportProps) {
                         <span className="text-xs text-muted-foreground ml-auto">{formatDate(data.currentSession.metrics.date)}</span>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4">
-                        <MetricCard label="Pain Level" value={data.currentSession.metrics.pain} variant="highlight" />
-                        <MetricCard label="Mobility" value={data.currentSession.metrics.mobility} variant="highlight" />
-                        <MetricCard
-                            label="Med. Adherence"
-                            value={`${data.adherence?.overallRate || 0}%`}
-                            variant={(data.adherence?.overallRate || 0) < 70 ? "risk" : "highlight"}
-                        />
-                    </div>
-
-                    {data.adherence && (
-                        <div className="p-4 bg-primary/5 rounded-xl border border-primary/20">
-                            <p className="text-xs font-bold text-primary uppercase tracking-widest mb-3">Medication Compliance (Last 30 Days)</p>
-                            <div className="space-y-2">
-                                <div className="flex justify-between text-xs">
-                                    <span className="text-muted-foreground text-sm">Taken {data.adherence.totalTaken} of {data.adherence.totalExpected} doses</span>
-                                    <span className="font-bold">{data.adherence.overallRate}%</span>
-                                </div>
-                                <div className="w-full bg-secondary/30 h-2 rounded-full overflow-hidden">
-                                    <div
-                                        className={cn(
-                                            "h-full transition-all duration-500",
-                                            data.adherence.overallRate > 80 ? "bg-wellness" :
-                                                data.adherence.overallRate > 50 ? "bg-attention" : "bg-risk"
-                                        )}
-                                        style={{ width: `${data.adherence.overallRate}%` }}
+                    {(() => {
+                        // Guard against the "no medications assigned" case — backend
+                        // sometimes returns overallRate=100 with totalExpected=0 which
+                        // misleadingly renders a full progress bar. Treat zero-expected
+                        // as 0% regardless of the backend's reported rate.
+                        const noMeds = !data.adherence || (data.adherence.totalExpected ?? 0) === 0;
+                        const safeRate = noMeds ? 0 : (data.adherence?.overallRate ?? 0);
+                        return (
+                            <>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <MetricCard label="Pain Level" value={data.currentSession.metrics.pain} variant="highlight" />
+                                    <MetricCard label="Mobility" value={data.currentSession.metrics.mobility} variant="highlight" />
+                                    <MetricCard
+                                        label="Med. Adherence"
+                                        value={noMeds ? "—" : `${safeRate}%`}
+                                        variant={!noMeds && safeRate < 70 ? "risk" : "highlight"}
                                     />
                                 </div>
-                            </div>
-                        </div>
-                    )}
+
+                                {data.adherence && (
+                                    <div className="p-4 bg-primary/5 rounded-xl border border-primary/20">
+                                        <p className="text-xs font-bold text-primary uppercase tracking-widest mb-3">Medication Compliance (Last 30 Days)</p>
+                                        {noMeds ? (
+                                            <p className="text-sm text-muted-foreground italic">No medications assigned</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between text-xs">
+                                                    <span className="text-muted-foreground text-sm">Taken {data.adherence.totalTaken} of {data.adherence.totalExpected} doses</span>
+                                                    <span className="font-bold">{safeRate}%</span>
+                                                </div>
+                                                <div className="w-full bg-secondary/30 h-2 rounded-full overflow-hidden">
+                                                    <div
+                                                        className={cn(
+                                                            "h-full transition-all duration-500",
+                                                            safeRate > 80 ? "bg-wellness" :
+                                                                safeRate > 50 ? "bg-attention" : "bg-risk"
+                                                        )}
+                                                        style={{ width: `${safeRate}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
 
                     <Card className="p-4 bg-wellness/5 border-wellness/20">
                         <p className="text-xs font-bold text-wellness uppercase tracking-widest mb-2">Session Clinical Notes</p>
