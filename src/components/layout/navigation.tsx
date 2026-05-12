@@ -254,8 +254,14 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
     case "ADMIN_DOCTOR":
       return [
         { path: "/doctor-admin", label: "Dashboard", icon: Stethoscope },
-        { path: "/appointments", label: "Appointments", icon: CalendarDays },
-        { path: "/admin/live-queue", label: "Live Queue", icon: Activity },
+        {
+          label: "Appointments",
+          icon: CalendarDays,
+          items: [
+            { path: "/appointments", label: "Appointments", icon: CalendarDays },
+            { path: "/admin/live-queue", label: "Live Queue", icon: Activity },
+          ],
+        },
         {
           label: "Clinical",
           icon: FilePlus2,
@@ -334,8 +340,6 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/care-gaps", label: "Care Gaps", icon: AlertTriangle },
             { path: "/medication-adherence", label: "Medication Adherence", icon: Pill },
             { path: "/revenue", label: "Revenue", icon: IndianRupee },
-            // Patient + team chats are unified at /chat (in-page tab strip).
-            { path: "/chat", label: "Chat", icon: MessageSquare },
           ],
         },
       ];
@@ -475,6 +479,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         { path: "/patient/coach", label: "Health Coach", icon: MessageSquareHeart },
         { path: "/patient-portal", label: "My Records", icon: ClipboardList },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
+        { path: "/triage", label: "Triage", icon: ClipboardList },
         {
           label: "Health",
           icon: Heart,
