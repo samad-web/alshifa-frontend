@@ -14,29 +14,16 @@ interface JourneyPhotoUploadProps {
   onClose: () => void;
   /** Patient.id — backend keys ClinicalPhoto on Patient.id, not User.id. */
   patientId: string;
-  /** Journey/phase context. Required for journey-progress uploads (the
-   *  patient flow this component was built for); optional for the
-   *  Phase B1 therapy-session capture, which has no journey context. */
-  journeyId?: string;
-  phaseId?: string;
-  phaseName?: string;
-  /** Phase B1 — when provided, the upload is tagged to this in-progress
-   *  TherapySession. The backend validates ownership + status before
-   *  accepting the FK. */
-  therapySessionId?: string;
-  /** Title shown in the dialog. Defaults to the journey-progress phrasing
-   *  when phaseName is provided, else a generic clinician phrasing. */
-  titleOverride?: string;
-  /** Hides the standard journey copy in favour of session-context copy. */
-  descriptionOverride?: string;
+  journeyId: string;
+  phaseId: string;
+  phaseName: string;
   onUploaded?: () => void;
 }
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export function JourneyPhotoUpload({
-  open, onClose, patientId, journeyId, phaseId, phaseName,
-  therapySessionId, titleOverride, descriptionOverride, onUploaded,
+  open, onClose, patientId, journeyId, phaseId, phaseName, onUploaded,
 }: JourneyPhotoUploadProps) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -80,12 +67,8 @@ export function JourneyPhotoUpload({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("patientId", patientId);
-      // Journey/phase fields are only appended when provided — Phase B1's
-      // session-context upload doesn't have journey/phase scope, and
-      // sending empty strings would fail the backend Zod string check.
-      if (journeyId) formData.append("journeyId", journeyId);
-      if (phaseId) formData.append("phaseId", phaseId);
-      if (therapySessionId) formData.append("therapySessionId", therapySessionId);
+      formData.append("journeyId", journeyId);
+      formData.append("phaseId", phaseId);
       // Patient uploads are forced to GENERAL_PROGRESS / DURING by the backend.
       // Sending them anyway keeps the multipart payload self-describing.
       formData.append("category", "GENERAL_PROGRESS");
@@ -117,12 +100,10 @@ export function JourneyPhotoUpload({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Camera className="w-5 h-5 text-primary" />
-            {titleOverride ?? (phaseName
-              ? `Upload Progress Photo — ${phaseName}`
-              : "Capture Photo")}
+            Upload Progress Photo — {phaseName}
           </DialogTitle>
           <DialogDescription>
-            {descriptionOverride ?? "Doctor reviews these to monitor your recovery. Stays linked to your current phase."}
+            Doctor reviews these to monitor your recovery. Stays linked to your current phase.
           </DialogDescription>
         </DialogHeader>
 
@@ -158,7 +139,6 @@ export function JourneyPhotoUpload({
             ref={inputRef}
             type="file"
             accept="image/jpeg,image/png,image/webp"
-            capture="environment"
             className="hidden"
             onChange={(e) => handleFile(e.target.files?.[0])}
           />
