@@ -250,8 +250,7 @@ export default function ConsultationRoom() {
                         {(role === "DOCTOR" || role === "ADMIN_DOCTOR") &&
                          appointment.patient?.id &&
                          (appointment.status === "COMPLETED" ||
-                          appointment.status === "IN_PROGRESS" ||
-                          appointment.status === "CONFIRMED") && (
+                          true) && (
                             <GenerateReportButton
                                 appointmentId={appointment.id}
                                 patientId={appointment.patient.id}
@@ -630,3 +629,4 @@ function VideoCallFrame({
         </div>
     );
 }
+
