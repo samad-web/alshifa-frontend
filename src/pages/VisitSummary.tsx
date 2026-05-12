@@ -209,29 +209,34 @@ function DoctorView({ userId }: { userId: string }) {
       // session notes live on Appointment, not on the auto-gen response).
       const apt = selectedAppointment as any;
 
-      if (data?.diagnosis) setDiagnosis(data.diagnosis);
-      const treatmentNotesValue =
-        data?.treatmentNotes || apt?.notes || apt?.sessionNotes || "";
-      if (treatmentNotesValue) setTreatmentNotes(treatmentNotesValue);
-      if (data?.prescriptions && data.prescriptions.length > 0) {
-        setPrescriptions(data.prescriptions);
-      }
-      if (data?.exercisePlan && data.exercisePlan.length > 0) {
-        // Normalise — auto-gen returns { exercise, description, notes } from
-        // VideoPrescription, but the form row is { exercise, sets, reps,
-        // frequency }. Map across so the rows render with sane defaults.
-        setExercises(
-          data.exercisePlan.map((ex: any) => ({
-            exercise: ex.exercise || ex.title || "",
-            sets: typeof ex.sets === "number" ? ex.sets : 0,
-            reps: typeof ex.reps === "number" ? ex.reps : 0,
-            frequency: ex.frequency || ex.notes || "",
-          })),
-        );
-      }
-      if (data?.dietaryAdvice) setDietaryAdvice(data.dietaryAdvice);
-      if (data?.nextSteps) setNextSteps(data.nextSteps);
-      if (data?.followUpDate) setFollowUpDate(data.followUpDate);
+      // Always overwrite every field — previously each setter was guarded by
+      // `if (data?.field)`, which left stale values from a prior auto-generate
+      // when the new appointment had no source data for a field. That made
+      // the feature look broken because the form never visibly updated for
+      // appointments without notes / prescriptions / etc.
+      setDiagnosis(data?.diagnosis || "");
+      setTreatmentNotes(data?.treatmentNotes || apt?.notes || apt?.sessionNotes || "");
+      setPrescriptions(
+        data?.prescriptions && data.prescriptions.length > 0
+          ? data.prescriptions
+          : [{ medication: "", dosage: "", frequency: "", duration: "" }],
+      );
+      setExercises(
+        data?.exercisePlan && data.exercisePlan.length > 0
+          // Normalise — auto-gen returns { exercise, description, notes } from
+          // VideoPrescription, but the form row is { exercise, sets, reps,
+          // frequency }. Map across so the rows render with sane defaults.
+          ? data.exercisePlan.map((ex: any) => ({
+              exercise: ex.exercise || ex.title || "",
+              sets: typeof ex.sets === "number" ? ex.sets : 0,
+              reps: typeof ex.reps === "number" ? ex.reps : 0,
+              frequency: ex.frequency || ex.notes || "",
+            }))
+          : [{ exercise: "", sets: 0, reps: 0, frequency: "" }],
+      );
+      setDietaryAdvice(data?.dietaryAdvice || "");
+      setNextSteps(data?.nextSteps || "");
+      setFollowUpDate(data?.followUpDate || "");
       toast.success("Summary auto-generated from appointment data");
     } catch (err: any) {
       toast.error(err?.message || "Failed to auto-generate");
