@@ -49,6 +49,9 @@ import { ConsultationFeedbackPrompt } from "@/components/feedback/ConsultationFe
 import { JourneyFeedbackPrompt } from "@/components/journey-feedback/JourneyFeedbackFlow";
 import { CoachWidget } from "@/features/voiceCoach";
 import { PhotoReminderBanner } from "@/components/patient/PhotoReminderBanner";
+import { MealPhotoBanner } from "@/components/patient/MealPhotoBanner";
+import { DailyCheckInPopup } from "@/components/patient/DailyCheckInPopup";
+import { wellnessService } from "@/services/wellness.service";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1528,6 +1531,11 @@ export default function EnhancedPatientDashboard() {
   const [showVitalLog, setShowVitalLog] = useState<string | null>(null);
   const [showBreathing, setShowBreathing] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
+  // Daily mood/sleep/water/activity check-in popup — auto-opens once per day
+  // when the patient lands on the dashboard and hasn't already submitted.
+  // Distinct from `showCheckIn` above (which drives the existing CheckInModal
+  // for pain-map adds + dashboard-driven flows).
+  const [showDailyCheckIn, setShowDailyCheckIn] = useState(false);
   // Latest relevant self-exam submission (DRAFT > SUBMITTED > REVIEWED).
   // `null` means the patient has no submission at all — the banner then
   // surfaces a "Start your kit" CTA instead of staying hidden.
@@ -1607,6 +1615,28 @@ export default function EnhancedPatientDashboard() {
       })
       .catch(() => { setSelfExamLoaded(true); /* still render the empty CTA */ });
     return () => { cancelled = true; };
+  }, []);
+
+  // Auto-open the daily check-in popup once per day. We hit the lightweight
+  // /api/wellness/check-in/today endpoint and only surface the popup if the
+  // patient hasn't already submitted today. A small 1s delay lets the rest
+  // of the dashboard paint first so the popup feels like an invitation
+  // rather than a blocker.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    wellnessService.getCheckInToday()
+      .then(({ data }) => {
+        if (cancelled || data.hasSubmittedToday) return;
+        timer = setTimeout(() => {
+          if (!cancelled) setShowDailyCheckIn(true);
+        }, 1000);
+      })
+      .catch(() => { /* silent — popup stays hidden if the probe fails */ });
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // ── Action dispatcher ──
@@ -1706,6 +1736,10 @@ export default function EnhancedPatientDashboard() {
             phase without a recent DURING photo. Self-contained: socket + REST
             + dismissal state, including the upload modal. */}
         <PhotoReminderBanner />
+        {/* Time-aware meal-photo prompt — visible during breakfast / lunch /
+            dinner windows when the patient hasn't yet logged a photo for the
+            active meal. Self-hides outside the window or after upload. */}
+        <MealPhotoBanner />
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between">
           <div>
@@ -1886,6 +1920,16 @@ export default function EnhancedPatientDashboard() {
 
       {/* Floating Voice Health Coach widget — gated by AYURVEDIC_VOICE_COACH */}
       <CoachWidget />
+
+      {/* Daily mood/sleep/water/activity popup — auto-opens once per day if
+          the patient hasn't submitted yet. On submit we fan out to the
+          wellness check-in + water + activity endpoints so the dashboard
+          adherence figures pick the new entries up on the next load. */}
+      <DailyCheckInPopup
+        isOpen={showDailyCheckIn}
+        onClose={() => setShowDailyCheckIn(false)}
+        onSuccess={() => { load(); }}
+      />
     </AppLayout>
   );
 }
