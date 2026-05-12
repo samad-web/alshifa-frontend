@@ -602,7 +602,6 @@ export default function DoctorAdminDashboard() {
               <ReportLink to="/reports?tab=appointments" label="Appointment Summary Today" />
               <ReportLink to="/care-gaps" label="Care Gap Summary" />
               <ReportLink to="/medication-adherence" label="Medication Adherence" />
-              <ReportLink to="/revenue" label="Revenue Today" />
             </div>
           </div>
           <div>
