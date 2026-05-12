@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useWebSocket } from "./WebSocketContext";
 import { apiClient } from "@/lib/api-client";
@@ -41,6 +42,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const { socket } = useWebSocket();
+    const navigate = useNavigate();
 
     const fetchNotifications = async () => {
         try {
@@ -106,10 +108,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             });
         };
 
+        // Patient → clinician dedicated chat toast. The generic 'notification'
+        // event still fires for the bell badge; this handler adds an inline
+        // CTA that takes the doctor straight to /chat.
+        const handleChatMessageToast = (data: {
+            senderId: string;
+            senderName: string;
+            preview: string;
+            conversationId: string;
+            timestamp: string | Date;
+        }) => {
+            toast.message(`💬 ${data.senderName}`, {
+                description: data.preview,
+                action: {
+                    label: 'Open Chat',
+                    onClick: () => navigate('/chat'),
+                },
+            });
+        };
+
         socket.on('notification', handleNotification);
         socket.on('new_notification', handleNotification); // alias used by notification.service.js
         socket.on('badge_earned', handleBadgeEarned);
         socket.on('zen_points_update', handleZenPointsUpdate);
+        socket.on('new_chat_message_notification', handleChatMessageToast);
 
         // ── Generic toast handlers for previously-silent events ──────────────
         // These events were emitted from the backend but had no listeners,
@@ -208,9 +230,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             socket.off('new_notification', handleNotification);
             socket.off('badge_earned', handleBadgeEarned);
             socket.off('zen_points_update', handleZenPointsUpdate);
+            socket.off('new_chat_message_notification', handleChatMessageToast);
             for (const [event, handler] of silentHandlers) socket.off(event, handler);
         };
-    }, [socket]);
+    }, [socket, navigate]);
 
     const addNotification = (notification: Omit<Notification, "id" | "timestamp" | "read">) => {
         const newNotification: Notification = {

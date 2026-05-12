@@ -74,7 +74,7 @@ export interface PatientProfile {
   gender?: string | null;
   phoneNumber?: string | null;
   dob?: string | null;
-  therapyType?: string | null;
+  therapyTypes?: string[];
   onboardingCompleted: boolean;
   zenPoints: number;
   branchId?: string | null;
@@ -1029,6 +1029,100 @@ export interface VisitSummaryEntry {
   sentAt?: string | null;
   createdAt: string;
   /** Joined Patient.fullName when the API includes the patient relation. */
-  patient?: { id: string; fullName: string | null } | null;
+  patient?: { id: string; fullName: string | null; profilePhoto?: string | null } | null;
   appointment?: { id: string; date: string; consultationType?: string } | null;
+  /** Doctor relation for the patient-facing visit summary card. */
+  doctor?: {
+    id: string;
+    fullName?: string | null;
+    specialization?: string | null;
+    profilePhoto?: string | null;
+  } | null;
+}
+
+// ── Therapy Session Workspace (Phase A) ─────────────────────────────────────
+
+export type TherapySessionStatus = 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED';
+
+export interface SessionNote {
+  id: string;
+  sessionId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TherapySession {
+  id: string;
+  appointmentId: string;
+  /** User.id of the assigned therapist (intentionally a User FK, not Therapist FK). */
+  therapistId: string;
+  patientId: string;
+  branchId: string;
+  status: TherapySessionStatus;
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // Optional relations populated by the backend `sessionInclude` shape.
+  notes?: SessionNote[];
+  patient?: {
+    id: string;
+    fullName: string | null;
+    patientId: string | null;
+    phoneNumber: string | null;
+  };
+  appointment?: {
+    id: string;
+    date: string;
+    status: AppointmentStatus;
+    consultationType: ConsultationType;
+    consultationMode: ConsultationMode;
+    therapistId: string | null;
+    therapist?: { id: string; fullName: string | null; userId: string };
+  };
+  // Phase B1 — populated by the extended `sessionInclude`. Each is
+  // optional so Phase A's response (still served by start/active) keeps
+  // type-checking under the same interface without forcing call sites
+  // to widen. Photos uses `ClinicalPhoto` from iwis.service.ts (the
+  // existing single source of truth).
+  painReadings?: SessionPainReading[];
+  regionNotes?: SessionRegionNote[];
+  outcome?: SessionOutcome | null;
+  photos?: import('@/services/iwis.service').ClinicalPhoto[];
+}
+
+// ── Phase B1 — clinical depth in the session workspace ─────────────────────
+
+export type SessionOverallOutcome = 'IMPROVED' | 'UNCHANGED' | 'REGRESSED';
+export type SessionTolerance = 'GOOD' | 'MODERATE' | 'POOR';
+
+export interface SessionPainReading {
+  id: string;
+  sessionId: string;
+  scale: number;
+  bodyRegion?: string | null;
+  recordedAt: string;
+  createdAt: string;
+}
+
+export interface SessionRegionNote {
+  id: string;
+  sessionId: string;
+  bodyRegion: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionOutcome {
+  id: string;
+  sessionId: string;
+  overallOutcome: SessionOverallOutcome;
+  patientTolerance: SessionTolerance;
+  nextSessionFocus?: string | null;
+  homeCareInstructions?: string | null;
+  recordedById: string;
+  createdAt: string;
+  updatedAt: string;
 }

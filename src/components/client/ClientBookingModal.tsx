@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { DateInput, toDDMMYYYY } from "@/components/common/DateInput";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon, Loader2, Video, MapPin, ChevronRight, ChevronLeft, Activity, Check, Sun, Sunset, Moon, CalendarOff } from "lucide-react";
 import { format } from "date-fns";
@@ -488,6 +488,18 @@ export function ClientBookingModal({
                                         <button
                                             key={staff.id}
                                             onClick={() => {
+                                                // Admin doctors are reserved for escalations. If the
+                                                // patient's triage didn't classify as Escalation Required,
+                                                // selecting one is invalid — surface immediately and
+                                                // clear the selection so they can pick someone else.
+                                                if (
+                                                    staff.user?.role === 'ADMIN_DOCTOR' &&
+                                                    triageResult?.classification !== 'Escalation Required'
+                                                ) {
+                                                    toast.error("This case does not qualify for an Admin Doctor. Please select a different doctor.");
+                                                    setFormData({ ...formData, doctorId: "" });
+                                                    return;
+                                                }
                                                 setFormData({ ...formData, doctorId: staff.id });
                                                 // Real-time availability sniff. Best-effort — failure
                                                 // here just means no toast, never blocks the booking.
@@ -546,13 +558,30 @@ export function ClientBookingModal({
                         <div className="space-y-4 animate-in fade-in slide-in-from-right-2">
                             <div className="flex flex-col items-center">
                                 <Label className="text-base font-bold mb-4 self-start">Select Date & Time</Label>
-                                <CalendarComponent
-                                    mode="single"
-                                    selected={formData.date}
-                                    onSelect={(d) => setFormData({ ...formData, date: d, slot: "" })}
-                                    className="rounded-lg border shadow-sm mb-5 bg-card"
-                                    disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                                />
+                                {/* Text-only DD/MM/YYYY input replaces the
+                                    calendar grid platform-wide. minDate=today
+                                    enforces "no past bookings". The slot list
+                                    below re-fetches automatically once a
+                                    valid date is entered (the form watches
+                                    formData.date). */}
+                                <div className="w-full max-w-xs mb-5">
+                                    <DateInput
+                                        value={formData.date ? toDDMMYYYY(formData.date) : ""}
+                                        onChange={(v) => {
+                                            if (!v) {
+                                                setFormData({ ...formData, date: undefined, slot: "" });
+                                                return;
+                                            }
+                                            const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v);
+                                            if (!m) return;
+                                            const [, dd, mm, yyyy] = m;
+                                            const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+                                            setFormData({ ...formData, date: d, slot: "" });
+                                        }}
+                                        minDate={toDDMMYYYY(new Date())}
+                                        placeholder="DD/MM/YYYY"
+                                    />
+                                </div>
 
                                 {formData.date && (() => {
                                     // Only AVAILABLE, non-held slots are bookable. We filter
@@ -569,9 +598,17 @@ export function ClientBookingModal({
                                                 <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                                     Available times for {format(formData.date, "PPP")}
                                                 </Label>
-                                                {!fetchingSlots && bookableSlots.length > 0 && (
-                                                    <span className="text-[11px] text-muted-foreground" aria-live="polite">
-                                                        {bookableSlots.length} open
+                                                {!fetchingSlots && (
+                                                    <span
+                                                        className={cn(
+                                                            "text-[11px] font-medium",
+                                                            bookableSlots.length > 0 ? "text-green-600" : "text-red-500",
+                                                        )}
+                                                        aria-live="polite"
+                                                    >
+                                                        {bookableSlots.length > 0
+                                                            ? `${bookableSlots.length} slot${bookableSlots.length === 1 ? "" : "s"} available`
+                                                            : "Doctor not available on this date"}
                                                     </span>
                                                 )}
                                             </div>
@@ -589,11 +626,11 @@ export function ClientBookingModal({
                                                     onSelect={(slot) => setFormData({ ...formData, slot })}
                                                 />
                                             ) : (
-                                                <div className="rounded-xl border border-dashed border-border/60 bg-secondary/10 p-6 text-center space-y-2">
-                                                    <CalendarOff className="w-8 h-8 mx-auto text-muted-foreground/60" aria-hidden="true" />
-                                                    <p className="text-sm font-medium text-foreground">No times available on this day</p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        This clinician has no openings on this date. Try another day.
+                                                <div className="rounded-xl border border-dashed border-red-300 bg-red-50/40 p-6 text-center space-y-2">
+                                                    <CalendarOff className="w-8 h-8 mx-auto text-red-400" aria-hidden="true" />
+                                                    <p className="text-sm font-medium text-red-700">Doctor is not available on this date</p>
+                                                    <p className="text-xs text-red-600/80">
+                                                        Please select another date.
                                                     </p>
                                                 </div>
                                             )}

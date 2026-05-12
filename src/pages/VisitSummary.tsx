@@ -13,15 +13,41 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import {
   FileText, Plus, X, Wand2, Send, Printer, ChevronDown, ChevronUp,
-  Stethoscope, Pill, Dumbbell, Apple, ArrowRight, Calendar, CheckCircle,
+  Stethoscope, Pill, Dumbbell, Apple, ArrowRight, Calendar, CheckCircle, History,
 } from "lucide-react";
 import { communicationApi } from "@/services/communication.service";
 import { toast } from "sonner";
 import type { VisitSummaryEntry } from "@/types";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { GroupedByBranch } from "@/components/common/GroupedByBranch";
+
+type DateRangeKey = "today" | "week" | "month" | "all";
+
+function rangeForKey(key: DateRangeKey): { startDate?: string; endDate?: string } {
+  if (key === "all") return {};
+  const now = new Date();
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  if (key === "week") start.setDate(start.getDate() - 6);
+  if (key === "month") start.setDate(start.getDate() - 29);
+  return { startDate: start.toISOString(), endDate: end.toISOString() };
+}
+
+function initialsFor(name: string | null | undefined): string {
+  return (name || "Patient")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("") || "P";
+}
 
 function summaryBranchId(s: any): string | null {
   return s?.branchId
@@ -120,9 +146,17 @@ function DoctorView({ userId }: { userId: string }) {
   // Used in confirmation labels: "For: <patient name>".
   const selectedAppointment = appointments.find((a) => a.id === appointmentId) ?? null;
 
+  // Patient-card view state — date range filter and the patient whose
+  // history drawer is open.
+  const [rangeKey, setRangeKey] = useState<DateRangeKey>("all");
+  const [historyPatientId, setHistoryPatientId] = useState<string | null>(null);
+
   useEffect(() => {
     loadSummaries();
-  }, []);
+    // Re-fetch whenever the doctor changes the date filter — backend now
+    // accepts startDate/endDate so we let it filter rather than pulling the
+    // whole list every time.
+  }, [rangeKey]);
 
   // Lazy-load completed appointments the first time the dialog opens.
   useEffect(() => {
@@ -147,7 +181,11 @@ function DoctorView({ userId }: { userId: string }) {
       // Doctor / therapist view: summaries the *current clinician* authored.
       // Previously this incorrectly called the patient endpoint with the
       // doctor's user id, which returned empty for everyone.
-      const data = await communicationApi.getMyVisitSummaries({ limit: 50 });
+      const range = rangeForKey(rangeKey);
+      const data = await communicationApi.getMyVisitSummaries({
+        limit: 50,
+        ...range,
+      });
       setSummaries(data.summaries);
     } catch (err: any) {
       toast.error(err?.message || "Failed to load summaries");
@@ -163,14 +201,37 @@ function DoctorView({ userId }: { userId: string }) {
     }
     try {
       setAutoGenerating(true);
-      const data = await communicationApi.autoGenerateVisitSummary(appointmentId.trim());
-      if (data.diagnosis) setDiagnosis(data.diagnosis);
-      if (data.treatmentNotes) setTreatmentNotes(data.treatmentNotes);
-      if (data.prescriptions && data.prescriptions.length > 0) setPrescriptions(data.prescriptions);
-      if (data.exercisePlan && data.exercisePlan.length > 0) setExercises(data.exercisePlan);
-      if (data.dietaryAdvice) setDietaryAdvice(data.dietaryAdvice);
-      if (data.nextSteps) setNextSteps(data.nextSteps);
-      if (data.followUpDate) setFollowUpDate(data.followUpDate);
+      const data = (await communicationApi.autoGenerateVisitSummary(
+        appointmentId.trim(),
+      )) as any;
+      // Fall back to the already-loaded appointment record so the form still
+      // pre-fills even when the helper API leaves a field empty (notes /
+      // session notes live on Appointment, not on the auto-gen response).
+      const apt = selectedAppointment as any;
+
+      if (data?.diagnosis) setDiagnosis(data.diagnosis);
+      const treatmentNotesValue =
+        data?.treatmentNotes || apt?.notes || apt?.sessionNotes || "";
+      if (treatmentNotesValue) setTreatmentNotes(treatmentNotesValue);
+      if (data?.prescriptions && data.prescriptions.length > 0) {
+        setPrescriptions(data.prescriptions);
+      }
+      if (data?.exercisePlan && data.exercisePlan.length > 0) {
+        // Normalise — auto-gen returns { exercise, description, notes } from
+        // VideoPrescription, but the form row is { exercise, sets, reps,
+        // frequency }. Map across so the rows render with sane defaults.
+        setExercises(
+          data.exercisePlan.map((ex: any) => ({
+            exercise: ex.exercise || ex.title || "",
+            sets: typeof ex.sets === "number" ? ex.sets : 0,
+            reps: typeof ex.reps === "number" ? ex.reps : 0,
+            frequency: ex.frequency || ex.notes || "",
+          })),
+        );
+      }
+      if (data?.dietaryAdvice) setDietaryAdvice(data.dietaryAdvice);
+      if (data?.nextSteps) setNextSteps(data.nextSteps);
+      if (data?.followUpDate) setFollowUpDate(data.followUpDate);
       toast.success("Summary auto-generated from appointment data");
     } catch (err: any) {
       toast.error(err?.message || "Failed to auto-generate");
@@ -486,6 +547,26 @@ function DoctorView({ userId }: { userId: string }) {
         </Dialog>
       </PageHeader>
 
+      {/* Date filter pills — backend filters by createdAt range. */}
+      <div className="flex flex-wrap items-center gap-2 mt-2 mb-4">
+        {([
+          { key: "today", label: "Today" },
+          { key: "week",  label: "This Week" },
+          { key: "month", label: "This Month" },
+          { key: "all",   label: "All Time" },
+        ] as { key: DateRangeKey; label: string }[]).map(({ key, label }) => (
+          <Button
+            key={key}
+            variant={rangeKey === key ? "default" : "outline"}
+            size="sm"
+            onClick={() => setRangeKey(key)}
+            className="h-8"
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
       {/* Recent Summaries Table */}
       {loading ? (
         <div className="space-y-3">
@@ -576,10 +657,155 @@ function DoctorView({ userId }: { userId: string }) {
             />
           );
         }
+
+        // Group by patient — one card per patient who has at least one
+        // visit summary in the selected date window. The card surfaces
+        // count + most recent date and opens a history drawer on click.
+        const grouped = new Map<string, {
+          patientId: string;
+          patientName: string;
+          profilePhoto: string | null;
+          summaries: VisitSummaryEntry[];
+        }>();
+        for (const s of scoped) {
+          const id = s.patient?.id || s.patientId;
+          if (!id) continue;
+          const name = s.patient?.fullName || s.patientName || "Unnamed patient";
+          const existing = grouped.get(id);
+          if (existing) {
+            existing.summaries.push(s);
+          } else {
+            grouped.set(id, {
+              patientId: id,
+              patientName: name,
+              profilePhoto: (s.patient as any)?.profilePhoto ?? null,
+              summaries: [s],
+            });
+          }
+        }
+        const patientGroups = Array.from(grouped.values()).map((g) => ({
+          ...g,
+          summaries: [...g.summaries].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          ),
+        }));
+        patientGroups.sort((a, b) => {
+          const aLatest = new Date(a.summaries[0].createdAt).getTime();
+          const bLatest = new Date(b.summaries[0].createdAt).getTime();
+          return bLatest - aLatest;
+        });
+
+        const activeGroup = historyPatientId
+          ? patientGroups.find((g) => g.patientId === historyPatientId) ?? null
+          : null;
+
         return (
-          <div className="space-y-3">
-            {scoped.map(renderSummary)}
-          </div>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {patientGroups.map((g) => (
+                <Card
+                  key={g.patientId}
+                  className="hover:shadow-md transition-shadow cursor-pointer"
+                  onClick={() => setHistoryPatientId(g.patientId)}
+                >
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <Avatar className="h-12 w-12 flex-shrink-0">
+                      {g.profilePhoto ? (
+                        <AvatarImage src={g.profilePhoto} alt={g.patientName} />
+                      ) : null}
+                      <AvatarFallback>{initialsFor(g.patientName)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold truncate">{g.patientName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {g.summaries.length} {g.summaries.length === 1 ? "summary" : "summaries"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Latest {formatDate(g.summaries[0].createdAt)}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="flex-shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHistoryPatientId(g.patientId);
+                      }}
+                    >
+                      <History className="h-3.5 w-3.5 mr-1" /> View History
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            <Sheet
+              open={!!historyPatientId}
+              onOpenChange={(open) => !open && setHistoryPatientId(null)}
+            >
+              <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
+                <SheetHeader>
+                  <SheetTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    {activeGroup?.patientName || "Patient"} · Visit history
+                  </SheetTitle>
+                </SheetHeader>
+                <div className="mt-4 space-y-3">
+                  {activeGroup?.summaries.map((s) => (
+                    <Card key={s.id} className="border-border/60">
+                      <CardContent className="p-4 space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-xs font-semibold text-muted-foreground">
+                            {formatDate(s.createdAt)}
+                          </span>
+                          <Badge
+                            variant={s.sentToPatient ? "default" : "secondary"}
+                            className="text-[10px] py-0"
+                          >
+                            {s.sentToPatient ? "Sent" : "Draft"}
+                          </Badge>
+                        </div>
+                        {s.diagnosis && (
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                              Chief complaint
+                            </p>
+                            <p className="text-sm">{s.diagnosis}</p>
+                          </div>
+                        )}
+                        {s.treatmentNotes && (
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                              Doctor notes
+                            </p>
+                            <p className="text-sm whitespace-pre-wrap">{s.treatmentNotes}</p>
+                          </div>
+                        )}
+                        {s.prescriptions && s.prescriptions.length > 0 && (
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold flex items-center gap-1">
+                              <Pill className="h-3 w-3" /> Medicines prescribed
+                            </p>
+                            <ul className="text-sm space-y-0.5 mt-1">
+                              {s.prescriptions.map((rx, i) => (
+                                <li key={i} className="text-foreground/80">
+                                  • {rx.medication}
+                                  {rx.dosage ? ` — ${rx.dosage}` : ""}
+                                  {rx.frequency ? `, ${rx.frequency}` : ""}
+                                  {rx.duration ? `, ${rx.duration}` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </SheetContent>
+            </Sheet>
+          </>
         );
       })()}
     </>
@@ -655,17 +881,34 @@ function PatientView({ userId: _userId }: { userId: string }) {
                     onClick={() => setExpandedId(isExpanded ? null : s.id)}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Stethoscope className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                          <span className="text-sm font-medium">{s.clinicianName}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDate(s.createdAt)}
-                          </span>
+                      <div className="flex-1 min-w-0 flex items-start gap-3">
+                        <Avatar className="h-10 w-10 flex-shrink-0">
+                          {s.doctor?.profilePhoto ? (
+                            <AvatarImage src={s.doctor.profilePhoto} alt={s.doctor.fullName ?? s.clinicianName} />
+                          ) : null}
+                          <AvatarFallback>
+                            {initialsFor(s.doctor?.fullName || s.clinicianName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                            <Stethoscope className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                            <span className="text-sm font-semibold">
+                              Dr. {s.doctor?.fullName || s.clinicianName}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {formatDate(s.createdAt)}
+                            </span>
+                          </div>
+                          {s.doctor?.specialization && (
+                            <p className="text-[11px] text-muted-foreground -mt-0.5 mb-1">
+                              {s.doctor.specialization}
+                            </p>
+                          )}
+                          <p className="text-sm text-muted-foreground truncate">
+                            {s.diagnosis || "No diagnosis recorded"}
+                          </p>
                         </div>
-                        <p className="text-sm text-muted-foreground truncate">
-                          {s.diagnosis || "No diagnosis recorded"}
-                        </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Button

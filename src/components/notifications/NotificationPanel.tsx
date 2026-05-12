@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Bell, Check, CheckCheck, Trash2, Calendar, FileText, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useAuth } from '@/hooks/useAuth';
 
 interface NotificationPanelProps {
     onClose?: () => void;
@@ -11,6 +12,8 @@ interface NotificationPanelProps {
 
 export function NotificationPanel({ onClose }: NotificationPanelProps) {
     const { notifications, unreadCount, markAsRead, markAllAsRead, clearNotifications } = useNotifications();
+    const { role } = useAuth();
+    const isPatient = role === 'PATIENT';
 
     const getPriorityStyles = (priority: string) => {
         switch (priority) {
@@ -68,7 +71,7 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
                     )}
                 </div>
                 <div className="flex gap-1">
-                    {unreadCount > 0 && (
+                    {!isPatient && unreadCount > 0 && (
                         <Button
                             variant="ghost"
                             size="sm"

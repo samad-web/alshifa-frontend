@@ -4,7 +4,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
+import { DateInput, toDDMMYYYY } from "@/components/common/DateInput";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2, Plus, Trash2, CalendarX, Clock } from "lucide-react";
@@ -219,14 +219,21 @@ export default function DoctorAvailability({ embedded = false }: { embedded?: bo
                                 <TabsContent value="single" className="space-y-4 pt-4">
                                     <div className="space-y-2">
                                         <Label>Date</Label>
-                                        <div className="border rounded-md p-2 flex justify-center">
-                                            <Calendar
-                                                mode="single"
-                                                selected={selectedDate}
-                                                onSelect={setSelectedDate}
-                                                disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                                            />
-                                        </div>
+                                        <DateInput
+                                            value={selectedDate ? toDDMMYYYY(selectedDate) : ""}
+                                            onChange={(v) => {
+                                                if (!v) {
+                                                    setSelectedDate(undefined);
+                                                    return;
+                                                }
+                                                const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v);
+                                                if (!m) return;
+                                                const [, dd, mm, yyyy] = m;
+                                                setSelectedDate(new Date(Number(yyyy), Number(mm) - 1, Number(dd)));
+                                            }}
+                                            minDate={toDDMMYYYY(new Date())}
+                                            placeholder="DD/MM/YYYY"
+                                        />
                                     </div>
                                 </TabsContent>
 

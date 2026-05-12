@@ -85,24 +85,32 @@ export default function SeasonalChallenges() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!form.startDate || !form.endDate) {
+      setError("Start and end dates are required.");
+      return;
+    }
+    const targetN = Number(form.target);
+    if (!Number.isFinite(targetN) || targetN <= 0) {
+      setError("Target must be a positive number.");
+      return;
+    }
     setSubmitting(true);
     try {
-      // <Input type="date"> returns "YYYY-MM-DD" but the backend's zod
-      // schema requires full ISO 8601 datetime — promote each to UTC midnight.
-      const startIso = new Date(`${form.startDate}T00:00:00.000Z`).toISOString();
-      const endIso   = new Date(`${form.endDate}T23:59:59.999Z`).toISOString();
-
+      // Backend Zod now accepts DD/MM/YYYY / YYYY-MM-DD / ISO directly and
+      // does the coercion server-side, so we forward whatever the DatePicker
+      // produced without trying to reformat it (the prior `${date}T...Z`
+      // concatenation broke when DatePicker handed us a full ISO string).
       const created = await clinicianGamificationApi.createSeasonalChallenge({
         title: form.title,
         description: form.description,
         metric: form.metric,
-        target: Number(form.target),
-        startDate: startIso,
-        endDate: endIso,
+        target: targetN,
+        startDate: form.startDate,
+        endDate: form.endDate,
         scope: form.scope || undefined,
         targetRoles: form.targetRoles.length > 0 ? form.targetRoles : undefined,
-        rewardXP: Number(form.rewardXP) || undefined,
-        rewardPoints: Number(form.rewardPoints) || undefined,
+        rewardXP: form.rewardXP ? Number(form.rewardXP) : undefined,
+        rewardPoints: form.rewardPoints ? Number(form.rewardPoints) : undefined,
         icon: form.icon || undefined,
       });
       setChallenges((prev) => [created, ...prev]);

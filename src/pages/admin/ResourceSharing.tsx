@@ -168,7 +168,7 @@ export default function ResourceSharing() {
         // Edit existing request — only the patchable fields, not the user
         // (changing the staff member would invalidate the availability
         // check that ran when the request was first created).
-        await operationsApi.updateSharingRequest(editingRequestId, {
+        const updated = await operationsApi.updateSharingRequest(editingRequestId, {
           fromBranchId: formFromBranch,
           toBranchId: formToBranch,
           date: formDate,
@@ -177,9 +177,11 @@ export default function ResourceSharing() {
           endTime: formEndTime,
           reason: formReason || null,
         });
+        // Optimistic in-place patch so the row updates without waiting for refetch.
+        setRequests((prev) => prev.map((r) => (r.id === editingRequestId ? updated : r)));
         toast.success("Sharing request updated");
       } else {
-        await operationsApi.createSharingRequest({
+        const created = await operationsApi.createSharingRequest({
           userId: formUserId,
           fromBranchId: formFromBranch,
           toBranchId: formToBranch,
@@ -189,6 +191,14 @@ export default function ResourceSharing() {
           endTime: formEndTime,
           reason: formReason || undefined,
         });
+        // Prepend the created request to the local list so it shows up
+        // immediately in "All Requests" — fetchData below still runs as a
+        // safety net so any server-side enrichment (joined branch name etc.)
+        // overrides the optimistic insert.
+        if (created && created.id) {
+          setRequests((prev) => [created, ...prev.filter((r) => r.id !== created.id)]);
+        }
+        toast.success("Sharing request created");
       }
       setDialogOpen(false);
       resetForm();

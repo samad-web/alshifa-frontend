@@ -1,91 +1,108 @@
-import { useMemo, useState } from "react";
-import { Calendar as CalendarIcon } from "lucide-react";
-import { format } from "date-fns";
-import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+// DatePicker — text-only DD/MM/YYYY input (no calendar popover).
+//
+// Per platform decision: every date field across IWIS uses a plain text
+// input with DD/MM/YYYY format. This file used to wrap react-day-picker;
+// it now delegates entirely to <DateInput> while preserving the original
+// `value: string (yyyy-MM-dd)` / `onChange(yyyy-MM-dd)` contract so the
+// 18+ consumer pages keep working without per-file edits.
+
+import { useEffect, useMemo, useState } from "react";
+import { DateInput } from "@/components/common/DateInput";
 import { cn } from "@/lib/utils";
 
 interface DatePickerProps {
-    /** ISO `yyyy-MM-dd` string (matches the native `<input type="date">` value shape). */
-    value: string;
-    onChange: (isoDate: string) => void;
-    placeholder?: string;
-    className?: string;
-    disabled?: boolean;
-    fromDate?: Date;
-    toDate?: Date;
-    /** date-fns display format for the button label. Default is Indian short
-     *  format "dd/MM/yyyy" (e.g. "22/04/2026"). */
-    displayFormat?: string;
-    /** Match the native input's required affordance (no HTML form validation — visual only). */
-    required?: boolean;
-    id?: string;
+  /** ISO `yyyy-MM-dd` string (matches the native `<input type="date">` value shape). */
+  value: string;
+  onChange: (isoDate: string) => void;
+  placeholder?: string;
+  className?: string;
+  disabled?: boolean;
+  /** Min selectable date — mapped to DateInput's minDate (DD/MM/YYYY). */
+  fromDate?: Date;
+  /** Max selectable date — mapped to DateInput's maxDate. */
+  toDate?: Date;
+  /** Retained for backwards-compat with old call sites. Ignored — display
+   *  format is always DD/MM/YYYY now. */
+  displayFormat?: string;
+  required?: boolean;
+  id?: string;
+}
+
+function isoToDDMM(iso: string | undefined): string {
+  if (!iso) return "";
+  // Accept either "yyyy-MM-dd" or full ISO "yyyy-MM-ddTHH:mm:ss.sssZ".
+  // Strip the time portion so the day component splits cleanly.
+  const dateOnly = iso.split("T")[0];
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+  if (!m) return "";
+  const [, yyyy, mm, dd] = m;
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function ddmmToIso(ddmm: string): string {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddmm);
+  if (!m) return "";
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function dateToDDMM(d: Date | undefined): string | undefined {
+  if (!d) return undefined;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 /**
- * Themed date picker — drop-in replacement for `<Input type="date">`.
- * Keeps the same ISO `yyyy-MM-dd` value contract so existing state/form
- * code works without changes.
+ * Drop-in replacement for the legacy calendar-popover DatePicker. Keeps
+ * the same yyyy-MM-dd string I/O — call sites need zero changes.
  */
 export function DatePicker({
-    value, onChange, placeholder = "Pick a date",
-    className, disabled, fromDate, toDate,
-    displayFormat = "dd/MM/yyyy", required, id,
+  value, onChange,
+  className, disabled, fromDate, toDate,
+  required, id,
 }: DatePickerProps) {
-    const [open, setOpen] = useState(false);
+  // Local draft holds the in-progress DD/MM/YYYY string while the user is
+  // typing partials ("12", "12/0", "12/03/202"). The previous version derived
+  // the input's display directly from the parent's ISO value via useMemo and
+  // only emitted upstream once 10 chars were entered — but DateInput is fully
+  // controlled, so until the value completed, parent stayed empty, the derived
+  // ddmmValue stayed "", and DateInput rendered an empty input on every
+  // keystroke. The user literally couldn't enter anything.
+  //
+  // Owning the draft locally fixes that: DateInput renders the partial as
+  // the user types, and we forward complete dates upstream when ready.
+  const [draft, setDraft] = useState(() => isoToDDMM(value));
+  const minDDMM = useMemo(() => dateToDDMM(fromDate), [fromDate]);
+  const maxDDMM = useMemo(() => dateToDDMM(toDate), [toDate]);
 
-    // Parse the ISO string without timezone drift — treat "yyyy-MM-dd" as a
-    // local date rather than UTC midnight.
-    const selected = useMemo(() => {
-        if (!value) return undefined;
-        const [y, m, d] = value.split("-").map(Number);
-        if (!y || !m || !d) return undefined;
-        return new Date(y, m - 1, d);
-    }, [value]);
+  // Sync draft from parent on EXTERNAL changes only (form reset, API
+  // prefill). During typing, parent.value doesn't change for partial input
+  // because we don't emit, so this effect only fires when the parent's
+  // value genuinely diverges from the current draft.
+  useEffect(() => {
+    setDraft(isoToDDMM(value));
+  }, [value]);
 
-    return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    id={id}
-                    type="button"
-                    variant="outline"
-                    disabled={disabled}
-                    className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !selected && "text-muted-foreground",
-                        className,
-                    )}
-                >
-                    <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                    {selected ? format(selected, displayFormat) : (
-                        <>
-                            {placeholder}
-                            {required && <span className="ml-1 text-destructive">*</span>}
-                        </>
-                    )}
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                    mode="single"
-                    selected={selected}
-                    onSelect={(d) => {
-                        if (d) {
-                            // Emit "yyyy-MM-dd" in local time (NOT toISOString(),
-                            // which would shift by the UTC offset and land on
-                            // the previous day for anything west of UTC).
-                            const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-                            onChange(iso);
-                        }
-                        setOpen(false);
-                    }}
-                    fromDate={fromDate}
-                    toDate={toDate}
-                    initialFocus
-                />
-            </PopoverContent>
-        </Popover>
-    );
+  return (
+    <DateInput
+      id={id}
+      value={draft}
+      onChange={(v) => {
+        setDraft(v);
+        // Only emit a finished value upstream — partial typing ("12/")
+        // shouldn't surface to consumers expecting yyyy-MM-dd. Empty
+        // string also forwards so consumers can detect clearing.
+        if (v === "" || /^\d{2}\/\d{2}\/\d{4}$/.test(v)) {
+          onChange(v ? ddmmToIso(v) : "");
+        }
+      }}
+      placeholder="DD/MM/YYYY"
+      disabled={disabled}
+      required={required}
+      minDate={minDDMM}
+      maxDate={maxDDMM}
+      className={cn(className)}
+    />
+  );
 }

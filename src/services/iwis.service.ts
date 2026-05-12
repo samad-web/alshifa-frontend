@@ -234,6 +234,17 @@ export const iwisApi = {
   // Feature 2: Diet
   listDietForPatient: async (patientId: string) =>
     (await apiClient.get<DietPrescription[]>('/api/diet-prescriptions', { patientId })).data,
+  // Cross-patient search powered by the new GET /api/diet-prescriptions?search=
+  // dispatch. Each row carries a flat `patientName` plus the nested `patient`
+  // record so the card can render and link without a follow-up fetch.
+  searchDiet: async (search: string) =>
+    (await apiClient.get<Array<DietPrescription & {
+      patientName: string | null;
+      patient?: { id: string; fullName: string | null };
+    }>>(
+      '/api/diet-prescriptions',
+      { search },
+    )).data,
   createDiet: async (data: Partial<DietPrescription> & { meals?: DietMealPlan[] }) =>
     (await apiClient.post<DietPrescription>('/api/diet-prescriptions', data)).data,
   updateDiet: async (id: string, data: Partial<DietPrescription> & { meals?: DietMealPlan[] }) =>
@@ -335,7 +346,7 @@ export const iwisApi = {
   // Feature 6: Group sessions
   listGroupSessions: async (params: { branchId?: string; date?: string; therapistId?: string }) =>
     (await apiClient.get<GroupSession[]>('/api/group-sessions', params)).data,
-  createGroupSession: async (data: Partial<GroupSession>) =>
+  createGroupSession: async (data: Partial<GroupSession> & { patientIds?: string[] }) =>
     (await apiClient.post<GroupSession>('/api/group-sessions', data)).data,
   joinGroupSession: async (id: string, patientId?: string) =>
     (await apiClient.post(`/api/group-sessions/${id}/join`, { patientId })).data,

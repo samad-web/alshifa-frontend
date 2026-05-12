@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,10 +7,11 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, GripVertical, Trash2, Award, ChevronDown, ChevronUp, UserCheck } from 'lucide-react';
+import { Plus, GripVertical, Trash2, Award, ChevronDown, ChevronUp, UserCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { AppLayout } from '@/components/layout/app-layout';
+import { cn } from '@/lib/utils';
 
 const TASK_TYPES = [
   { value: 'MEDICATION', label: 'Medication', icon: '💊' },
@@ -49,6 +50,34 @@ interface MilestoneDraft {
   badgeIcon: string;
 }
 
+// Shape of the rows returned by GET /api/journeys/mine. Trimmed to the
+// fields this page actually renders — anything else the backend returns is
+// ignored.
+interface ExistingPhase {
+  id: string;
+  name: string;
+  order: number;
+  status: 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'SKIPPED';
+}
+interface ExistingJourney {
+  id: string;
+  title: string;
+  condition: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'PAUSED' | 'DISCONTINUED';
+  phases: ExistingPhase[];
+  patient?: {
+    patient?: { fullName?: string | null } | null;
+    email?: string;
+  } | null;
+}
+
+const STATUS_BADGE: Record<ExistingJourney['status'], string> = {
+  ACTIVE:        'bg-primary/10 text-primary border-primary/30',
+  COMPLETED:     'bg-emerald-100 text-emerald-700 border-emerald-200',
+  PAUSED:        'bg-amber-100 text-amber-700 border-amber-200',
+  DISCONTINUED:  'bg-muted text-muted-foreground border-border',
+};
+
 export default function JourneyBuilder() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -78,6 +107,67 @@ export default function JourneyBuilder() {
   const [phases, setPhases] = useState<PhaseDraft[]>([]);
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Existing journeys this doctor already created — surfaced above the
+  // create form so they can complete the current phase without leaving the
+  // page. completingPhaseId tracks which row is awaiting the PATCH so the
+  // button can disable + show a spinner only on that one card.
+  const [existingJourneys, setExistingJourneys] = useState<ExistingJourney[]>([]);
+  const [existingLoading, setExistingLoading] = useState(true);
+  const [completingPhaseId, setCompletingPhaseId] = useState<string | null>(null);
+
+  const loadExistingJourneys = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get<ExistingJourney[]>('/api/journeys/mine');
+      setExistingJourneys(Array.isArray(data) ? data : []);
+    } catch (err) {
+      // Soft-fail: if the endpoint is unavailable we just hide the panel
+      // instead of breaking the create form, which is the page's primary job.
+      console.warn('[JourneyBuilder] failed to load existing journeys', err);
+      setExistingJourneys([]);
+    } finally {
+      setExistingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadExistingJourneys(); }, [loadExistingJourneys]);
+
+  // Mark the journey's current ACTIVE phase as COMPLETED. The backend
+  // (PATCH /api/journeys/:id/phases/:phaseId) cascades:
+  //   - flips this phase to COMPLETED
+  //   - activates the next UPCOMING phase if any
+  //   - if no UPCOMING remain, flips the journey itself to COMPLETED and
+  //     fires the F04 progress-report generator + journey-feedback prompt
+  async function completeCurrentPhase(journey: ExistingJourney) {
+    const active = journey.phases.find((p) => p.status === 'ACTIVE');
+    if (!active) {
+      toast({ title: 'No active phase', description: 'This journey has no phase in ACTIVE state to complete.', variant: 'destructive' });
+      return;
+    }
+    setCompletingPhaseId(active.id);
+    try {
+      const { data } = await apiClient.patch<{ message: string; nextPhase: { name?: string } | null }>(
+        `/api/journeys/${journey.id}/phases/${active.id}`,
+        { status: 'COMPLETED' },
+      );
+      const wasLast = !data?.nextPhase;
+      toast({
+        title: wasLast ? 'Journey completed' : 'Phase completed',
+        description: wasLast
+          ? `"${journey.title}" has been marked as completed. Progress report will be generated.`
+          : `Activated next phase: ${data.nextPhase?.name || 'the next phase'}.`,
+      });
+      await loadExistingJourneys();
+    } catch (err: any) {
+      toast({
+        title: 'Could not complete phase',
+        description: err?.message || 'The phase update failed. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCompletingPhaseId(null);
+    }
+  }
 
   // If we have an ID but no name (e.g. URL params only carried the ID),
   // resolve the patient's display name + branch from the API so the form
@@ -222,7 +312,104 @@ export default function JourneyBuilder() {
         still show grab is the GripVertical inside each phase row, which
         opts back in via cursor-grab below. */}
     <div className="max-w-3xl mx-auto p-4 space-y-6 cursor-default">
-      <h1 className="text-2xl font-bold">Create Treatment Journey</h1>
+      <h1 className="text-2xl font-bold">Treatment Journey Builder</h1>
+
+      {/* Existing journeys — read-only summary with a single mutating action
+          ("Complete current phase") so the doctor can advance an in-flight
+          journey without round-tripping through the patient profile. */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-lg">Your Journeys</CardTitle>
+          <span className="text-xs text-muted-foreground">
+            {existingLoading ? 'Loading…' : `${existingJourneys.length} total`}
+          </span>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {existingLoading ? (
+            <p className="text-sm text-muted-foreground">Loading your journeys…</p>
+          ) : existingJourneys.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              You haven't built any journeys yet. Use the form below to create one.
+            </p>
+          ) : (
+            existingJourneys.map((j) => {
+              const totalPhases = j.phases.length;
+              const completedPhases = j.phases.filter((p) => p.status === 'COMPLETED').length;
+              const activePhase = j.phases.find((p) => p.status === 'ACTIVE');
+              const pct = totalPhases ? Math.round((completedPhases / totalPhases) * 100) : 0;
+              const patientName = j.patient?.patient?.fullName || j.patient?.email || '—';
+              const isCompleting = !!activePhase && completingPhaseId === activePhase.id;
+
+              return (
+                <div key={j.id} className="rounded-lg border p-4 space-y-3 bg-card">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{j.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {patientName} · {j.condition}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={cn('text-[10px]', STATUS_BADGE[j.status])}>
+                      {j.status}
+                    </Badge>
+                  </div>
+
+                  {/* Progress + phase strip — same visual language as the
+                      Patient Details Journey tab so the doctor sees one
+                      consistent representation across surfaces. */}
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-muted-foreground">Phases</span>
+                      <span className="font-semibold">{completedPhases}/{totalPhases} · {pct}%</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 flex gap-1">
+                        {j.phases.map((p) => (
+                          <div key={p.id} className="flex-1" title={`${p.name} · ${p.status}`}>
+                            <div className={cn(
+                              'h-2 rounded-full',
+                              p.status === 'COMPLETED' ? 'bg-emerald-500'
+                                : p.status === 'ACTIVE' ? 'bg-primary'
+                                : p.status === 'SKIPPED' ? 'bg-rose-300'
+                                : 'bg-muted',
+                            )} />
+                            <p className="text-[9px] text-muted-foreground truncate mt-1">{p.name}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Complete current phase — disabled when there's no
+                          ACTIVE phase (journey already finished or paused),
+                          or while a sibling card is mid-PATCH. */}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 self-start"
+                        disabled={!activePhase || j.status !== 'ACTIVE' || isCompleting || completingPhaseId !== null}
+                        onClick={() => completeCurrentPhase(j)}
+                        title={
+                          j.status !== 'ACTIVE' ? 'Journey is not ACTIVE'
+                            : !activePhase ? 'No phase is currently ACTIVE'
+                            : `Mark "${activePhase.name}" as completed`
+                        }
+                      >
+                        {isCompleting ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {isCompleting ? 'Completing…' : 'Complete current phase'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </CardContent>
+      </Card>
+
+      <h2 className="text-xl font-bold">Create New Journey</h2>
 
       {/* Basic Info */}
       <Card>
