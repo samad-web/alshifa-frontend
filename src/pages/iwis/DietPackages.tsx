@@ -423,9 +423,16 @@ export default function DietPackagesPage({ embedded = false }: DietPackagesPageP
                     </div>
                 )}
 
-                {/* Status tabs */}
+                {/* Status tabs.
+                    DOCTOR sees only "All" — the approval-lifecycle tabs
+                    (Pending / Approved / Rejected / Archived) are admin
+                    affordances; doctors don't drive approvals so surfacing
+                    them adds noise to the doctor's view. */}
                 <div className="flex flex-wrap gap-2 border-b border-border/40 pb-3">
-                    {(["ALL", "PENDING", "APPROVED", "REJECTED", "ARCHIVED"] as const).map((t) => (
+                    {(role === "DOCTOR"
+                        ? (["ALL"] as const)
+                        : (["ALL", "PENDING", "APPROVED", "REJECTED", "ARCHIVED"] as const)
+                    ).map((t) => (
                         <Button
                             key={t}
                             size="sm"
