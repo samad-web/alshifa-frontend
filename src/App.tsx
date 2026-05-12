@@ -132,12 +132,7 @@ const SuperAdminSpecialtyRoutes = lazy(() => import("./pages/super-admin/Special
 const CareGapDashboard = lazy(() => import("./pages/admin/CareGapDashboard"));
 const MedicationAdherenceDashboard = lazy(() => import("./pages/admin/MedicationAdherenceDashboard"));
 const RevenueDashboard = lazy(() => import("./pages/admin/RevenueDashboard"));
-const FoodDatabase = lazy(() => import("./pages/admin/FoodDatabase"));
-const RecipeLibrary = lazy(() => import("./pages/admin/RecipeLibrary"));
-const WorkflowAutomation = lazy(() => import("./pages/admin/WorkflowAutomation"));
-const PatientHistory = lazy(() => import("./pages/admin/PatientHistory"));
-const PatientHealthPassport = lazy(() => import("./pages/admin/PatientHealthPassport"));
-const MyPatients = lazy(() => import("./pages/doctor/MyPatients"));
+
 const queryClient = new QueryClient();
 
 // Redirect authenticated users to their role-specific dashboard
@@ -1017,5 +1012,6 @@ const App = () => (
 );
 
 export default App;
+
 
 
