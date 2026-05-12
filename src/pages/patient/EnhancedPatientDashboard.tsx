@@ -34,6 +34,7 @@ import {
   type SmartInsight,
 } from "@/services/enhancedDashboard.service";
 import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
+import { MotivationCard } from "@/components/patient/MotivationCard";
 import { selfExamService, type SelfExamSubmission } from "@/services/selfExam.service";
 import { communicationApi } from "@/services/communication.service";
 import type { AnnouncementEntry } from "@/types";
@@ -1798,6 +1799,13 @@ export default function EnhancedPatientDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left column — primary actions */}
           <div className="lg:col-span-2 space-y-4">
+            {/* Monday Motivation Card — personalised weekly tip (prakriti +
+                Indian season). The component self-hides when the patient has
+                already read this week's card and it's not Monday, so it won't
+                permanently occupy the top of the dashboard. Save / share are
+                inline; the "Got it" CTA awards +5 Zen Points the first time. */}
+            <MotivationCard patientName={patientName} />
+
             <DailyTaskChecklist tasks={data.tasks} onActOnTask={(t) => dispatch(t.action)} />
 
             <div ref={medsRef}>
