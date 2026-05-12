@@ -92,10 +92,7 @@ type FilterKey = "all" | "today" | "overdue" | "completed";
 // Main panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-// `bare` strips the outer card chrome (border + radius + shadow) so this panel
-// can sit inside another card (e.g. <TasksSection /> on the Admin Dashboard)
-// without rendering a nested-card border. No business-logic change.
-export function FollowUpTaskPanel({ bare = false }: { bare?: boolean } = {}) {
+export function FollowUpTaskPanel() {
     const qc = useQueryClient();
     const { socket } = useWebSocket();
     const [filter, setFilter] = useState<FilterKey>("all");
@@ -178,13 +175,7 @@ export function FollowUpTaskPanel({ bare = false }: { bare?: boolean } = {}) {
     // ── Render ──────────────────────────────────────────────────────────────
 
     return (
-        <section
-            className={
-                bare
-                    ? "overflow-hidden"
-                    : "rounded-xl border bg-card shadow-card overflow-hidden"
-            }
-        >
+        <section className="rounded-xl border bg-card shadow-card overflow-hidden">
             <header className="px-5 py-3 border-b flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                     <h2 className="font-semibold flex items-center gap-2">

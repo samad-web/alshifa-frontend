@@ -270,19 +270,19 @@ export function HealthReportsTab({ patientId: overridePatientId }: HealthReports
                                     <p className="text-[11px] text-muted-foreground mt-0.5">{formatSize(r.pdfSizeBytes)}</p>
 
                                     {isProgress && stats && (
-                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                                             {stats.painReduction !== null && (
-                                                <span className="text-xs bg-green-50 text-green-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                                <span className="text-emerald-700 font-medium">
                                                     Pain ↓{stats.painReduction}%
                                                 </span>
                                             )}
                                             {stats.tasksTotal > 0 && (
-                                                <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                                <span className="text-foreground">
                                                     Tasks {stats.tasksDone}/{stats.tasksTotal}
                                                 </span>
                                             )}
                                             {stats.dietAdherencePercent !== null && (
-                                                <span className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                                <span className="text-foreground">
                                                     Diet {stats.dietAdherencePercent}%
                                                 </span>
                                             )}

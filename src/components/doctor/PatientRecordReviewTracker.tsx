@@ -118,12 +118,8 @@ export function PatientRecordReviewTracker({ patientId }: PatientRecordReviewTra
   return (
     <div
       className={cn(
-        // Anchored bottom-LEFT so it never overlaps the Consultation Room's
-        // right sidebar (where the Generate Health Report button lives).
-        // The right edge of the screen is owned by the consultation panel
-        // and admin tooling — keep this discoverability chip clear of it.
-        "fixed bottom-4 left-4 z-[9999] rounded-2xl shadow-lg border-2 border-primary/40 bg-card text-foreground",
-        "px-4 py-3 flex items-center gap-3 text-sm min-w-[280px] animate-in slide-in-from-left-2",
+        "fixed bottom-4 right-4 z-[9999] rounded-2xl shadow-lg border-2 border-primary/40 bg-card text-foreground",
+        "px-4 py-3 flex items-center gap-3 text-sm min-w-[280px] animate-in slide-in-from-right-2",
       )}
       role="status"
       aria-live="polite"
