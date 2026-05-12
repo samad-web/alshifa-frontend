@@ -281,10 +281,12 @@ export default function CareGapDashboard() {
                 <tbody>
                   {filteredGaps.map((g) => {
                     const Icon = GAP_TYPE_ICON[g.gapType];
+                    const navigable = !!g.patientId;
                     return (
                       <tr
                         key={g.id}
-                        className={`border-t transition ${rowTone(g.severity)}`}
+                        className={`group border-t transition ${rowTone(g.severity)} ${navigable ? "cursor-pointer" : ""}`}
+                        onClick={navigable ? () => navigate(`/patients/${g.patientId}/timeline`) : undefined}
                       >
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3 min-w-0">
@@ -324,8 +326,13 @@ export default function CareGapDashboard() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => navigate(`/patients/${g.patientId}/timeline`)}
-                              className="gap-1"
+                              // Stop propagation so this click doesn't re-fire
+                              // the row-level navigate handler added above.
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/patients/${g.patientId}/timeline`);
+                              }}
+                              className="gap-1 group-hover:underline"
                             >
                               View
                               <ArrowRight className="w-3.5 h-3.5" />
