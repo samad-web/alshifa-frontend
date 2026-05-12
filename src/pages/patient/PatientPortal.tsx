@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import {
   Calendar, Pill, FileText, Download, Search, ChevronLeft, ChevronRight,
-  ClipboardList, Activity, ExternalLink,
+  ClipboardList, Activity, ExternalLink, Leaf,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { FeedbackPromptListener } from "@/components/FeedbackModal";
 import { HomeTherapyFeedbackListener } from "@/components/HomeTherapyFeedbackListener";
 import { HealthReportsTab } from "@/components/patient/HealthReportsTab";
+import { MyTipsTab } from "@/components/patient/MyTipsTab";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -459,7 +460,7 @@ export default function PatientPortal() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <Tabs defaultValue="appointments" className="w-full">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="appointments" className="gap-1.5">
                   <Calendar className="h-3.5 w-3.5" /> Appointments
                 </TabsTrigger>
@@ -475,12 +476,16 @@ export default function PatientPortal() {
                 <TabsTrigger value="reports" className="gap-1.5">
                   <FileText className="h-3.5 w-3.5" /> Health Reports
                 </TabsTrigger>
+                <TabsTrigger value="tips" className="gap-1.5">
+                  <Leaf className="h-3.5 w-3.5" /> My Tips
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="appointments" className="pt-4"><AppointmentsTab /></TabsContent>
               <TabsContent value="prescriptions" className="pt-4"><PrescriptionsTab /></TabsContent>
               <TabsContent value="documents" className="pt-4"><DocumentsTab /></TabsContent>
               <TabsContent value="summaries" className="pt-4"><VisitSummariesTab /></TabsContent>
               <TabsContent value="reports" className="pt-4"><HealthReportsTab /></TabsContent>
+              <TabsContent value="tips" className="pt-4"><MyTipsTab /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>
