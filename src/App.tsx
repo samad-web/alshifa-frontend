@@ -311,6 +311,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+            <Route
+        path="/consultation/:appointmentId"
+        element={
+          <ProtectedRoute allowedRoles={["THERAPIST", "DOCTOR", "ADMIN_DOCTOR"]}>
+            <ConsultationRoom />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/therapist/session/:appointmentId"
         element={
@@ -1015,6 +1023,7 @@ const App = () => (
 );
 
 export default App;
+
 
 
 
