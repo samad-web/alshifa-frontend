@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useBranches } from "@/hooks/useBranches";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -79,12 +79,24 @@ export default function PerformanceScorecards() {
       .finally(() => setLoading(false));
   }, [periodType, isBranchAdmin]);
 
+  // Resolve the current period string ("2026-04" / "2026-Q2") that the
+  // backend filters scorecards by. The previous code mistakenly forwarded
+  // periodType ("monthly") here, so the WHERE clause never matched any row
+  // and the Branch Overview was always empty even right after a successful
+  // generation.
+  const currentPeriod = useMemo(() => {
+    const now = new Date();
+    return periodType === "monthly"
+      ? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+      : `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
+  }, [periodType]);
+
   useEffect(() => {
     if (!isAdmin || !branchId) return;
-    operationsApi.getBranchScorecards(branchId, { period: periodType })
+    operationsApi.getBranchScorecards(branchId, { period: currentPeriod })
       .then(setBranchCards)
       .catch(() => {});
-  }, [branchId, periodType, isAdmin]);
+  }, [branchId, currentPeriod, isAdmin]);
 
   // Sync from navbar branch scope. Defaults to the first branch when
   // "All branches" is active. BRANCH_ADMIN is hard-pinned to their own
@@ -107,14 +119,12 @@ export default function PerformanceScorecards() {
     if (!branchId) return;
     setGenerating(true);
     try {
-      const now = new Date();
-      const period = periodType === "monthly"
-        ? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-        : `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
-      const result = await operationsApi.generateScorecards({ period, periodType });
+      const result = await operationsApi.generateScorecards({ period: currentPeriod, periodType });
       toast.success(`Generated ${result.generated} scorecards`);
-      // Refresh branch cards
-      const updated = await operationsApi.getBranchScorecards(branchId, { period: periodType });
+      // Refresh branch cards using the same period we just generated for —
+      // mismatched period strings here were why the Branch Overview stayed
+      // empty after generation.
+      const updated = await operationsApi.getBranchScorecards(branchId, { period: currentPeriod });
       setBranchCards(updated);
     } catch {
       toast.error("Failed to generate scorecards");

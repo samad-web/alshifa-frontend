@@ -97,7 +97,9 @@ export default function TherapistPatients() {
                                     total: patient.totalSittings || 20
                                 }}
                                 phoneNumber={patient.phoneNumber}
-                                reason={patient.therapyType}
+                                reason={Array.isArray(patient.therapyTypes) && patient.therapyTypes.length > 0
+                                    ? patient.therapyTypes.join(", ")
+                                    : null}
                             >
                                 <Button
                                     variant="outline"

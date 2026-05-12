@@ -71,7 +71,10 @@ interface FormState {
   phoneNumber: string;
   dob: string;              // YYYY-MM-DD
   gender: string;
-  therapyType: string;
+  // Comma-separated free-text input. Split into a string[] on submit so the
+  // backend receives the new array shape; placeholder doubles as the format
+  // hint to the admin ("e.g. Ayurveda, Physiotherapy").
+  therapyTypes: string;
   specialization: string;
   qualification: string;
   yearsExperience: string;  // kept as string in the input; coerced to number on submit
@@ -103,7 +106,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   email: "", password: "", fullName: "", role: "PATIENT", branchId: "",
-  phoneNumber: "", dob: "", gender: "", therapyType: "",
+  phoneNumber: "", dob: "", gender: "", therapyTypes: "",
   specialization: "", qualification: "", yearsExperience: "", clinic: "",
   registrationNumber: "",
   initialSkills: [],
@@ -180,7 +183,11 @@ export default function CreateUser() {
     // require the admin to enter one for that role.
     if (!form.password && !isPatientRole) missing.push("password");
     if (form.fullName.trim().length < 2) missing.push("fullName");
-    if (!form.branchId) missing.push("branchId");
+    // branchId is only mandatory for roles whose authorization is branch-scoped
+    // (DOCTOR, BRANCH_ADMIN). Other roles can be created without a branch
+    // assignment — the backend service-layer enforcement still protects the
+    // branch-scoped roles, so dropping the blanket requirement here is safe.
+    if (!form.branchId && (form.role === "DOCTOR" || form.role === "BRANCH_ADMIN")) missing.push("branchId");
     for (const f of requiredForRole) {
       const v = form[f];
       if (v === undefined || v === null || String(v).trim() === "") missing.push(f as string);
@@ -246,7 +253,12 @@ export default function CreateUser() {
     if (isPatientRole) {
       if (form.dob) p.dob = form.dob;
       if (form.gender) p.gender = form.gender;
-      if (form.therapyType) p.therapyType = form.therapyType;
+      if (form.therapyTypes.trim()) {
+        p.therapyTypes = form.therapyTypes
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
       if (generatedCreds) p.patientId = generatedCreds;
       // Medical history captured at intake. Stored on the Patient record
       // (onboardingData) so it surfaces in triage / consultation views.
@@ -506,7 +518,10 @@ export default function CreateUser() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label htmlFor="branchId" className="flex items-center gap-2">
-                          <Building2 className="w-3.5 h-3.5 text-muted-foreground" /> Assigned Branch <span className="text-attention">*</span>
+                          <Building2 className="w-3.5 h-3.5 text-muted-foreground" /> Assigned Branch
+                          {(form.role === "DOCTOR" || form.role === "BRANCH_ADMIN") && (
+                            <span className="text-attention">*</span>
+                          )}
                         </Label>
                         <SearchableSelect
                           value={form.branchId}
@@ -572,9 +587,9 @@ export default function CreateUser() {
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="therapyType">Therapy type (optional)</Label>
-                        <Input id="therapyType" name="therapyType" placeholder="e.g. Ayurveda, Physiotherapy"
-                          value={form.therapyType} onChange={handleChange}
+                        <Label htmlFor="therapyTypes">Therapy types (optional)</Label>
+                        <Input id="therapyTypes" name="therapyTypes" placeholder="e.g. Ayurveda, Physiotherapy"
+                          value={form.therapyTypes} onChange={handleChange}
                           className="h-12 bg-secondary/30 border-secondary focus:bg-background transition-all rounded-xl" />
                       </div>
 

@@ -48,7 +48,16 @@ function timeAgo(dateStr: string | null | undefined) {
   return new Date(dateStr).toLocaleDateString();
 }
 
-export default function StaffActivityFeed() {
+export interface StaffActivityFeedProps {
+  /** Render without page-level chrome (AppLayout + PageHeader). Used
+   *  when the page is embedded as a tab inside <StaffSchedule />.
+   *  Default false preserves the standalone /staff-activity render
+   *  shape — and the FeatureGate empty state when a tenant doesn't
+   *  have STAFF_ACTIVITY_FEED enabled. */
+  embedded?: boolean;
+}
+
+export default function StaffActivityFeed({ embedded = false }: StaffActivityFeedProps = {}) {
   const { role } = useAuth();
   const { branches } = useBranches();
   // Reads the global navbar branch scope. `branchIdParam` is `undefined`
@@ -92,21 +101,23 @@ export default function StaffActivityFeed() {
   };
 
   if (loading) {
-    return (
-      <AppLayout>
-        <div className="container max-w-7xl mx-auto px-4 py-8 flex items-center justify-center min-h-[50vh]">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-            <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Loading Staff Feed...</p>
-          </div>
+    const loadingBody = (
+      <div className={embedded
+        ? "flex items-center justify-center min-h-[50vh]"
+        : "container max-w-7xl mx-auto px-4 py-8 flex items-center justify-center min-h-[50vh]"}
+      >
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Loading Staff Feed...</p>
         </div>
-      </AppLayout>
+      </div>
     );
+    return embedded ? loadingBody : <AppLayout>{loadingBody}</AppLayout>;
   }
 
-  return (
-    <AppLayout>
-      <div className="container max-w-7xl mx-auto px-4 py-8 space-y-8">
+  const body = (
+    <div className={embedded ? "space-y-8" : "container max-w-7xl mx-auto px-4 py-8 space-y-8"}>
+      {!embedded && (
         <PageHeader
           title="Staff Activity Feed"
           subtitle="Real-time view of all staff members and their current status."
@@ -128,6 +139,7 @@ export default function StaffActivityFeed() {
             </Button>
           </div>
         </PageHeader>
+      )}
 
         {error && (
           <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
@@ -201,8 +213,9 @@ export default function StaffActivityFeed() {
           </div>
         )}
 
-        <p className="text-[10px] text-muted-foreground text-center">Auto-refreshes every 30 seconds</p>
-      </div>
-    </AppLayout>
+      <p className="text-[10px] text-muted-foreground text-center">Auto-refreshes every 30 seconds</p>
+    </div>
   );
+
+  return embedded ? body : <AppLayout>{body}</AppLayout>;
 }

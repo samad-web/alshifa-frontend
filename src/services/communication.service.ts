@@ -80,7 +80,12 @@ export const communicationApi = {
   // ── Handoff Notes (Feature 35) ────────────────────────────────────────────
 
   async createHandoffNote(data: {
-    patientId: string; toClinicianId?: string; toBranchId?: string;
+    patientId: string;
+    /** Required for SENT handoffs (the only flow the form exposes today). */
+    toClinicianId: string;
+    toBranchId?: string;
+    /** DD/MM/YYYY string — backend converts to ISO before persisting. */
+    handoffDate: string;
     summary: string; currentMedications?: { name: string; dosage: string; frequency: string }[];
     activeConditions?: string[]; nextSteps?: string; urgency?: string;
   }): Promise<HandoffNoteEntry> {
@@ -226,7 +231,7 @@ export const communicationApi = {
   },
 
   // Doctor view — visit summaries authored by the calling clinician.
-  async getMyVisitSummaries(params?: { page?: number; limit?: number }): Promise<{ summaries: VisitSummaryEntry[]; total: number }> {
+  async getMyVisitSummaries(params?: { page?: number; limit?: number; startDate?: string; endDate?: string }): Promise<{ summaries: VisitSummaryEntry[]; total: number }> {
     type Shape = { summaries: VisitSummaryEntry[]; total: number } | { data: VisitSummaryEntry[]; pagination?: { total?: number } };
     const { data } = await apiClient.get<Shape>('/api/visit-summary/mine', params);
     if ('summaries' in data) return data;

@@ -443,7 +443,15 @@ export default function CentralizedInventory() {
                   <SelectTrigger>
                     <SelectValue placeholder="Select medicine" />
                   </SelectTrigger>
-                  <SelectContent>
+                  {/* z-[9999] keeps the popover above the Dialog overlay; without
+                      it the dropdown rendered behind the modal and looked
+                      "hidden" to admins running Inventory HQ. */}
+                  <SelectContent className="z-[9999] max-h-60 overflow-y-auto">
+                    {inventory.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
+                        No medicines in inventory yet.
+                      </div>
+                    )}
                     {inventory.map(item => {
                       const med = item.medicine as any;
                       return (
@@ -471,7 +479,12 @@ export default function CentralizedInventory() {
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="z-[9999] max-h-60 overflow-y-auto">
+                      {allBranches.length === 0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
+                          No branches found.
+                        </div>
+                      )}
                       {allBranches.map(b => (
                         <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
                       ))}
@@ -484,9 +497,14 @@ export default function CentralizedInventory() {
                     <SelectTrigger>
                       <SelectValue placeholder={tfFrom ? "Select" : "Pick source first"} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="z-[9999] max-h-60 overflow-y-auto">
                       {/* Source branch is excluded so the dropdown
                           can't even offer a same-branch transfer. */}
+                      {allBranches.filter((b) => b.id !== tfFrom).length === 0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
+                          No other branches to transfer to.
+                        </div>
+                      )}
                       {allBranches
                         .filter((b) => b.id !== tfFrom)
                         .map(b => (

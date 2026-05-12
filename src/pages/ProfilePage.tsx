@@ -65,7 +65,7 @@ type PatientProfile = {
   age: number | null;
   gender: string | null;
   phoneNumber: string | null;
-  therapyType: string | null;
+  therapyTypes: string[];
   patientId: string | null;
   zenPoints: number;
   profilePhoto: string | null;
@@ -215,7 +215,9 @@ export default function ProfilePage() {
       // Patient-only
       dob: me.patient?.dob ? String(me.patient.dob).slice(0, 10) : "",
       gender: me.patient?.gender ?? "",
-      therapyType: me.patient?.therapyType ?? "",
+      // Edit-buffer keeps a comma-separated string for typing convenience;
+      // split-on-save converts to the string[] payload the backend expects.
+      therapyTypes: Array.isArray(me.patient?.therapyTypes) ? me.patient.therapyTypes.join(", ") : "",
       // Shared personal details (clinicians, pharmacist, patient)
       phoneNumber: p.phoneNumber ?? me.patient?.phoneNumber ?? "",
       bio: p.bio ?? "",
@@ -239,7 +241,12 @@ export default function ProfilePage() {
       if (cleanPhone) payload.phoneNumber = cleanPhone;
       if (buf.dob) payload.dob = buf.dob;
       if (buf.gender) payload.gender = buf.gender;
-      if (buf.therapyType !== undefined) payload.therapyType = stripEdgeSpaces(buf.therapyType) || null;
+      if (buf.therapyTypes !== undefined) {
+        payload.therapyTypes = stripEdgeSpaces(buf.therapyTypes)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
     }
     if (me.role === "DOCTOR" || me.role === "ADMIN_DOCTOR" || me.role === "THERAPIST") {
       if (buf.clinic !== undefined) payload.clinic = stripEdgeSpaces(buf.clinic) || null;
@@ -334,6 +341,7 @@ export default function ProfilePage() {
                     ref={fileInputRef}
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
+                    capture="environment"
                     className="hidden"
                     onChange={handlePhotoChange}
                   />
@@ -456,9 +464,10 @@ export default function ProfilePage() {
                              onBlur={() => setBuf(b => ({ ...b, phoneNumber: stripEdgeSpaces(b.phoneNumber ?? "") }))} />
                     </div>
                     <div>
-                      <Label htmlFor="therapyType">Therapy type</Label>
-                      <Input id="therapyType" value={buf.therapyType}
-                             onChange={(e) => setBuf({ ...buf, therapyType: e.target.value })} />
+                      <Label htmlFor="therapyTypes">Therapy types</Label>
+                      <Input id="therapyTypes" placeholder="e.g. AYURVEDA, YOGA"
+                             value={buf.therapyTypes}
+                             onChange={(e) => setBuf({ ...buf, therapyTypes: e.target.value })} />
                     </div>
                   </div>
                 </div>
@@ -469,7 +478,13 @@ export default function ProfilePage() {
                   <Row icon={Cake}  label="Age"          value={me.patient?.age} />
                   <Row icon={User}  label="Gender"       value={me.patient?.gender ? me.patient.gender.replace(/_/g, " ").toLowerCase() : null} />
                   <Row icon={Phone} label="Phone"        value={me.patient?.phoneNumber} />
-                  <Row icon={Activity} label="Therapy type" value={me.patient?.therapyType} />
+                  <Row
+                    icon={Activity}
+                    label="Therapy types"
+                    value={Array.isArray(me.patient?.therapyTypes) && me.patient.therapyTypes.length > 0
+                      ? me.patient.therapyTypes.join(", ")
+                      : null}
+                  />
                   <Row icon={Activity} label="Zen points"   value={me.patient?.zenPoints} />
                   {me.patient?.patientId && (
                     <Row icon={ShieldCheck} label="Patient ID" value={me.patient.patientId} />

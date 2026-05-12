@@ -1,14 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Navigation } from "@/components/layout/navigation";
 import { AppointmentModal } from "@/components/appointment-modal";
 import { AppointmentList } from "@/components/appointment-list";
+import { WalkInBookingModal } from "@/components/appointments/WalkInBookingModal";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, CalendarDays, Clock, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { Plus, CalendarDays, Clock, CheckCircle2, XCircle, AlertTriangle, Loader2, Activity, UserPlus } from "lucide-react";
+
+// Live Queue board — lazy-loaded so the Appointments page doesn't pull the
+// queue chunk for users who never open that tab.
+const LiveQueueBoard = lazy(() => import("@/pages/admin/LiveQueueBoard"));
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { useNotifications } from "@/contexts/NotificationContext";
 import { apiClient } from "@/lib/api-client";
 import { AppointmentsSkeleton } from "@/components/ui/page-skeletons";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -36,10 +40,12 @@ function appointmentBranchName(a: any): string | null {
 }
 
 type AppointmentStatus = "ALL" | "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED";
+// Live Queue is rendered as an extra tab inside Appointments. It uses its
+// own value so we keep the AppointmentStatus filter logic untouched.
+type AppointmentTab = AppointmentStatus | "LIVE_QUEUE";
 
 export default function Appointments() {
     const { role } = useAuth();
-    const { addNotification } = useNotifications();
     const { isAll, branchIdParam } = useBranchScope();
     const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
     const [appointments, setAppointments] = useState<any[]>([]);
@@ -47,14 +53,26 @@ export default function Appointments() {
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
     const [editingAppointment, setEditingAppointment] = useState<any>(null);
-    const [activeTab, setActiveTab] = useState<AppointmentStatus>("ALL");
+    const [activeTab, setActiveTab] = useState<AppointmentTab>("ALL");
+    // Live Queue is gated by the same roles that previously had a sidebar
+    // entry — patients/pharmacists never saw it, so don't show the tab to them.
+    const showLiveQueueTab = ["DOCTOR", "ADMIN_DOCTOR", "ADMIN", "BRANCH_ADMIN"].includes(role || "");
     const [cancelTarget, setCancelTarget] = useState<any>(null);
     const [cancelling, setCancelling] = useState(false);
+    // Walk-in booking modal — only opens for ADMIN/ADMIN_DOCTOR.
+    const [walkInOpen, setWalkInOpen] = useState(false);
 
     const canApprove = ["DOCTOR", "THERAPIST", "ADMIN", "ADMIN_DOCTOR"].includes(role || "");
 
     useEffect(() => {
         fetchAppointments();
+    }, []);
+
+    // Pre-select the Live Queue tab when the URL says ?tab=live-queue
+    // (back-compat for the old /live-queue links that now redirect here).
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("tab") === "live-queue") setActiveTab("LIVE_QUEUE");
     }, []);
 
     const fetchAppointments = async () => {
@@ -103,17 +121,12 @@ export default function Appointments() {
     const handleApprove = async (appointmentId: string) => {
         try {
             const { data: updatedAppointment } = await apiClient.put<any>(`/api/appointments/${appointmentId}/approve`, {});
+            // Single confirmation toast for the clinician. The patient is
+            // notified server-side by notificationService.sendAppointmentConfirmation
+            // (idempotent, gated on full approval). Adding addNotification here
+            // would fire on the clinician's own context, double-toasting and
+            // cluttering their bell with a notification meant for the patient.
             toast.success("Appointment approved successfully");
-
-            // Trigger notification for the patient
-            addNotification({
-                type: "appointment_confirmed",
-                title: "Appointment Confirmed",
-                message: `Your appointment on ${new Date(updatedAppointment.date).toLocaleDateString()} has been approved.`,
-                data: { appointmentId: updatedAppointment.id },
-                priority: 'MEDIUM'
-            });
-
             setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updatedAppointment } : a));
         } catch (error: any) {
             toast.error(error?.message || "Failed to approve appointment");
@@ -125,16 +138,6 @@ export default function Appointments() {
         try {
             const { data: updatedAppointment } = await apiClient.put<any>(`/api/appointments/${appointmentId}/reject`, {});
             toast.success("Appointment rejected successfully");
-
-            // Trigger notification for the patient
-            addNotification({
-                type: "appointment_rejected",
-                title: "Appointment Not Approved",
-                message: `Your appointment request for ${new Date(updatedAppointment.date).toLocaleDateString()} was not approved.`,
-                data: { appointmentId: updatedAppointment.id },
-                priority: 'MEDIUM'
-            });
-
             setAppointments((prev) => prev.map((a) => a.id === appointmentId ? { ...a, ...updatedAppointment } : a));
         } catch (error: any) {
             toast.error(error?.message || "Failed to reject appointment");
@@ -188,7 +191,7 @@ export default function Appointments() {
             <div className="min-h-screen bg-background pt-16 md:pt-20 px-4 md:px-8 pb-12">
                 <div className="max-w-6xl mx-auto space-y-6">
                     {/* Header */}
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div>
                             <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
                                 <CalendarDays className="h-8 w-8 text-primary" />
@@ -198,10 +201,20 @@ export default function Appointments() {
                                 Manage and approve appointment requests
                             </p>
                         </div>
+                        {isAdmin && (
+                            <Button
+                                onClick={() => setWalkInOpen(true)}
+                                className="text-white"
+                                style={{ background: "#0D6E6E" }}
+                            >
+                                <UserPlus className="w-4 h-4 mr-2" />
+                                Book Walk-In
+                            </Button>
+                        )}
                     </div>
 
                     {/* Tabs */}
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AppointmentStatus)}>
+                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AppointmentTab)}>
                         <TabsList className="flex w-full overflow-x-auto h-auto p-1 bg-muted/50 gap-1 no-scrollbar">
                             <TabsTrigger value="ALL" className="flex-1 min-w-[80px] gap-2">
                                 All
@@ -236,8 +249,23 @@ export default function Appointments() {
                                     {getTabCount("CANCELLED")}
                                 </span>
                             </TabsTrigger>
+                            {showLiveQueueTab && (
+                                <TabsTrigger value="LIVE_QUEUE" className="flex-1 min-w-[110px] gap-2">
+                                    <Activity className="h-3 w-3" />
+                                    Live Queue
+                                </TabsTrigger>
+                            )}
                         </TabsList>
 
+                        {showLiveQueueTab && (
+                            <TabsContent value="LIVE_QUEUE" className="mt-6">
+                                <Suspense fallback={<div className="py-20 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin inline-block" /></div>}>
+                                    <LiveQueueBoard />
+                                </Suspense>
+                            </TabsContent>
+                        )}
+
+                        {activeTab !== "LIVE_QUEUE" && (
                         <TabsContent value={activeTab} className="mt-6">
                             {loading ? (
                                 <AppointmentsSkeleton />
@@ -276,6 +304,7 @@ export default function Appointments() {
                                 />
                             )}
                         </TabsContent>
+                        )}
                     </Tabs>
                 </div>
             </div>
@@ -346,6 +375,15 @@ export default function Appointments() {
                 onSuccess={fetchAppointments}
                 appointment={editingAppointment}
             />
+
+            {/* Walk-In Booking Modal (ADMIN / ADMIN_DOCTOR only) */}
+            {isAdmin && (
+                <WalkInBookingModal
+                    isOpen={walkInOpen}
+                    onClose={() => setWalkInOpen(false)}
+                    onBooked={fetchAppointments}
+                />
+            )}
         </>
     );
 }

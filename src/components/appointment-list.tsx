@@ -1,4 +1,4 @@
-import { Calendar, Clock, User, Edit2, XCircle, CheckCircle2, Video, MessageSquare, Activity, MapPin, ClipboardList, Paperclip, FileText } from "lucide-react";
+import { Calendar, Clock, User, Edit2, XCircle, CheckCircle2, Video, MessageSquare, Activity, MapPin, ClipboardList, Paperclip, FileText, Stethoscope } from "lucide-react";
 import { RetentionChecklistModal } from "./RetentionChecklistModal";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProgressAnalysisReport } from "./ProgressAnalysisReport";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
+
+const CONSULTATION_ROOM_ROLES = ["DOCTOR", "ADMIN_DOCTOR", "THERAPIST"];
 
 interface Appointment {
     id: string;
@@ -43,6 +46,7 @@ interface Appointment {
     consultationMode?: string;
     consultationType?: string;
     meetingLink?: string;
+    isWalkIn?: boolean;
     doctorApproved: boolean;
     therapistApproved: boolean;
     branch?: {
@@ -90,6 +94,8 @@ export function AppointmentList({
     onStartSession,
 }: AppointmentListProps) {
     const { role } = useAuth();
+    const navigate = useNavigate();
+    const canEnterConsultationRoom = CONSULTATION_ROOM_ROLES.includes(role ?? "");
     const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
     const [reportData, setReportData] = useState<any>(null);
     const [loadingReport, setLoadingReport] = useState(false);
@@ -239,6 +245,11 @@ export function AppointmentList({
                                             {appointment.consultationType && appointment.consultationType !== "DOCTOR" && (
                                                 <Badge variant="outline" className="text-[10px] font-bold border-secondary/30 text-secondary bg-secondary/5">
                                                     {appointment.consultationType}
+                                                </Badge>
+                                            )}
+                                            {appointment.isWalkIn && (
+                                                <Badge variant="outline" className="text-[10px] font-bold bg-amber-100 text-amber-700 border-amber-200">
+                                                    Walk-In
                                                 </Badge>
                                             )}
                                         </div>
@@ -421,8 +432,8 @@ export function AppointmentList({
                                             </Button>
                                         )}
 
-                                        {/* Cancel Action */}
-                                        {onCancel && (appointment.status === "SCHEDULED" || appointment.status === "CONFIRMED" || appointment.status === "PENDING") && (
+                                        {/* Cancel Action — doctors cannot cancel from the Pending tab; they approve/reject instead. */}
+                                        {onCancel && (appointment.status === "SCHEDULED" || appointment.status === "CONFIRMED" || (appointment.status === "PENDING" && role !== "DOCTOR" && role !== "ADMIN_DOCTOR")) && (
                                             <Button
                                                 size="sm"
                                                 variant="outline"
@@ -507,6 +518,41 @@ export function AppointmentList({
                                                 Retention Checklist
                                             </Button>
                                         )}
+
+                                        {/* Consultation Room — clinicians get a deep link to the
+                                            session view from any status (including the same row
+                                            as the other actions, for visual consistency). The
+                                            button below this block handles the CANCELLED case
+                                            where this entire actions row is hidden. */}
+                                        {canEnterConsultationRoom && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => navigate(`/consultation/${appointment.id}`)}
+                                                className="gap-2 border-teal-700 text-teal-700 hover:bg-teal-50 hover:text-teal-800 hover:border-teal-800"
+                                            >
+                                                <Stethoscope className="w-3 h-3" />
+                                                Consultation Room
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Cancelled-fallback: the standard action row is hidden for
+                                    CANCELLED appointments (see gate above), but doctors still
+                                    need to enter the consultation room to review notes / pull a
+                                    health report. Render a minimal action strip just for that. */}
+                                {canEnterConsultationRoom && appointment.status === "CANCELLED" && (
+                                    <div className="flex flex-wrap gap-2 pt-2">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => navigate(`/consultation/${appointment.id}`)}
+                                            className="gap-2 border-teal-700/40 text-teal-700 hover:bg-teal-700/10"
+                                        >
+                                            <Stethoscope className="w-3 h-3" />
+                                            Consultation Room
+                                        </Button>
                                     </div>
                                 )}
                             </div>

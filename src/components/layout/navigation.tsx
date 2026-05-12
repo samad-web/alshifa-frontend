@@ -267,6 +267,10 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/food-database", label: "Food Database", icon: Leaf, section: "Records" },
             { path: "/recipe-library", label: "Recipe Library", icon: BookOpen, section: "Records" },
             { path: "/diet-packages", label: "Diet Package Reviews", icon: Salad, section: "Records" },
+            { path: "/food-database", label: "Food Database", icon: Salad, section: "Records" },
+            { path: "/recipe-library", label: "Recipe Library", icon: Salad, section: "Records" },
+            { path: "/my-patients", label: "My Patients View", icon: Users, section: "Patients" },
+            { path: "/patient-history", label: "Patient History", icon: FileText, section: "Records" },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon, section: "Records" },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText, section: "Records" },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck, section: "Records" },
@@ -1246,3 +1250,4 @@ export function Navigation() {
     </>
   );
 }
+

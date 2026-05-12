@@ -36,11 +36,14 @@ export default function PatientAppointments() {
     const fetchAppointments = async () => {
         try {
             const { data } = await apiClient.get<any>('/api/appointments');
-            if (data.appointments) {
-                setAppointments(data.appointments);
-            } else {
-                setAppointments(data);
-            }
+            const list = (data?.appointments ?? data ?? []) as any[];
+            // Most recent first — sort defensively even though the API already
+            // returns date-desc, so the patient list never depends on server
+            // ordering.
+            const sorted = [...list].sort(
+                (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+            );
+            setAppointments(sorted);
         } catch (error) {
             console.error("Failed to fetch appointments:", error);
         } finally {

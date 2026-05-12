@@ -17,6 +17,19 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { useBranchScope } from "@/hooks/useBranchScope";
 
+// Resolve a stored ClinicalPhoto.filePath into a browser-loadable URL.
+// Supabase uploads come back as full https://… URLs and pass through; the
+// disk-fallback path returns a server-relative `/uploads/...` which needs the
+// backend origin prepended (Vite is on a different port from the API).
+const PHOTO_PLACEHOLDER = "/placeholder-image.png";
+function getPhotoUrl(filePath: string | null | undefined): string {
+    if (!filePath) return PHOTO_PLACEHOLDER;
+    if (/^https?:\/\//i.test(filePath)) return filePath;
+    const base = (import.meta.env.VITE_API_URL as string | undefined) || "http://localhost:4000";
+    const path = filePath.startsWith("/") ? filePath : `/${filePath}`;
+    return `${base}${path}`;
+}
+
 const CATEGORIES: PhotoCategory[] = ["SKIN_CONDITION", "SWELLING_OEDEMA", "WOUND_HEALING", "WEIGHT_CHANGE", "GENERAL_PROGRESS"];
 const STAGES: PhotoStage[] = ["BEFORE", "DURING", "AFTER"];
 const CAT_LABEL: Record<PhotoCategory, string> = {
@@ -176,7 +189,12 @@ export default function ClinicalPhotosPage() {
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                     {photos.map((p) => (
                                         <Panel key={p.id} title={CAT_LABEL[p.category]} className="overflow-hidden">
-                                            <img src={p.filePath} alt={p.category} className="w-full h-40 object-cover rounded-lg" />
+                                            <img
+                                                src={getPhotoUrl(p.filePath)}
+                                                alt={p.category}
+                                                onError={(e) => { e.currentTarget.src = PHOTO_PLACEHOLDER; }}
+                                                className="w-full h-40 object-cover rounded-lg bg-muted"
+                                            />
                                             <div className="flex flex-wrap gap-1 mt-3">
                                                 <Badge variant={p.stage === "BEFORE" ? "secondary" : p.stage === "AFTER" ? "default" : "outline"}>{p.stage}</Badge>
                                                 {p.bodyRegion && <Badge variant="outline">{p.bodyRegion}</Badge>}
@@ -200,7 +218,12 @@ export default function ClinicalPhotosPage() {
                                                     <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Before</div>
                                                     {pair.before ? (
                                                         <>
-                                                            <img src={pair.before.filePath} alt="before" className="w-full h-64 object-cover rounded-lg" />
+                                                            <img
+                                                                src={getPhotoUrl(pair.before.filePath)}
+                                                                alt="before"
+                                                                onError={(e) => { e.currentTarget.src = PHOTO_PLACEHOLDER; }}
+                                                                className="w-full h-64 object-cover rounded-lg bg-muted"
+                                                            />
                                                             <div className="text-xs text-muted-foreground">{new Date(pair.before.takenAt).toLocaleDateString()}</div>
                                                         </>
                                                     ) : <div className="h-64 rounded-lg border-2 border-dashed border-border flex items-center justify-center text-muted-foreground text-sm">No photo</div>}
@@ -210,7 +233,12 @@ export default function ClinicalPhotosPage() {
                                                     <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">After</div>
                                                     {pair.after ? (
                                                         <>
-                                                            <img src={pair.after.filePath} alt="after" className="w-full h-64 object-cover rounded-lg" />
+                                                            <img
+                                                                src={getPhotoUrl(pair.after.filePath)}
+                                                                alt="after"
+                                                                onError={(e) => { e.currentTarget.src = PHOTO_PLACEHOLDER; }}
+                                                                className="w-full h-64 object-cover rounded-lg bg-muted"
+                                                            />
                                                             <div className="text-xs text-muted-foreground">{new Date(pair.after.takenAt).toLocaleDateString()}</div>
                                                         </>
                                                     ) : <div className="h-64 rounded-lg border-2 border-dashed border-border flex items-center justify-center text-muted-foreground text-sm">No photo yet</div>}
@@ -237,7 +265,7 @@ export default function ClinicalPhotosPage() {
                         <form onSubmit={submit} className="space-y-4 py-4">
                             <div className="space-y-2">
                                 <Label>Photo</Label>
-                                <Input type="file" accept="image/*" required onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] ?? null })} />
+                                <Input type="file" accept="image/*" capture="environment" required onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] ?? null })} />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
