@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Upload, Search, Leaf, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Upload, Search, Leaf, Loader2, ChevronLeft, ChevronRight, BookOpen } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { FoodCard } from "@/components/diet/FoodCard";
 import { AddFoodModal } from "@/components/diet/AddFoodModal";
 import { BulkImportModal } from "@/components/diet/BulkImportModal";
+import RecipeLibrary from "@/pages/admin/RecipeLibrary";
 import type {
   AyurvedicFood,
   FoodCategory,
@@ -30,6 +32,13 @@ const CATEGORIES: FoodCategory[] = ["GRAIN","VEGETABLE","FRUIT","DAIRY","SPICE",
 const SEASONS: Season[] = ["WINTER","SUMMER","MONSOON","AUTUMN","SPRING"];
 const DOSHAS = ["VATA","PITTA","KAPHA"] as const;
 
+interface FoodDatabaseInnerProps {
+  /** Render without AppLayout + outer PageHeader chrome. Used when the
+   *  food list is embedded as a tab inside the combined Food Database +
+   *  Recipe Library page. Defaults to false → standalone render. */
+  embedded?: boolean;
+}
+
 /**
  * /food-database — Ayurvedic Food Database management page.
  *
@@ -38,8 +47,11 @@ const DOSHAS = ["VATA","PITTA","KAPHA"] as const;
  *  - Bulk Import is hidden for DOCTOR (admin operation only)
  *  - DOCTOR sees view-only cards (FoodCard.showActions=false). Backend
  *    enforces the same — owner-only edit/delete returns 403 otherwise
+ *
+ * Internal name; the file's default export below wraps this in a tabs
+ * shell so /food-database shows both Food Database and Recipe Library.
  */
-export default function FoodDatabase() {
+function FoodDatabaseInner({ embedded = false }: FoodDatabaseInnerProps = {}) {
   const { role } = useAuth();
   const qc = useQueryClient();
 
@@ -109,26 +121,36 @@ export default function FoodDatabase() {
 
   const totalPages = data?.pagination?.totalPages ?? 1;
 
-  return (
-    <AppLayout>
-      <div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
+  const actions = (
+    <div className="flex items-center gap-2">
+      {canBulkImport && (
+        <Button variant="outline" onClick={() => setBulkOpen(true)}>
+          <Upload className="w-4 h-4 mr-2" /> Bulk Import
+        </Button>
+      )}
+      {canEditEachCard && (
+        <Button onClick={() => { setEditing(null); setAddOpen(true); }}>
+          <Plus className="w-4 h-4 mr-2" /> Add Food
+        </Button>
+      )}
+    </div>
+  );
+
+  const content = (
+    <>
+      {!embedded && (
         <PageHeader
           title="🌿 Ayurvedic Food Database"
           subtitle="Branch-scoped catalogue of foods with dosha effects, rasa/guna metadata, nutrition and allergens."
         >
-          <div className="flex items-center gap-2">
-            {canBulkImport && (
-              <Button variant="outline" onClick={() => setBulkOpen(true)}>
-                <Upload className="w-4 h-4 mr-2" /> Bulk Import
-              </Button>
-            )}
-            {canEditEachCard && (
-              <Button onClick={() => { setEditing(null); setAddOpen(true); }}>
-                <Plus className="w-4 h-4 mr-2" /> Add Food
-              </Button>
-            )}
-          </div>
+          {actions}
         </PageHeader>
+      )}
+      {embedded && (
+        <div className="flex justify-end">
+          {actions}
+        </div>
+      )}
 
         {/* Filter bar */}
         <div className="rounded-xl border bg-card p-3 flex flex-wrap items-end gap-3">
@@ -242,16 +264,60 @@ export default function FoodDatabase() {
           </>
         )}
 
-        {/* Modals */}
-        <AddFoodModal
-          open={addOpen}
-          editing={editing}
-          onClose={() => { setAddOpen(false); setEditing(null); }}
+      {/* Modals */}
+      <AddFoodModal
+        open={addOpen}
+        editing={editing}
+        onClose={() => { setAddOpen(false); setEditing(null); }}
+      />
+      <BulkImportModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+      />
+    </>
+  );
+
+  if (embedded) return <div className="space-y-6">{content}</div>;
+  return (
+    <AppLayout>
+      <div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
+        {content}
+      </div>
+    </AppLayout>
+  );
+}
+
+/**
+ * Default export — /food-database page. Wraps the food catalogue and the
+ * recipe library in shadcn Tabs so the doctor / admin can switch between
+ * them without leaving the page. The /recipe-library route still exists
+ * for backwards compatibility and renders the standalone library — but
+ * the nav no longer points there.
+ */
+export default function FoodDatabase() {
+  return (
+    <AppLayout>
+      <div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <PageHeader
+          title="🌿 Food Database & Recipe Library"
+          subtitle="Ayurvedic food catalogue and the recipes built from it."
         />
-        <BulkImportModal
-          open={bulkOpen}
-          onClose={() => setBulkOpen(false)}
-        />
+        <Tabs defaultValue="foods" className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="foods" className="gap-1.5">
+              <Leaf className="w-4 h-4" /> Food Database
+            </TabsTrigger>
+            <TabsTrigger value="recipes" className="gap-1.5">
+              <BookOpen className="w-4 h-4" /> Recipe Library
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="foods" className="mt-0">
+            <FoodDatabaseInner embedded />
+          </TabsContent>
+          <TabsContent value="recipes" className="mt-0">
+            <RecipeLibrary embedded />
+          </TabsContent>
+        </Tabs>
       </div>
     </AppLayout>
   );

@@ -29,6 +29,13 @@ const DOSHA_TARGETS: DoshaTarget[] = ["VATA", "PITTA", "KAPHA", "TRIDOSHA"];
 const MEAL_CATEGORIES: MealCategory[] = ["BREAKFAST", "LUNCH", "DINNER", "SNACK", "BEVERAGE", "GENERAL"];
 const PREP_BUCKETS = ["UNDER_15", "UNDER_30", "UNDER_60"] as const;
 
+interface RecipeLibraryProps {
+  /** Render without AppLayout + PageHeader chrome. Used when embedded as a
+   *  tab inside another page (e.g. the Food Database & Recipe Library
+   *  combined view). Defaults to false → standalone page render. */
+  embedded?: boolean;
+}
+
 /**
  * /recipe-library — reusable Ayurvedic recipe library.
  *
@@ -39,7 +46,7 @@ const PREP_BUCKETS = ["UNDER_15", "UNDER_30", "UNDER_60"] as const;
  *  - Backend's per-route role guard mirrors this; the UI just hides the
  *    affordances so therapists never see disabled-state action buttons
  */
-export default function RecipeLibrary() {
+export default function RecipeLibrary({ embedded = false }: RecipeLibraryProps = {}) {
   const { role } = useAuth();
   const qc = useQueryClient();
 
@@ -104,9 +111,9 @@ export default function RecipeLibrary() {
 
   const totalPages = data?.pagination?.totalPages ?? 1;
 
-  return (
-    <AppLayout>
-      <div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
+  const content = (
+    <>
+      {!embedded && (
         <PageHeader
           title="📖 Recipe Library"
           subtitle="Reusable Ayurvedic recipes built from foods in your branch's database."
@@ -117,6 +124,14 @@ export default function RecipeLibrary() {
             </Button>
           )}
         </PageHeader>
+      )}
+      {embedded && canAuthor && (
+        <div className="flex justify-end">
+          <Button onClick={() => { setEditing(null); setBuilderOpen(true); }}>
+            <Plus className="w-4 h-4 mr-2" /> New Recipe
+          </Button>
+        </div>
+      )}
 
         {/* Filter bar */}
         <div className="rounded-xl border bg-card p-3 flex flex-wrap items-end gap-3">
@@ -229,17 +244,25 @@ export default function RecipeLibrary() {
           </>
         )}
 
-        {/* Modals */}
-        <RecipeDetailModal
-          recipeId={selectedRecipeId}
-          open={selectedRecipeId !== null}
-          onClose={() => setSelectedRecipeId(null)}
-        />
-        <RecipeBuilderModal
-          open={builderOpen}
-          editing={editing}
-          onClose={() => { setBuilderOpen(false); setEditing(null); }}
-        />
+      {/* Modals */}
+      <RecipeDetailModal
+        recipeId={selectedRecipeId}
+        open={selectedRecipeId !== null}
+        onClose={() => setSelectedRecipeId(null)}
+      />
+      <RecipeBuilderModal
+        open={builderOpen}
+        editing={editing}
+        onClose={() => { setBuilderOpen(false); setEditing(null); }}
+      />
+    </>
+  );
+
+  if (embedded) return <div className="space-y-6">{content}</div>;
+  return (
+    <AppLayout>
+      <div className="container max-w-7xl mx-auto px-4 py-6 space-y-6">
+        {content}
       </div>
     </AppLayout>
   );

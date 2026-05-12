@@ -45,6 +45,9 @@ import {
   Leaf,
   BookOpen,
   Zap,
+  AlertTriangle,
+  Pill,
+  IndianRupee,
   LucideIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -257,20 +260,18 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           label: "Clinical",
           icon: FilePlus2,
           items: [
-            { path: "/doctor", label: "My Patients", icon: User, section: "Patients" },
+            { path: "/my-patients", label: "My Patients", icon: Users, section: "Patients" },
             { path: "/patients", label: "All Patients", icon: Users, section: "Patients" },
+            { path: "/patient-history", label: "Patient History", icon: FileText, section: "Patients" },
             { path: "/assign-patient", label: "Assign Patient", icon: User, section: "Patients" },
             { path: "/create-user", label: "Create User", icon: User, section: "Users" },
             { path: "/manage-users", label: "Manage Users", icon: Users, section: "Users" },
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2, section: "Records" },
-            { path: "/diet-prescriptions", label: "Diet Plans", icon: Salad, section: "Records" },
-            { path: "/food-database", label: "Food Database", icon: Leaf, section: "Records" },
-            { path: "/recipe-library", label: "Recipe Library", icon: BookOpen, section: "Records" },
-            { path: "/diet-packages", label: "Diet Package Reviews", icon: Salad, section: "Records" },
-            { path: "/food-database", label: "Food Database", icon: Salad, section: "Records" },
-            { path: "/recipe-library", label: "Recipe Library", icon: Salad, section: "Records" },
-            { path: "/my-patients", label: "My Patients View", icon: Users, section: "Patients" },
-            { path: "/patient-history", label: "Patient History", icon: FileText, section: "Records" },
+            // Diet Plans & Packages now live as two tabs under /diet-prescriptions.
+            // /diet-packages still routes but is reached via the tab, not the nav.
+            { path: "/diet-prescriptions", label: "Diet Plans & Packages", icon: Salad, section: "Records" },
+            // Food Database & Recipe Library combined under /food-database.
+            { path: "/food-database", label: "Food Database + Recipes", icon: Salad, section: "Records" },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon, section: "Records" },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText, section: "Records" },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck, section: "Records" },
@@ -330,6 +331,9 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           icon: BarChart3,
           items: [
             { path: "/reports", label: "Reports", icon: BarChart3 },
+            { path: "/care-gaps", label: "Care Gaps", icon: AlertTriangle },
+            { path: "/medication-adherence", label: "Medication Adherence", icon: Pill },
+            { path: "/revenue", label: "Revenue", icon: IndianRupee },
             // Patient + team chats are unified at /chat (in-page tab strip).
             { path: "/chat", label: "Chat", icon: MessageSquare },
           ],
