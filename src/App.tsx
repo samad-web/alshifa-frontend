@@ -129,6 +129,9 @@ const SuperAdminAudit = lazy(() => import("./pages/super-admin/AuditLog"));
 const SuperAdminTriageOversight = lazy(() => import("./pages/super-admin/TriageOversight"));
 const SuperAdminSpecialtyRoutes = lazy(() => import("./pages/super-admin/SpecialtyRoutesAdmin"));
 
+const PatientHistory = lazy(() => import("./pages/admin/PatientHistory"));
+const PatientHealthPassport = lazy(() => import("./pages/admin/PatientHealthPassport"));
+const MyPatients = lazy(() => import("./pages/doctor/MyPatients"));
 const CareGapDashboard = lazy(() => import("./pages/admin/CareGapDashboard"));
 const MedicationAdherenceDashboard = lazy(() => import("./pages/admin/MedicationAdherenceDashboard"));
 const RevenueDashboard = lazy(() => import("./pages/admin/RevenueDashboard"));
@@ -1012,6 +1015,7 @@ const App = () => (
 );
 
 export default App;
+
 
 
 
