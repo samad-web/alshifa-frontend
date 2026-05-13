@@ -34,6 +34,7 @@ const DoctorAvailability = lazy(() => import("./pages/DoctorAvailability"));
 const DoctorGamification = lazy(() => import("./pages/DoctorGamification"));
 const TherapistDashboard = lazy(() => import("./pages/TherapistDashboard"));
 const TherapistPatients = lazy(() => import("./pages/TherapistPatients"));
+const GroupSessionWorkspace = lazy(() => import("./pages/therapist/GroupSessionWorkspace"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const VoiceCoachPage = lazy(() => import("./features/voiceCoach/CoachPage"));
@@ -332,6 +333,18 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["THERAPIST"]}>
             <TherapistPatients />
+          </ProtectedRoute>
+        }
+      />
+      {/* Group Session Workspace — opens from "Join Session" on the
+          /group-sessions cards. Uses the existing /:id/roster +
+          /:id/complete endpoints; notes/attendance are local-only
+          pending a schema migration for durable persistence. */}
+      <Route
+        path="/group-sessions/:sessionId/workspace"
+        element={
+          <ProtectedRoute allowedRoles={["THERAPIST", "ADMIN_DOCTOR", "ADMIN"]}>
+            <GroupSessionWorkspace />
           </ProtectedRoute>
         }
       />
@@ -751,7 +764,7 @@ function AppRoutes() {
       <Route
         path="/admin/home-therapy"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "THERAPIST"]}>
             <HomeTherapyRequestsPage />
           </ProtectedRoute>
         }
