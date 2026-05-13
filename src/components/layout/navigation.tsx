@@ -421,6 +421,10 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         { path: "/therapist", label: "Today's Sittings", icon: Heart },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
         { path: "/therapist/patients", label: "My Patients", icon: Users },
+        // Reuses the role-aware DoctorAvailability page (route already
+        // allows THERAPIST). The therapist's blocks land on
+        // BlockedSlot.therapistId via the page's role-aware dispatch.
+        { path: "/doctor-availability", label: "My Availability", icon: CalendarDays },
         {
           label: "Clinical",
           icon: FilePlus2,
