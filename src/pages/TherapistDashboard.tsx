@@ -22,8 +22,10 @@ import { cn } from "@/lib/utils";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Calendar, Users, Heart, Trophy, Play, Bell, AlertTriangle, Sparkles, Activity, Video,
-  ChevronDown, ChevronRight, Clock, ArrowRight,
+  ChevronDown, ChevronRight, Clock, ArrowRight, LogIn, LogOut, Loader2,
 } from "lucide-react";
+import { operationsApi } from "@/services/operations.service";
+import type { StaffAttendanceEntry } from "@/types";
 import {
   dashboardSummaryApi,
   TherapistDashboardSummary,
@@ -91,6 +93,14 @@ export default function TherapistDashboard() {
     sessionId: activeHomeSessionId,
   });
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  // Today's attendance row — drives the check-in widget. Fetched once on
+  // mount via /api/operations/attendance/mine scoped to today; refreshed
+  // optimistically after Check In / Check Out.
+  const [todayAttendance, setTodayAttendance] = useState<StaffAttendanceEntry | null>(null);
+  const [attendanceBusy, setAttendanceBusy] = useState(false);
+  // Tick re-renders the "elapsed" line every 30 s without us having to
+  // refetch — the math reads Date.now() directly.
+  const [attendanceTick, setAttendanceTick] = useState(0);
   // The permission modal no longer fires automatically when a home-therapy
   // session becomes active and the browser had previously denied
   // location — that produced an "Enable Location Access" popup on
@@ -125,6 +135,50 @@ export default function TherapistDashboard() {
       .catch(() => { /* silent — banner just won't render */ });
     return () => { cancelled = true; };
   }, []);
+
+  // Today's attendance — single-day window so the response is at most one row.
+  const refreshTodayAttendance = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      const rows = await operationsApi.getMyAttendance({ startDate: today, endDate: today });
+      setTodayAttendance(rows[0] ?? null);
+    } catch { /* widget just falls back to "check in" state */ }
+  };
+  useEffect(() => { refreshTodayAttendance(); }, []);
+  useEffect(() => {
+    const id = setInterval(() => setAttendanceTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleDashboardClockIn = async () => {
+    setAttendanceBusy(true);
+    try {
+      await operationsApi.clockIn();
+      toast({ title: "Clocked in" });
+      await refreshTodayAttendance();
+    } catch (err) {
+      toast({
+        title: "Couldn't clock in",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    } finally { setAttendanceBusy(false); }
+  };
+
+  const handleDashboardClockOut = async () => {
+    setAttendanceBusy(true);
+    try {
+      await operationsApi.clockOut();
+      toast({ title: "Clocked out" });
+      await refreshTodayAttendance();
+    } catch (err) {
+      toast({
+        title: "Couldn't clock out",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    } finally { setAttendanceBusy(false); }
+  };
 
   async function startSession(appointmentId: string) {
     setStartingAppointmentId(appointmentId);
@@ -235,6 +289,81 @@ export default function TherapistDashboard() {
             </Button>
           </section>
         )}
+
+        {/* Attendance widget — quick check-in / check-out without leaving the
+            dashboard. Pings /api/operations/attendance/mine for today's row
+            on mount; the "Open" link takes the therapist to the full
+            attendance page for monthly history. */}
+        {(() => {
+          // Note: attendanceTick is in the closure so the elapsed string
+          // refreshes every 30 s alongside the parent re-render.
+          void attendanceTick;
+          const isIn  = !!todayAttendance?.clockIn && !todayAttendance?.clockOut;
+          const isOut = !!todayAttendance?.clockIn && !!todayAttendance?.clockOut;
+          let elapsedLabel = "";
+          if (todayAttendance?.clockIn) {
+            const end = todayAttendance.clockOut
+              ? new Date(todayAttendance.clockOut).getTime()
+              : Date.now();
+            const mins = Math.max(0, Math.round((end - new Date(todayAttendance.clockIn).getTime()) / 60_000));
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            elapsedLabel = h > 0 ? `${h}h ${m}m` : `${m}m`;
+          }
+          const inClock  = todayAttendance?.clockIn
+            ? new Date(todayAttendance.clockIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "";
+          return (
+            <section
+              className="rounded-xl border bg-card px-5 py-3 flex items-center justify-between gap-3 flex-wrap"
+              role="status"
+              aria-label="My attendance"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                {isIn ? (
+                  <span className="inline-flex h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" aria-hidden />
+                ) : (
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">
+                    {isIn  && <>Checked in at {inClock} · <span className="text-muted-foreground font-normal">{elapsedLabel} elapsed</span></>}
+                    {isOut && <>Worked {elapsedLabel} today</>}
+                    {!isIn && !isOut && "You haven't checked in today"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    <Link to="/therapist/attendance" className="hover:underline">View monthly history →</Link>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {!isIn && !isOut && (
+                  <Button
+                    size="sm"
+                    onClick={handleDashboardClockIn}
+                    disabled={attendanceBusy}
+                    className="gap-1.5"
+                  >
+                    {attendanceBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+                    Check In
+                  </Button>
+                )}
+                {isIn && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDashboardClockOut}
+                    disabled={attendanceBusy}
+                    className="gap-1.5"
+                  >
+                    {attendanceBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+                    Check Out
+                  </Button>
+                )}
+              </div>
+            </section>
+          );
+        })()}
 
         {/* SECTION B — Today at a Glance */}
         <section className="grid grid-cols-2 md:grid-cols-5 gap-3">

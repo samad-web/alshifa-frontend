@@ -469,6 +469,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           icon: Briefcase,
           items: [
             { path: "/staff-schedule", label: "Schedule", icon: CalendarDays },
+            { path: "/therapist/attendance", label: "My Attendance", icon: ClipboardCheck },
           ],
         },
         { path: "/reports", label: "Reports", icon: BarChart3 },
