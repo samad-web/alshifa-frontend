@@ -39,6 +39,8 @@ import { SelfExamBundlePanel, urgencyBadge } from "@/components/dashboard/SelfEx
 import HomeTherapyTodayPanel from "@/components/dashboard/HomeTherapyTodayPanel";
 import { TherapistCompleteSessionModal } from "@/components/HomeTherapySessionFeedback";
 import type { HomeTherapySession } from "@/services/homeTherapy.service";
+import { iwisApi, type TherapistEnrolment } from "@/services/iwis.service";
+import { Package } from "lucide-react";
 
 function greetingPrefix(d = new Date()) {
   const h = d.getHours();
@@ -304,6 +306,13 @@ export default function TherapistDashboard() {
           onComplete={() => setHomeRefreshKey((k) => k + 1)}
         />
 
+        {/* SECTION C3 — Package Sessions summary. Lazy-fetches ACTIVE
+            enrolments where this therapist is the assignee or has logged
+            prior sessions. Self-hides when nothing's in flight; tapping
+            an item routes to the full /therapist/package-sessions view. */}
+        <PackageSessionsSummaryCard />
+
+
         {/* Permission modal — surfaces when GPS is needed but denied. */}
         <PermissionDialog open={showPermissionModal} onOpenChange={setShowPermissionModal}>
           <PermissionDialogContent>
@@ -530,5 +539,81 @@ function TodaySessionCard({
       </button>
       {expanded && <SelfExamBundlePanel appointmentId={appt.id} />}
     </div>
+  );
+}
+
+/**
+ * Compact summary card surfaced on the therapist dashboard — shows the
+ * three in-flight package enrolments with the most sessions remaining,
+ * routes to /therapist/package-sessions for the full view. Self-hides
+ * when there's nothing actionable so the dashboard stays uncluttered.
+ *
+ * Lazy-fetches on mount; silent on failure (the empty state already
+ * covers the "no rows" case from the user's perspective).
+ */
+function PackageSessionsSummaryCard() {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<TherapistEnrolment[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    iwisApi
+      .listTherapistPackageSessions()
+      .then((data) => { if (!cancelled) setRows(data); })
+      .catch(() => { if (!cancelled) setRows([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // While loading, render nothing (the dashboard already has plenty of
+  // sections; flashing a skeleton here would be more noise than signal).
+  if (rows === null) return null;
+  const inFlight = rows.filter((r) => r.status === "ACTIVE" && r.sessionsRemaining > 0);
+  if (inFlight.length === 0) return null;
+
+  const top = [...inFlight]
+    .sort((a, b) => b.sessionsRemaining - a.sessionsRemaining)
+    .slice(0, 3);
+
+  return (
+    <section className="rounded-xl border bg-card shadow-card p-5 space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="font-semibold flex items-center gap-2">
+          <Package className="w-5 h-5 text-primary" /> Package Sessions
+        </h2>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => navigate("/therapist/package-sessions")}
+          className="text-xs"
+        >
+          View all
+          <ArrowRight className="w-3 h-3 ml-1" />
+        </Button>
+      </div>
+      <div className="space-y-2">
+        {top.map((r) => (
+          <div
+            key={r.enrolmentId}
+            className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-muted/40 text-sm"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-medium truncate">
+                {r.patient?.fullName ?? "Unnamed patient"}
+              </p>
+              <p className="text-[11px] text-muted-foreground truncate">
+                {r.packageName ?? "—"} · {r.sessionsUsed}/{r.sessionsTotal} sessions
+              </p>
+            </div>
+            <Badge variant="outline" className="bg-background shrink-0">
+              {r.sessionsRemaining} left
+            </Badge>
+          </div>
+        ))}
+        {inFlight.length > top.length && (
+          <p className="text-[11px] text-muted-foreground">
+            + {inFlight.length - top.length} more enrolment{inFlight.length - top.length === 1 ? "" : "s"}
+          </p>
+        )}
+      </div>
+    </section>
   );
 }

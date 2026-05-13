@@ -36,6 +36,7 @@ const TherapistDashboard = lazy(() => import("./pages/TherapistDashboard"));
 const TherapistPatients = lazy(() => import("./pages/TherapistPatients"));
 const GroupSessionWorkspace = lazy(() => import("./pages/therapist/GroupSessionWorkspace"));
 const TherapistHomeTherapy = lazy(() => import("./pages/therapist/TherapistHomeTherapy"));
+const TherapistPackageSessions = lazy(() => import("./pages/therapist/TherapistPackageSessions"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const VoiceCoachPage = lazy(() => import("./features/voiceCoach/CoachPage"));
@@ -358,6 +359,17 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["THERAPIST"]}>
             <TherapistHomeTherapy />
+          </ProtectedRoute>
+        }
+      />
+      {/* Therapist-side Treatment Package delivery view — log delivered
+          sessions against active PackageEnrolments and review the
+          therapist's own session history. */}
+      <Route
+        path="/therapist/package-sessions"
+        element={
+          <ProtectedRoute allowedRoles={["THERAPIST"]}>
+            <TherapistPackageSessions />
           </ProtectedRoute>
         }
       />
