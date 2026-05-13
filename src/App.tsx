@@ -38,6 +38,7 @@ const GroupSessionWorkspace = lazy(() => import("./pages/therapist/GroupSessionW
 const TherapistHomeTherapy = lazy(() => import("./pages/therapist/TherapistHomeTherapy"));
 const TherapistPackageSessions = lazy(() => import("./pages/therapist/TherapistPackageSessions"));
 const TherapistSessionNotes = lazy(() => import("./pages/therapist/TherapistSessionNotes"));
+const TherapistAttendance = lazy(() => import("./pages/therapist/TherapistAttendance"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const VoiceCoachPage = lazy(() => import("./features/voiceCoach/CoachPage"));
@@ -382,6 +383,16 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["THERAPIST"]}>
             <TherapistSessionNotes />
+          </ProtectedRoute>
+        }
+      />
+      {/* Therapist daily check-in / check-out + monthly history. Reads
+          and writes via /api/operations/attendance/*. */}
+      <Route
+        path="/therapist/attendance"
+        element={
+          <ProtectedRoute allowedRoles={["THERAPIST"]}>
+            <TherapistAttendance />
           </ProtectedRoute>
         }
       />
