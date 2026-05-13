@@ -30,6 +30,7 @@ import {
   DoctorAppointmentCard,
 } from "@/services/dashboardSummary.service";
 import { appointmentsApi } from "@/services/appointments.service";
+import { queueApi } from "@/services/queue.service";
 import { therapySessionApi } from "@/services/therapySession.service";
 import type { TherapySession } from "@/types";
 import TodoPanel from "@/components/todo/TodoPanel";
@@ -126,12 +127,25 @@ export default function TherapistDashboard() {
   async function startSession(appointmentId: string) {
     setStartingAppointmentId(appointmentId);
     try {
-      const session = await therapySessionApi.start(appointmentId);
-      navigate(`/therapist/sessions/${session.id}`);
+      // Use the queue's start-consultation endpoint (also used by the
+      // doctor dashboard). The previous /api/therapy-sessions/start
+      // endpoint isn't mounted and references a Prisma model that
+      // doesn't exist — every click was 404'ing into the JSON catch-all,
+      // which is why the error popup showed "[object Object]" (the
+      // catch-all's structured payload bypassed the api-client's old
+      // string-only message extractor).
+      await queueApi.startConsultation(appointmentId);
+      navigate(`/consultation/${appointmentId}`);
     } catch (err) {
+      // ApiClientError extends Error, so .message is always a string
+      // after the api-client fix in this batch.
+      const description =
+        err instanceof Error && err.message
+          ? err.message
+          : "Try again, or refresh the queue.";
       toast({
         title: "Couldn't start session",
-        description: err instanceof Error ? err.message : "",
+        description,
         variant: "destructive",
       });
       setStartingAppointmentId(null);
