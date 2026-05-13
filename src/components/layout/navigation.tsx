@@ -436,6 +436,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck },
             { path: "/therapist/package-sessions", label: "Package Sessions", icon: Package },
+            { path: "/therapist/session-notes", label: "Session Notes", icon: FileText },
           ],
         },
         {

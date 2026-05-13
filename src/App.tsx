@@ -37,6 +37,7 @@ const TherapistPatients = lazy(() => import("./pages/TherapistPatients"));
 const GroupSessionWorkspace = lazy(() => import("./pages/therapist/GroupSessionWorkspace"));
 const TherapistHomeTherapy = lazy(() => import("./pages/therapist/TherapistHomeTherapy"));
 const TherapistPackageSessions = lazy(() => import("./pages/therapist/TherapistPackageSessions"));
+const TherapistSessionNotes = lazy(() => import("./pages/therapist/TherapistSessionNotes"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const VoiceCoachPage = lazy(() => import("./features/voiceCoach/CoachPage"));
@@ -370,6 +371,17 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["THERAPIST"]}>
             <TherapistPackageSessions />
+          </ProtectedRoute>
+        }
+      />
+      {/* SOAP-format session notes — therapist documentation surface.
+          Optional ?patientId / ?appointmentId query params pre-fill the
+          draft for deep-links from appointment cards. */}
+      <Route
+        path="/therapist/session-notes"
+        element={
+          <ProtectedRoute allowedRoles={["THERAPIST"]}>
+            <TherapistSessionNotes />
           </ProtectedRoute>
         }
       />

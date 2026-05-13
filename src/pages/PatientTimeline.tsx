@@ -25,6 +25,7 @@ import { apiClient } from "@/lib/api-client";
 import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
 import type { CheckInPainRegion, LastPainRegionsResponse } from "@/services/enhancedDashboard.service";
 import { healthReportService } from "@/services/healthReport.service";
+import { therapistNotesApi, type TherapistSessionNote } from "@/services/therapistNotes.service";
 
 const EVENT_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string }> = {
     APPOINTMENT:    { label: "Appointment",       icon: Calendar,   color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -197,6 +198,14 @@ export default function PatientTimeline() {
                     triage fallback). */}
                 {patientId && <PainMapSnapshot patientId={patientId} />}
 
+                {/* Therapist-authored SOAP notes — visible only to
+                    clinicians the author opted-in to share with. Hidden
+                    for THERAPIST and PATIENT roles (they have other
+                    dedicated surfaces). */}
+                {patientId && user?.role && ["DOCTOR", "ADMIN_DOCTOR", "ADMIN"].includes(user.role) && (
+                    <TherapistNotesSection patientId={patientId} />
+                )}
+
                 {/* Filters */}
                 <Panel>
                     <div className="flex flex-wrap gap-4 items-end">
@@ -321,5 +330,109 @@ export default function PatientTimeline() {
                 )}
             </div>
         </AppLayout>
+    );
+}
+
+/**
+ * Doctor-side surface for therapist SOAP notes. Lazy-fetches notes the
+ * therapist opted to share (isVisibleToDoctor === true on the backend);
+ * private notes never surface here. Self-hides while loading and when
+ * there's nothing to show so the timeline stays uncluttered.
+ */
+function TherapistNotesSection({ patientId }: { patientId: string }) {
+    const [notes, setNotes] = useState<TherapistSessionNote[] | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        therapistNotesApi
+            .list({ patientId })
+            .then((rows) => { if (!cancelled) setNotes(rows); })
+            .catch((e: unknown) => {
+                if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load notes");
+            });
+        return () => { cancelled = true; };
+    }, [patientId]);
+
+    if (notes === null && !err) return null;
+    if (err) {
+        return (
+            <Panel title="Therapist Session Notes" description="SOAP-format notes shared by the patient's therapist">
+                <p className="text-sm text-destructive">{err}</p>
+            </Panel>
+        );
+    }
+    if (!notes || notes.length === 0) return null;
+
+    const formatNoteDate = (iso: string): string => {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return "—";
+        return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    };
+
+    return (
+        <Panel
+            title="Therapist Session Notes"
+            description="SOAP-format notes the therapist shared with the care team"
+        >
+            <ul className="space-y-3">
+                {notes.map((n) => (
+                    <li key={n.id} className="rounded-xl border bg-card p-4 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <Clipboard className="w-4 h-4 text-primary shrink-0" />
+                                <span className="font-semibold truncate">
+                                    {n.therapist?.fullName ?? "Therapist"}
+                                </span>
+                                {n.sessionType && (
+                                    <Badge variant="outline" className="text-[10px] capitalize">
+                                        {n.sessionType.replace("_", " ").toLowerCase()}
+                                    </Badge>
+                                )}
+                                {n.duration != null && (
+                                    <span className="text-xs text-muted-foreground">
+                                        · {n.duration} min
+                                    </span>
+                                )}
+                            </div>
+                            <span className="text-xs text-muted-foreground shrink-0">
+                                {formatNoteDate(n.createdAt)}
+                            </span>
+                        </div>
+                        <div className="space-y-1.5 text-sm">
+                            {n.subjective && (
+                                <p>
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-primary/10 text-primary text-[10px] font-bold mr-1.5">S</span>
+                                    <span className="whitespace-pre-wrap text-foreground/90">{n.subjective}</span>
+                                </p>
+                            )}
+                            {n.objective && (
+                                <p>
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-primary/10 text-primary text-[10px] font-bold mr-1.5">O</span>
+                                    <span className="whitespace-pre-wrap text-foreground/90">{n.objective}</span>
+                                </p>
+                            )}
+                            {n.assessment && (
+                                <p>
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-primary/10 text-primary text-[10px] font-bold mr-1.5">A</span>
+                                    <span className="whitespace-pre-wrap text-foreground/90">{n.assessment}</span>
+                                </p>
+                            )}
+                            {n.plan && (
+                                <p>
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-primary/10 text-primary text-[10px] font-bold mr-1.5">P</span>
+                                    <span className="whitespace-pre-wrap text-foreground/90">{n.plan}</span>
+                                </p>
+                            )}
+                            {n.nextSessionPlan && (
+                                <p className="text-xs text-muted-foreground italic">
+                                    Next session focus: {n.nextSessionPlan}
+                                </p>
+                            )}
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </Panel>
     );
 }
