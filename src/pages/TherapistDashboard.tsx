@@ -30,7 +30,6 @@ import {
   DoctorAppointmentCard,
 } from "@/services/dashboardSummary.service";
 import { appointmentsApi } from "@/services/appointments.service";
-import { queueApi } from "@/services/queue.service";
 import { therapySessionApi } from "@/services/therapySession.service";
 import type { TherapySession } from "@/types";
 import TodoPanel from "@/components/todo/TodoPanel";
@@ -83,20 +82,23 @@ export default function TherapistDashboard() {
   // step 2 collects feedback. Setting null closes the modal.
   const [completeTarget, setCompleteTarget] = useState<HomeTherapySession | null>(null);
   const [homeRefreshKey, setHomeRefreshKey] = useState(0);
-  const { permissionState, requestPermission } = useLocationBroadcast({
+  // permissionState is read by useLocationBroadcast internally to decide
+  // whether to start the watcher — we don't render anything from it on
+  // the dashboard, so it's not destructured here. requestPermission stays
+  // for the modal's "I've enabled it" button.
+  const { requestPermission } = useLocationBroadcast({
     active: !!activeHomeSessionId,
     sessionId: activeHomeSessionId,
   });
   const [showPermissionModal, setShowPermissionModal] = useState(false);
-  // Surface the modal automatically when the therapist marks a session
-  // en-route but the browser has denied location access.
-  useEffect(() => {
-    if (activeHomeSessionId && (permissionState === "denied" || permissionState === "unsupported")) {
-      setShowPermissionModal(true);
-    } else {
-      setShowPermissionModal(false);
-    }
-  }, [activeHomeSessionId, permissionState]);
+  // The permission modal no longer fires automatically when a home-therapy
+  // session becomes active and the browser had previously denied
+  // location — that produced an "Enable Location Access" popup on
+  // every dashboard load whenever the therapist had a lingering active
+  // session and prior denied permission, even when they weren't about
+  // to use GPS. The modal still mounts below so HomeTherapyTodayPanel
+  // (or any future button) can open it via setShowPermissionModal(true)
+  // when the therapist explicitly attempts to depart / share location.
 
   async function refresh() {
     setLoading(true);
@@ -127,14 +129,15 @@ export default function TherapistDashboard() {
   async function startSession(appointmentId: string) {
     setStartingAppointmentId(appointmentId);
     try {
-      // Use the queue's start-consultation endpoint (also used by the
-      // doctor dashboard). The previous /api/therapy-sessions/start
-      // endpoint isn't mounted and references a Prisma model that
-      // doesn't exist — every click was 404'ing into the JSON catch-all,
-      // which is why the error popup showed "[object Object]" (the
-      // catch-all's structured payload bypassed the api-client's old
-      // string-only message extractor).
-      await queueApi.startConsultation(appointmentId);
+      // Flip the appointment status to IN_PROGRESS via PUT /:id.
+      // The doctor-side queue endpoint (queueApi.startConsultation)
+      // can't be reused — its QueueEntry row has a required doctorId
+      // FK, so therapist-only appointments 403 on canAccessQueue.
+      // The PUT route accepts THERAPIST, validates the
+      // CONFIRMED/ACCEPTED → IN_PROGRESS transition server-side, and
+      // ConsultationRoom keys off Appointment.status === 'IN_PROGRESS'
+      // for the in-session view.
+      await appointmentsApi.update(appointmentId, { status: "IN_PROGRESS" });
       navigate(`/consultation/${appointmentId}`);
     } catch (err) {
       // ApiClientError extends Error, so .message is always a string
