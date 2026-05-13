@@ -35,6 +35,7 @@ const DoctorGamification = lazy(() => import("./pages/DoctorGamification"));
 const TherapistDashboard = lazy(() => import("./pages/TherapistDashboard"));
 const TherapistPatients = lazy(() => import("./pages/TherapistPatients"));
 const GroupSessionWorkspace = lazy(() => import("./pages/therapist/GroupSessionWorkspace"));
+const TherapistHomeTherapy = lazy(() => import("./pages/therapist/TherapistHomeTherapy"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
 const VoiceCoachPage = lazy(() => import("./features/voiceCoach/CoachPage"));
@@ -345,6 +346,18 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["THERAPIST", "ADMIN_DOCTOR", "ADMIN"]}>
             <GroupSessionWorkspace />
+          </ProtectedRoute>
+        }
+      />
+      {/* Therapist-side home-therapy surface — distinct from the admin
+          approval queue at /admin/home-therapy. Lists the therapist's
+          own assigned sessions via the same panel used on their
+          dashboard. */}
+      <Route
+        path="/therapist/home-therapy"
+        element={
+          <ProtectedRoute allowedRoles={["THERAPIST"]}>
+            <TherapistHomeTherapy />
           </ProtectedRoute>
         }
       />
@@ -764,7 +777,7 @@ function AppRoutes() {
       <Route
         path="/admin/home-therapy"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN", "THERAPIST"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "BRANCH_ADMIN"]}>
             <HomeTherapyRequestsPage />
           </ProtectedRoute>
         }

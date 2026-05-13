@@ -444,7 +444,10 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/therapy-rooms", label: "Therapy Rooms", icon: DoorOpen },
             { path: "/group-sessions", label: "Group Sessions", icon: Users },
             { path: "/clinical-photos", label: "Clinical Photos", icon: Camera },
-            { path: "/admin/home-therapy", label: "Home Therapy", icon: Home },
+            // /admin/home-therapy is admin-only (approval queue); therapists
+            // get their own session list at /therapist/home-therapy via the
+            // same panel that drives their dashboard widget.
+            { path: "/therapist/home-therapy", label: "Home Therapy", icon: Home },
           ],
         },
         {
