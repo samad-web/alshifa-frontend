@@ -195,6 +195,38 @@ export interface PackageProgress {
   progressPct: number;
 }
 
+/**
+ * Per-enrolment row returned by GET /api/packages/therapist-sessions.
+ * Reframes the spec's session-level view (PENDING/IN_PROGRESS/COMPLETED)
+ * onto the schema's actual shape: enrolment progress counters + the
+ * therapist's own PackageSessionLog history. Each row is one patient
+ * × one package.
+ */
+export interface TherapistEnrolment {
+  enrolmentId: string;
+  status: EnrolmentStatus;
+  startDate: string;
+  endDate: string;
+  sessionsTotal: number;
+  sessionsUsed: number;
+  sessionsRemaining: number;
+  progressPct: number;
+  packageId: string | null;
+  packageName: string | null;
+  patient: {
+    id: string;
+    fullName: string | null;
+    patientId: string | null;
+  } | null;
+  mySessions: Array<{
+    id: string;
+    sessionType: string;
+    conductedAt: string;
+    notes: string | null;
+    appointmentId: string | null;
+  }>;
+}
+
 export interface GroupSession {
   id: string; branchId: string; therapistId: string; roomId?: string | null;
   title: string; sessionType: string; date: string;
@@ -342,6 +374,15 @@ export const iwisApi = {
     (await apiClient.get<PackageProgress>(`/api/packages/enrolments/${enrolmentId}/progress`)).data,
   logPackageSession: async (enrolmentId: string, data: { sessionType: string; conductedById: string; conductedAt?: string; appointmentId?: string; notes?: string }) =>
     (await apiClient.post(`/api/packages/enrolments/${enrolmentId}/log-session`, data)).data,
+  /** Therapist-side delivery view: enrolments worth surfacing to the caller
+   *  (in-flight in their branch + any they've already touched) with progress
+   *  + their own session logs. Backend reframes the spec's PENDING/IN_PROGRESS
+   *  per-session view as an event-based "log next session" workflow because
+   *  PackageSessionLog only exists post-delivery. */
+  listTherapistPackageSessions: async () =>
+    (await apiClient.get<{ data: { enrolments: TherapistEnrolment[] } }>(
+      "/api/packages/therapist-sessions",
+    )).data.data.enrolments,
 
   // Feature 6: Group sessions
   listGroupSessions: async (params: { branchId?: string; date?: string; therapistId?: string }) =>
