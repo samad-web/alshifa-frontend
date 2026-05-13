@@ -15,7 +15,7 @@ import {
     Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Plus, Users, Loader2, Calendar, Clock, DoorOpen, Building2, CheckCircle2, UserPlus, Check, ChevronsUpDown, X } from "lucide-react";
+import { Plus, Users, Loader2, Calendar, Clock, DoorOpen, Building2, CheckCircle2, UserPlus, Check, ChevronsUpDown, X, Play } from "lucide-react";
 import { iwisApi, type GroupSession, type TherapyRoom } from "@/services/iwis.service";
 import { branchesApi } from "@/services/branches.service";
 import { apiClient } from "@/lib/api-client";
@@ -23,6 +23,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { cn } from "@/lib/utils";
+import { useNavigate } from "react-router-dom";
 
 interface PatientLite { id: string; fullName: string | null; phoneNumber?: string | null }
 
@@ -36,6 +37,7 @@ const STATUS_TONE: Record<string, string> = {
 export default function GroupSessionsPage() {
     const { toast } = useToast();
     const { role } = useAuth();
+    const navigate = useNavigate();
     const { branchIdParam } = useBranchScope();
     const { confirm, dialog: confirmDialog } = useConfirm();
     const isClinician = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "THERAPIST";
@@ -217,6 +219,17 @@ export default function GroupSessionsPage() {
                                         {s.status === "OPEN" && !isClinician && (
                                             <Button size="sm" onClick={() => join(s.id)}>
                                                 <UserPlus className="w-3.5 h-3.5 mr-2" /> Join
+                                            </Button>
+                                        )}
+                                        {/* Clinician shortcut into the session workspace — opens the
+                                            roster + complete view. Hidden once the session is locked. */}
+                                        {isClinician && s.status !== "COMPLETED" && s.status !== "CANCELLED" && (
+                                            <Button
+                                                size="sm"
+                                                onClick={() => navigate(`/group-sessions/${s.id}/workspace`)}
+                                                className="bg-primary hover:bg-primary/90"
+                                            >
+                                                <Play className="w-3.5 h-3.5 mr-2" /> Join Session
                                             </Button>
                                         )}
                                         {isClinician && s.status !== "COMPLETED" && s.status !== "CANCELLED" && (

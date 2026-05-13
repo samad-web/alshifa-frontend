@@ -420,6 +420,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
       return [
         { path: "/therapist", label: "Today's Sittings", icon: Heart },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
+        { path: "/therapist/patients", label: "My Patients", icon: Users },
         {
           label: "Clinical",
           icon: FilePlus2,
@@ -439,6 +440,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/therapy-rooms", label: "Therapy Rooms", icon: DoorOpen },
             { path: "/group-sessions", label: "Group Sessions", icon: Users },
             { path: "/clinical-photos", label: "Clinical Photos", icon: Camera },
+            { path: "/admin/home-therapy", label: "Home Therapy", icon: Home },
           ],
         },
         {

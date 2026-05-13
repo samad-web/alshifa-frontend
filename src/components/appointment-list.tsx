@@ -438,7 +438,7 @@ export function AppointmentList({
                                                 size="sm"
                                                 variant="outline"
                                                 onClick={() => onCancel(appointment.id)}
-                                                className="gap-2 text-attention hover:bg-attention/10"
+                                                className="gap-2 text-attention hover:bg-attention/10 hover:text-attention"
                                             >
                                                 <XCircle className="w-3 h-3" />
                                                 Cancel
@@ -512,7 +512,7 @@ export function AppointmentList({
                                                 size="sm"
                                                 variant="outline"
                                                 onClick={() => setChecklistAppointmentId(appointment.id)}
-                                                className="gap-2 text-primary border-primary/30 hover:bg-primary/5"
+                                                className="gap-2 text-primary border-primary/30 hover:bg-primary/5 hover:text-primary"
                                             >
                                                 <ClipboardList className="w-3 h-3" />
                                                 Retention Checklist
