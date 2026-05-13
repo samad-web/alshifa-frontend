@@ -156,9 +156,34 @@ async function request<T>(
     }
 
     const errorPayload = typeof body === 'object' ? body : { error: body };
+    // Some backend handlers (notably the JSON 404 catch-all and the
+    // visit-summary routes) reply with `error: { code, message }` —
+    // unwrap so the thrown ApiClientError.message stays a string. Falling
+    // back to the legacy `errorPayload.error` / `errorPayload.message`
+    // shapes keeps every other caller working unchanged.
+    const messageFromShape = (v: unknown): string | null => {
+      if (typeof v === 'string') return v;
+      if (
+        v && typeof v === 'object'
+        && 'message' in (v as Record<string, unknown>)
+        && typeof (v as { message: unknown }).message === 'string'
+      ) {
+        return (v as { message: string }).message;
+      }
+      return null;
+    };
+    const message =
+      messageFromShape(errorPayload.error)
+      ?? messageFromShape(errorPayload.message)
+      ?? 'Request failed';
+    // Promote `error.code` when the wrapped shape carries it.
+    const wrappedCode =
+      errorPayload.error && typeof errorPayload.error === 'object'
+        ? (errorPayload.error as { code?: string }).code
+        : undefined;
     throw new ApiClientError({
-      message: errorPayload.error || errorPayload.message || 'Request failed',
-      code: errorPayload.code,
+      message,
+      code: errorPayload.code ?? wrappedCode,
       details: errorPayload.details,
       status: response.status,
       payload: errorPayload,
