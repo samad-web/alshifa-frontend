@@ -41,6 +41,7 @@ const TherapistSessionNotes = lazy(() => import("./pages/therapist/TherapistSess
 const TherapistAttendance = lazy(() => import("./pages/therapist/TherapistAttendance"));
 const ConsultationRoom = lazy(() => import("./pages/ConsultationRoom"));
 const EnhancedPatientDashboard = lazy(() => import("./pages/patient/EnhancedPatientDashboard"));
+const PatientConsultation = lazy(() => import("./pages/patient/PatientConsultation"));
 const VoiceCoachPage = lazy(() => import("./features/voiceCoach/CoachPage"));
 const PatientDetails = lazy(() => import("./pages/PatientDetails"));
 const PatientsPage = lazy(() => import("./pages/Patients"));
@@ -425,6 +426,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
             <VoiceCoachPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/consultation/:appointmentId"
+        element={
+          <ProtectedRoute allowedRoles={["PATIENT"]}>
+            <PatientConsultation />
           </ProtectedRoute>
         }
       />
