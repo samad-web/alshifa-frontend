@@ -26,6 +26,7 @@ import { BodyMapPainSelector } from "@/components/shared/BodyMapPainSelector";
 import type { CheckInPainRegion, LastPainRegionsResponse } from "@/services/enhancedDashboard.service";
 import { healthReportService } from "@/services/healthReport.service";
 import { therapistNotesApi, type TherapistSessionNote } from "@/services/therapistNotes.service";
+import { therapyOutcomesApi, type TherapyOutcome } from "@/services/therapyOutcomes.service";
 
 const EVENT_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string }> = {
     APPOINTMENT:    { label: "Appointment",       icon: Calendar,   color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -204,6 +205,15 @@ export default function PatientTimeline() {
                     dedicated surfaces). */}
                 {patientId && user?.role && ["DOCTOR", "ADMIN_DOCTOR", "ADMIN"].includes(user.role) && (
                     <TherapistNotesSection patientId={patientId} />
+                )}
+
+                {/* Structured therapy-outcome rows — pain / mobility
+                    trends authored by therapists. Visible to all clinician
+                    roles (THERAPIST gets their own outcomes; others get
+                    every therapist's entries for the patient). Self-hides
+                    when no rows exist. */}
+                {patientId && user?.role && ["THERAPIST", "DOCTOR", "ADMIN_DOCTOR", "ADMIN"].includes(user.role) && (
+                    <TherapyOutcomesSection patientId={patientId} />
                 )}
 
                 {/* Filters */}
@@ -430,6 +440,170 @@ function TherapistNotesSection({ patientId }: { patientId: string }) {
                                 </p>
                             )}
                         </div>
+                    </li>
+                ))}
+            </ul>
+        </Panel>
+    );
+}
+
+/**
+ * Trend arrow for two adjacent outcome values (chronologically ordered
+ * latest-first by the API). For pain a *lower* second-to-last value is
+ * "improving"; for mobility *higher* is improving — the caller passes
+ * `goodWhen` to flip the polarity.
+ */
+function trendArrow(
+    latest: number | null | undefined,
+    previous: number | null | undefined,
+    goodWhen: "lower" | "higher",
+): { glyph: string; tone: string } {
+    if (latest == null || previous == null) return { glyph: "→", tone: "text-muted-foreground" };
+    if (latest === previous) return { glyph: "→", tone: "text-muted-foreground" };
+    const improved = goodWhen === "lower" ? latest < previous : latest > previous;
+    return improved
+        ? { glyph: "↑", tone: "text-emerald-600" }
+        : { glyph: "↓", tone: "text-rose-600" };
+}
+
+/**
+ * Read-only trend + history of therapy outcomes for a patient. THERAPIST
+ * sees their own rows (backend enforces); DOCTOR / ADMIN_DOCTOR / ADMIN
+ * see every therapist's entries. Self-hides when there's nothing to show.
+ */
+function TherapyOutcomesSection({ patientId }: { patientId: string }) {
+    const [rows, setRows] = useState<TherapyOutcome[] | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        therapyOutcomesApi
+            .list(patientId)
+            .then((r) => { if (!cancelled) setRows(r); })
+            .catch((e: unknown) => {
+                if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load outcomes");
+            });
+        return () => { cancelled = true; };
+    }, [patientId]);
+
+    if (rows === null && !err) return null;
+    if (err) {
+        return (
+            <Panel title="Therapy Outcomes" description="Pain & mobility tracked per session">
+                <p className="text-sm text-destructive">{err}</p>
+            </Panel>
+        );
+    }
+    if (!rows || rows.length === 0) return null;
+
+    // rows are latest-first from the API. For trend display the most
+    // recent N entries get reversed so the eye reads earliest → latest.
+    const ordered = [...rows].reverse();
+    const recent = ordered.slice(-5);
+    const latest = ordered[ordered.length - 1];
+    const prior  = ordered[ordered.length - 2];
+    const painTrend = trendArrow(latest?.painScore, prior?.painScore, "lower");
+    const mobilityTrend = trendArrow(latest?.mobilityScore, prior?.mobilityScore, "higher");
+
+    const formatDate = (iso: string): string => {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return "—";
+        return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    };
+
+    return (
+        <Panel
+            title="Therapy Outcomes"
+            description="Pain & mobility tracked per session by the patient's therapist(s)"
+        >
+            {recent.length >= 2 && (
+                <div className="rounded-xl border bg-card p-4 mb-4 space-y-2 text-sm">
+                    <p className="text-xs uppercase tracking-wide font-semibold text-muted-foreground">
+                        Trend overview (last {recent.length})
+                    </p>
+                    <div className="flex items-center gap-3 font-mono">
+                        <span className="text-muted-foreground w-20">Pain:</span>
+                        <span className="flex items-center gap-1">
+                            {recent.map((r, i) => (
+                                <span key={r.id} className="inline-flex items-center gap-1">
+                                    <span>{r.painScore ?? "—"}</span>
+                                    {i < recent.length - 1 && <span className="text-muted-foreground">→</span>}
+                                </span>
+                            ))}
+                        </span>
+                        <span className={`text-base ${painTrend.tone}`}>{painTrend.glyph}</span>
+                    </div>
+                    <div className="flex items-center gap-3 font-mono">
+                        <span className="text-muted-foreground w-20">Mobility:</span>
+                        <span className="flex items-center gap-1">
+                            {recent.map((r, i) => (
+                                <span key={r.id} className="inline-flex items-center gap-1">
+                                    <span>{r.mobilityScore ?? "—"}</span>
+                                    {i < recent.length - 1 && <span className="text-muted-foreground">→</span>}
+                                </span>
+                            ))}
+                        </span>
+                        <span className={`text-base ${mobilityTrend.tone}`}>{mobilityTrend.glyph}</span>
+                    </div>
+                </div>
+            )}
+
+            <ul className="space-y-3">
+                {rows.map((r) => (
+                    <li key={r.id} className="rounded-xl border bg-card p-4 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <Activity className="w-4 h-4 text-primary shrink-0" />
+                                <span className="font-semibold truncate">
+                                    {r.therapist?.fullName ?? "Therapist"}
+                                </span>
+                            </div>
+                            <span className="text-xs text-muted-foreground shrink-0">
+                                {formatDate(r.sessionDate)}
+                            </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {r.painScore != null && (
+                                <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">
+                                    Pain {r.painScore}/10
+                                </Badge>
+                            )}
+                            {r.mobilityScore != null && (
+                                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                    Mobility {r.mobilityScore}%
+                                </Badge>
+                            )}
+                            {r.swellingReduced != null && (
+                                <Badge variant="outline" className={
+                                    r.swellingReduced
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        : "bg-amber-50 text-amber-700 border-amber-200"
+                                }>
+                                    Swelling {r.swellingReduced ? "reduced" : "unchanged"}
+                                </Badge>
+                            )}
+                        </div>
+                        {r.functionalImprovement && (
+                            <p className="text-sm">
+                                <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1.5">
+                                    Function
+                                </span>
+                                <span className="whitespace-pre-wrap text-foreground/90">{r.functionalImprovement}</span>
+                            </p>
+                        )}
+                        {r.therapistObservation && (
+                            <p className="text-sm">
+                                <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1.5">
+                                    Observation
+                                </span>
+                                <span className="whitespace-pre-wrap text-foreground/90">{r.therapistObservation}</span>
+                            </p>
+                        )}
+                        {r.nextSessionGoal && (
+                            <p className="text-xs italic text-muted-foreground">
+                                Next session goal: {r.nextSessionGoal}
+                            </p>
+                        )}
                     </li>
                 ))}
             </ul>
