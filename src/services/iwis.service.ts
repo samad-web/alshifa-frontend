@@ -355,5 +355,13 @@ export const iwisApi = {
   cancelGroupSession: async (id: string) =>
     (await apiClient.post(`/api/group-sessions/${id}/cancel`, {})).data,
   getGroupRoster: async (id: string) =>
-    (await apiClient.get<GroupSession & { appointments: Array<{ id: string; patient: { id: string; fullName: string | null; phoneNumber: string | null } }> }>(`/api/group-sessions/${id}/roster`)).data,
+    (await apiClient.get<GroupSession & { appointments: Array<{ id: string; patient: { id: string; fullName: string | null; phoneNumber: string | null } }>; attendedParticipantIds?: string[] }>(`/api/group-sessions/${id}/roster`)).data,
+  setGroupSessionAttendance: async (
+    id: string,
+    body: { participantId: string; isPresent: boolean },
+  ) =>
+    (await apiClient.patch<{ id: string; attendedParticipantIds: string[] }>(
+      `/api/group-sessions/${id}/attendance`,
+      body,
+    )).data,
 };

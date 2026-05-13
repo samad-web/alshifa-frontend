@@ -1,18 +1,23 @@
 // Group Session Workspace — clinician landing page for a single
 // GroupSession. Shows the enrolled patient roster, lets the therapist
-// hold local-only session notes during the sitting, and exposes the
-// existing Complete action.
+// mark attendance during the sitting, hold notes, and complete the
+// session.
 //
-// Backend scope today (intentionally minimal — see batch notes):
-//   GET  /api/group-sessions/:id/roster   → session + participants
-//   POST /api/group-sessions/:id/complete → flip status to COMPLETED
+// Backend endpoints in use:
+//   GET   /api/group-sessions/:id/roster      → session + participants + attendedParticipantIds
+//   PATCH /api/group-sessions/:id/attendance  → toggle a participant present/absent
+//   POST  /api/group-sessions/:id/complete    → present → COMPLETED, absent → NO_SHOW
 //
-// Notes + attendance live in component state only — persisting either
-// would require new `notes` / `attendance` columns on GroupSession plus a
-// PATCH endpoint, which is deferred to a follow-up batch (would need a
-// schema migration + backend restart per the project's prisma policy).
-// A banner under the notes field surfaces this so the clinician knows
-// to capture durable notes in the patient timeline.
+// Attendance defaults to ABSENT for every enrolled patient. The therapist
+// flips each participant present manually as they arrive. Only present
+// patients count toward session completion — the backend's complete()
+// transaction reads attendedParticipantIds and sets each appointment's
+// status accordingly.
+//
+// Notes still live in component state only — persisting per-session
+// notes would require an additional schema field. A banner under the
+// textarea tells the clinician to capture durable notes in the patient
+// timeline.
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -46,6 +51,7 @@ interface RosterResponse {
   status: string;
   maxCapacity: number;
   appointments: RosterParticipant[];
+  attendedParticipantIds?: string[];
   therapist?: { fullName: string | null } | null;
   room?: { name: string | null } | null;
 }
@@ -68,9 +74,10 @@ export default function GroupSessionWorkspace() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  // Local attendance — keyed on appointmentId since that's the unique
-  // membership row. Defaults to "attended" (true) for every enrolled patient,
-  // mirroring the typical group-session flow where everyone shows up.
+  // Attendance roll — keyed on appointmentId (the unique membership row).
+  // Defaults to ABSENT for every enrolled patient; the therapist flips each
+  // patient present as they arrive. Seeded from the session's
+  // attendedParticipantIds so re-opening a session preserves the marks.
   const [attendance, setAttendance] = useState<Record<string, boolean>>({});
   const [completing, setCompleting] = useState(false);
 
@@ -83,10 +90,13 @@ export default function GroupSessionWorkspace() {
       .getGroupRoster(sessionId)
       .then((resp) => {
         if (cancelled) return;
-        setData(resp as RosterResponse);
-        // Seed attendance: assume present unless toggled off.
+        const roster = resp as RosterResponse;
+        setData(roster);
+        // Seed attendance: ABSENT by default, PRESENT only for participants
+        // already in the server-side attendedParticipantIds array.
+        const present = new Set(roster.attendedParticipantIds ?? []);
         const seed: Record<string, boolean> = {};
-        for (const row of resp.appointments ?? []) seed[row.id] = true;
+        for (const row of roster.appointments ?? []) seed[row.id] = present.has(row.id);
         setAttendance(seed);
       })
       .catch((err: unknown) => {
@@ -97,8 +107,26 @@ export default function GroupSessionWorkspace() {
     return () => { cancelled = true; };
   }, [sessionId]);
 
-  const toggleAttendance = (appointmentId: string) => {
-    setAttendance((prev) => ({ ...prev, [appointmentId]: !prev[appointmentId] }));
+  const toggleAttendance = async (appointmentId: string) => {
+    if (!sessionId) return;
+    const previous = attendance[appointmentId] ?? false;
+    const next = !previous;
+    // Optimistic update so the UI reflects the click instantly; rolled
+    // back below if the PATCH fails.
+    setAttendance((prev) => ({ ...prev, [appointmentId]: next }));
+    try {
+      await iwisApi.setGroupSessionAttendance(sessionId, {
+        participantId: appointmentId,
+        isPresent: next,
+      });
+    } catch (err: unknown) {
+      setAttendance((prev) => ({ ...prev, [appointmentId]: previous }));
+      toast({
+        title: "Couldn't update attendance",
+        description: err instanceof Error ? err.message : "",
+        variant: "destructive",
+      });
+    }
   };
 
   const attendedCount = useMemo(
@@ -107,7 +135,16 @@ export default function GroupSessionWorkspace() {
   );
 
   const handleComplete = async () => {
-    if (!sessionId) return;
+    if (!sessionId || !data) return;
+    const total = data.appointments.length;
+    if (total > 0) {
+      const confirmed = window.confirm(
+        `${attendedCount} of ${total} patient${total === 1 ? "" : "s"} marked present. ` +
+          `Completing locks the session: present patients' appointments become COMPLETED, ` +
+          `absent become NO_SHOW. Continue?`,
+      );
+      if (!confirmed) return;
+    }
     setCompleting(true);
     try {
       await iwisApi.completeGroupSession(sessionId);
@@ -227,19 +264,22 @@ export default function GroupSessionWorkspace() {
                             </p>
                           )}
                         </div>
-                        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none shrink-0">
-                          <input
-                            type="checkbox"
-                            checked={present}
-                            onChange={() => toggleAttendance(row.id)}
-                            disabled={isLocked}
-                            className="accent-primary h-4 w-4"
-                            aria-label={`Mark ${name} present`}
-                          />
-                          <span className={present ? "text-primary font-medium" : "text-muted-foreground"}>
-                            Present
-                          </span>
-                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void toggleAttendance(row.id)}
+                          disabled={isLocked}
+                          aria-pressed={present}
+                          aria-label={`Toggle attendance for ${name}`}
+                          className={
+                            "shrink-0 text-xs font-medium px-2.5 py-1 rounded-md border transition-colors " +
+                            "disabled:opacity-60 disabled:cursor-not-allowed " +
+                            (present
+                              ? "bg-green-100 text-green-700 border-green-300 hover:bg-green-200"
+                              : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")
+                          }
+                        >
+                          {present ? "✓ Present" : "Absent"}
+                        </button>
                       </li>
                     );
                   })}
