@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
     ClipboardList,
     Salad,
     ClipboardCheck,
+    Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ChatWrapper } from "@/components/chat/ChatWrapper";
@@ -28,6 +29,7 @@ import { GenerateReportButton } from "@/components/consultation/GenerateReportBu
 import { PainMapCard } from "@/components/patient/PainMapCard";
 import { PatientRecordReviewTracker } from "@/components/doctor/PatientRecordReviewTracker";
 import { VisitSummaryModal } from "@/components/consultation/VisitSummaryModal";
+import { videoSessionService } from "@/services/videoSession.service";
 import { useAuth } from "@/hooks/useAuth";
 import type { FollowUpPayload } from "@/services/followUp.service";
 import { iwisApi, type DietPrescription } from "@/services/iwis.service";
@@ -222,6 +224,7 @@ export default function ConsultationRoom() {
                                 <VideoCallFrame
                                     meetingLink={appointment.meetingLink}
                                     patientName={appointment.patient?.fullName || "Patient"}
+                                    appointmentId={appointmentId}
                                 />
 
                                 {/* Chat Section */}
@@ -450,26 +453,83 @@ export default function ConsultationRoom() {
 function VideoCallFrame({
     meetingLink,
     patientName,
+    appointmentId,
 }: {
     meetingLink: string | null;
     patientName: string;
+    appointmentId?: string;
 }) {
+    const [tokenedUrl, setTokenedUrl] = useState<string | null>(null);
+    const [tokenResolved, setTokenResolved] = useState(false);
+
+    useEffect(() => {
+        if (!appointmentId) {
+            setTokenResolved(true);
+            return;
+        }
+        let cancelled = false;
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        const FETCH_TIMEOUT_MS = 5000;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(
+                () => reject(new Error("videoSession.get timed out")),
+                FETCH_TIMEOUT_MS,
+            );
+        });
+        (async () => {
+            try {
+                const data = await Promise.race([
+                    videoSessionService.get(appointmentId),
+                    timeoutPromise,
+                ]);
+                if (cancelled) return;
+                if (data?.meetingToken && data?.url) {
+                    setTokenedUrl(`${data.url}?t=${encodeURIComponent(data.meetingToken)}`);
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    console.warn("[VideoCallFrame] token fetch failed — using raw meetingLink", err);
+                }
+            } finally {
+                if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+                if (!cancelled) setTokenResolved(true);
+            }
+        })();
+        return () => {
+            cancelled = true;
+            if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+        };
+    }, [appointmentId]);
+
     const embeddedUrl = useMemo(() => {
         if (!meetingLink) return null;
         try {
             const u = new URL(meetingLink);
-            // Jitsi supports config overrides via URL hash parameters.
             if (u.hostname.includes('jit.si')) {
                 u.hash = 'config.prejoinPageEnabled=true&config.disableInviteFunctions=true';
             }
-            // Daily.co doesn't need parameters — the room config was set at create time.
             return u.toString();
         } catch {
             return meetingLink;
         }
     }, [meetingLink]);
 
-    if (!embeddedUrl) {
+    const finalSrc = tokenedUrl || embeddedUrl;
+
+    if (!tokenResolved) {
+        return (
+            <div className="flex-1 bg-black rounded-3xl overflow-hidden flex items-center justify-center">
+                <div className="text-center space-y-4 p-8">
+                    <Loader2 className="w-10 h-10 text-white/50 animate-spin mx-auto" />
+                    <p className="text-white/60 text-sm font-medium">
+                        Connecting to consultation room…
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!finalSrc) {
         return (
             <div className="flex-1 bg-black rounded-3xl overflow-hidden flex items-center justify-center">
                 <div className="text-center space-y-4 p-8">
@@ -488,12 +548,9 @@ function VideoCallFrame({
         <div className="flex-1 bg-black rounded-3xl overflow-hidden relative group">
             <iframe
                 title={`Video call with ${patientName}`}
-                src={embeddedUrl}
+                src={finalSrc}
                 className="w-full h-full border-0"
-                // Permissions the provider needs to run camera + mic + screen share.
                 allow="camera; microphone; fullscreen; speaker; display-capture; autoplay; clipboard-write"
-                // Best-effort sandbox — same-origin is required for provider scripts,
-                // forms + popups permit post-call surveys or sign-in prompts.
                 allowFullScreen
             />
             <div className="absolute bottom-6 left-6 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-lg text-white text-xs font-bold border border-white/10 pointer-events-none">
@@ -505,7 +562,7 @@ function VideoCallFrame({
                 variant="outline"
                 className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white border-white/20 hover:bg-black/60 hover:text-white"
             >
-                <a href={embeddedUrl} target="_blank" rel="noopener noreferrer" title="Open in a separate tab">
+                <a href={finalSrc} target="_blank" rel="noopener noreferrer" title="Open in a separate tab">
                     <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
                     Pop out
                 </a>

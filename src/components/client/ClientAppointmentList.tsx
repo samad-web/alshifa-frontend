@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Calendar, Clock, MessageSquare, ChevronRight, Video, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ export function ClientAppointmentList({
 }: ClientAppointmentListProps) {
     const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
     const [cancelling, setCancelling] = useState(false);
+    const navigate = useNavigate();
 
     const handleConfirmCancel = async () => {
         if (!cancelTarget || !onCancel) return;
@@ -170,7 +172,7 @@ export function ClientAppointmentList({
                                 <Button
                                     size="sm"
                                     className="h-8 text-[11px] font-bold rounded-md bg-primary hover:bg-primary/90"
-                                    onClick={() => window.open(appointment.meetingLink, "_blank")}
+                                    onClick={() => navigate(`/patient/consultation/${appointment.id}`)}
                                 >
                                     Join Now
                                 </Button>
