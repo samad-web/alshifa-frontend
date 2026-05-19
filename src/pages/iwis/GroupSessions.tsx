@@ -15,7 +15,7 @@ import {
     Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Plus, Users, Loader2, Calendar, Clock, DoorOpen, Building2, CheckCircle2, UserPlus, Check, ChevronsUpDown, X, Play } from "lucide-react";
+import { Plus, Users, Loader2, Calendar, Clock, DoorOpen, CheckCircle2, UserPlus, Check, ChevronsUpDown, X, Play } from "lucide-react";
 import { iwisApi, type GroupSession, type TherapyRoom } from "@/services/iwis.service";
 import { branchesApi } from "@/services/branches.service";
 import { apiClient } from "@/lib/api-client";
@@ -34,13 +34,27 @@ const STATUS_TONE: Record<string, string> = {
     CANCELLED: "bg-destructive/10 text-destructive border-destructive/30",
 };
 
+// True when the wall-clock has passed the session's scheduled end time.
+// Sessions stay in OPEN status server-side until a clinician marks them
+// complete, so this check is what actually hides the patient "Join" button
+// for sessions that have technically ended. `date` arrives as an ISO
+// timestamp; `endTime` is a local "HH:mm" string set by the clinic.
+function sessionHasEnded(s: { date: string; endTime: string }): boolean {
+    if (!s.date || !s.endTime) return false;
+    const [hh, mm] = s.endTime.split(":").map(Number);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return false;
+    const end = new Date(s.date);
+    end.setHours(hh, mm, 0, 0);
+    return Date.now() > end.getTime();
+}
+
 export default function GroupSessionsPage() {
     const { toast } = useToast();
     const { role } = useAuth();
     const navigate = useNavigate();
     const { branchIdParam } = useBranchScope();
     const { confirm, dialog: confirmDialog } = useConfirm();
-    const isClinician = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "THERAPIST";
+    const isClinician = role === "ADMIN" || role === "ADMIN_DOCTOR" || role === "THERAPIST" || role === "DOCTOR";
 
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
     const [branchId, setBranchId] = useState("");
@@ -90,7 +104,6 @@ export default function GroupSessionsPage() {
     // / THERAPIST don't see the navbar switcher so they fall back to the
     // first branch in their list.
     const isAdmin = role === "ADMIN" || role === "ADMIN_DOCTOR";
-    const isCrossBranch = isAdmin && !branchIdParam;
     useEffect(() => {
         if (branchIdParam) { setBranchId(branchIdParam); return; }
         if (isAdmin) { setBranchId(""); return; }
@@ -164,9 +177,19 @@ export default function GroupSessionsPage() {
             tone: "default",
         });
         if (!ok) return;
-        await iwisApi.completeGroupSession(id);
-        toast({ title: "Session completed" });
-        reload();
+        try {
+            await iwisApi.completeGroupSession(id);
+            toast({ title: "Session completed" });
+            reload();
+        } catch (err) {
+            // Surface the real reason (e.g. ownership 403 from the backend
+            // mutation gate) so the click doesn't silently no-op.
+            toast({
+                title: "Couldn't complete session",
+                description: err instanceof Error && err.message ? err.message : "Please try again.",
+                variant: "destructive",
+            });
+        }
     };
 
     return (
@@ -176,22 +199,6 @@ export default function GroupSessionsPage() {
                     {isClinician && <Button onClick={() => setDialogOpen(true)}><Plus className="w-4 h-4 mr-2" /> New Session</Button>}
                 </PageHeader>
 
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Building2 className="w-4 h-4" />
-                    {isCrossBranch ? (
-                        <>
-                            Branch: <span className="font-semibold text-foreground">All branches</span>
-                            <span className="text-xs">(narrow via navbar)</span>
-                        </>
-                    ) : (
-                        <>
-                            Branch: <span className="font-semibold text-foreground">
-                                {branches.find((b) => b.id === branchId)?.name || "—"}
-                            </span>
-                            <span className="text-xs">(switch via navbar)</span>
-                        </>
-                    )}
-                </div>
 
                 {loading ? (
                     <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
@@ -207,7 +214,17 @@ export default function GroupSessionsPage() {
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <Badge variant="outline" className={STATUS_TONE[s.status]}>{s.status}</Badge>
-                                        <Badge variant="outline"><Users className="w-3 h-3 mr-1" /> {s._count?.appointments ?? 0} / {s.maxCapacity}</Badge>
+                                        {/* COMPLETED sessions show a final-roster label instead of
+                                            the enrolled/capacity ratio — "0 / 22" on a closed session
+                                            reads like "no one showed up" when the truth is just "no
+                                            one enrolled". The ratio is correct shorthand for OPEN/FULL
+                                            cards where the upper bound still constrains the user. */}
+                                        <Badge variant="outline">
+                                            <Users className="w-3 h-3 mr-1" />
+                                            {s.status === "COMPLETED"
+                                                ? `Final: ${s._count?.appointments ?? 0} enrolled`
+                                                : `${s._count?.appointments ?? 0} / ${s.maxCapacity}`}
+                                        </Badge>
                                         {s.room && <Badge variant="outline"><DoorOpen className="w-3 h-3 mr-1" /> {s.room.name}</Badge>}
                                     </div>
                                     <div className="space-y-1 text-sm text-muted-foreground">
@@ -216,14 +233,16 @@ export default function GroupSessionsPage() {
                                         <div>Therapist: {s.therapist?.fullName || "—"}</div>
                                     </div>
                                     <div className="flex justify-end gap-2 pt-2">
-                                        {s.status === "OPEN" && !isClinician && (
+                                        {s.status === "OPEN" && !isClinician && !sessionHasEnded(s) && (
                                             <Button size="sm" onClick={() => join(s.id)}>
                                                 <UserPlus className="w-3.5 h-3.5 mr-2" /> Join
                                             </Button>
                                         )}
                                         {/* Clinician shortcut into the session workspace — opens the
-                                            roster + complete view. Hidden once the session is locked. */}
-                                        {isClinician && s.status !== "COMPLETED" && s.status !== "CANCELLED" && (
+                                            roster + complete view. Hidden once the session is locked
+                                            OR once it's past its scheduled end time (Complete stays
+                                            available so therapists can close out attendance). */}
+                                        {isClinician && s.status !== "COMPLETED" && s.status !== "CANCELLED" && !sessionHasEnded(s) && (
                                             <Button
                                                 size="sm"
                                                 onClick={() => navigate(`/group-sessions/${s.id}/workspace`)}

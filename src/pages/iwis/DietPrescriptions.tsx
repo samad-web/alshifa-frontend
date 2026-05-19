@@ -436,16 +436,6 @@ function DietPrescriptionsInner({ embedded = false }: DietPrescriptionsInnerProp
                                                 ))}
                                             </div>
                                         )}
-                                        {canHoverEdit && (
-                                            <AddMealSlotButton
-                                                prescriptionId={p.id}
-                                                existingSlots={(p.meals ?? []).map((m) => m.mealTime)}
-                                                onAdded={async () => {
-                                                    const refreshed = await iwisApi.listDietForPatient(patientId);
-                                                    setPrescriptions(refreshed);
-                                                }}
-                                            />
-                                        )}
                                     </div>
                                 </Panel>
                             </HoverActionCard>
@@ -835,82 +825,3 @@ export default function DietPlansAndPackagesPage() {
     );
 }
 
-// ── Inline helper: "+ Add Meal Slot" button + slot picker dialog ────────────
-// Lives in this file because it's only used here. Posts an empty meal at the
-// chosen MealTime; foods/avoidFoods/instructions are filled in afterwards via
-// the row's edit dialog.
-function AddMealSlotButton({
-    prescriptionId,
-    existingSlots,
-    onAdded,
-}: {
-    prescriptionId: string;
-    existingSlots: MealTime[];
-    onAdded: () => void;
-}) {
-    const { toast } = useToast();
-    const [open, setOpen] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const available = MEAL_TIMES.filter((t) => !existingSlots.includes(t));
-    const [pick, setPick] = useState<MealTime | "">(available[0] ?? "");
-
-    if (available.length === 0) return null;
-
-    async function handleAdd() {
-        if (!pick) return;
-        setSaving(true);
-        try {
-            await iwisApi.addDietMeal(prescriptionId, {
-                mealTime: pick as MealTime,
-                foods: [],
-                avoidFoods: [],
-                instructions: undefined,
-            });
-            toast({ title: "Meal slot added", description: "Open it to fill in foods and instructions." });
-            setOpen(false);
-            onAdded();
-        } catch (err: unknown) {
-            toast({
-                title: "Could not add meal",
-                description: err instanceof Error ? err.message : "Unknown error",
-                variant: "destructive",
-            });
-        } finally {
-            setSaving(false);
-        }
-    }
-
-    return (
-        <>
-            <div className="pt-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => { setPick(available[0]); setOpen(true); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Meal Slot
-                </Button>
-            </div>
-            <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
-                <DialogContent className="sm:max-w-[420px]">
-                    <DialogHeader>
-                        <DialogTitle>Add a meal slot</DialogTitle>
-                        <DialogDescription>Pick a slot. You can fill in foods and instructions immediately after.</DialogDescription>
-                    </DialogHeader>
-                    <div className="py-3 space-y-2">
-                        <Label>Meal time</Label>
-                        <Select value={pick || undefined} onValueChange={(v) => setPick(v as MealTime)}>
-                            <SelectTrigger><SelectValue placeholder="Select a slot" /></SelectTrigger>
-                            <SelectContent>
-                                {available.map((t) => <SelectItem key={t} value={t}>{MEAL_LABEL[t]}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="ghost" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
-                        <Button onClick={handleAdd} disabled={saving || !pick}>
-                            {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            Add slot
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </>
-    );
-}

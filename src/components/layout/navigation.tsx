@@ -184,7 +184,7 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
             { path: "/manage-users", label: "Manage Users", icon: Users },
             { path: "/assign-patient", label: "Assign Patient", icon: User },
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
-            { path: "/diet-packages", label: "Diet Package Reviews", icon: Salad },
+            { path: "/diet-prescriptions", label: "Diet Plans & Packages", icon: Salad },
             { path: "/self-exam-review", label: "Self-Exam Review", icon: ClipboardList },
           ],
         },
@@ -367,14 +367,27 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
         { path: "/doctor", label: "Dashboard", icon: User },
         { path: "/appointments", label: "Appointments", icon: CalendarDays },
         {
+          label: "Patients",
+          icon: Users,
+          items: [
+            { path: "/my-patients", label: "My Patients", icon: Users, section: "Patients" },
+            { path: "/patient-history", label: "Patient History", icon: FileText, section: "Patients" },
+          ],
+        },
+        {
           label: "Clinical",
           icon: FilePlus2,
           items: [
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
-            { path: "/diet-prescriptions", label: "Diet Plans", icon: Salad },
-            { path: "/food-database", label: "Food Database", icon: Leaf },
-            { path: "/recipe-library", label: "Recipe Library", icon: BookOpen },
-            { path: "/diet-packages", label: "Diet Packages", icon: Salad },
+            // Diet Plans & Packages — one entry, combined-tab view at
+            // /diet-prescriptions. The /diet-packages route is still mounted
+            // (back-compat for old deep links / notifications) but is no
+            // longer surfaced separately in the nav.
+            { path: "/diet-prescriptions", label: "Diet Plans & Packages", icon: Salad },
+            // Food Database & Recipe Library — one entry, combined-tab view at
+            // /food-database. /recipe-library route still resolves (back-compat
+            // for old deep links) but is no longer surfaced separately.
+            { path: "/food-database", label: "Food Database + Recipes", icon: Leaf },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck },
@@ -430,8 +443,8 @@ const getRoleNavItems = (role: AppRole | null): NavEntry[] => {
           icon: FilePlus2,
           items: [
             { path: "/prescriptions", label: "Prescriptions", icon: FilePlus2 },
-            { path: "/diet-packages", label: "Diet Packages", icon: Salad },
-            { path: "/recipe-library", label: "Recipe Library", icon: BookOpen },
+            { path: "/diet-prescriptions", label: "Diet Plans & Packages", icon: Salad },
+            { path: "/food-database", label: "Food Database + Recipes", icon: Leaf },
             { path: "/journey-builder", label: "Journey Builder", icon: MapIcon },
             { path: "/handoff-notes", label: "Handoff Notes", icon: FileText },
             { path: "/visit-summary", label: "Visit Summary", icon: ClipboardCheck },

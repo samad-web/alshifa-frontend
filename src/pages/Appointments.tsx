@@ -68,11 +68,19 @@ export default function Appointments() {
         fetchAppointments();
     }, []);
 
-    // Pre-select the Live Queue tab when the URL says ?tab=live-queue
-    // (back-compat for the old /live-queue links that now redirect here).
+    // Pre-select an initial tab from ?tab=… in the URL. Used by:
+    //   • the old /live-queue redirect (?tab=live-queue)
+    //   • dashboard stat cards that deep-link to a specific status
+    //     (e.g. "Pending Approval" → ?tab=pending).
+    // Accepts case-insensitive values; unknown values fall through to the
+    // default ALL tab so a typo or stale URL never breaks the page.
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        if (params.get("tab") === "live-queue") setActiveTab("LIVE_QUEUE");
+        const raw = params.get("tab");
+        if (!raw) return;
+        const tab = raw.toUpperCase().replace(/-/g, "_");
+        const allowed: AppointmentTab[] = ["ALL", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "LIVE_QUEUE"];
+        if ((allowed as string[]).includes(tab)) setActiveTab(tab as AppointmentTab);
     }, []);
 
     const fetchAppointments = async () => {

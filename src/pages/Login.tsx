@@ -37,7 +37,6 @@ export default function Login() {
   const [signInErr, setSignInErr] = useState<SignInError | null>(null);
   const [emailIssue, setEmailIssue] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [inactivityNotice, setInactivityNotice] = useState(false);
   const { user, role, signIn, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -46,15 +45,6 @@ export default function Login() {
       navigate(getRoleRedirectPath(role), { replace: true });
     }
   }, [user, role, loading, navigate]);
-
-  useEffect(() => {
-    try {
-      if (sessionStorage.getItem("auth:logout-reason") === "inactivity") {
-        setInactivityNotice(true);
-        sessionStorage.removeItem("auth:logout-reason");
-      }
-    } catch { /* storage may be blocked */ }
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,15 +161,6 @@ export default function Login() {
 
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-6" noValidate>
-            {inactivityNotice && !copy && (
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-primary/5 border border-primary/20">
-                <Clock className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="text-sm font-bold text-foreground">You were signed out</p>
-                  <p className="text-sm text-muted-foreground">For your security, we ended your session after 15 minutes of inactivity.</p>
-                </div>
-              </div>
-            )}
             {copy && (
               <div className="flex items-start gap-3 p-4 rounded-xl bg-attention/5 border border-attention/20 animate-shake">
                 <ErrIcon className="w-5 h-5 text-attention shrink-0 mt-0.5" />

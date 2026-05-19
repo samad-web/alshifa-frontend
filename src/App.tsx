@@ -13,6 +13,7 @@ import ErrorBoundary from "@/components/common/ErrorBoundary";
 import { FeatureGate } from "@/components/common/FeatureGate";
 import { lazy, Suspense } from "react";
 import { TriageWizard } from "./components/triage/TriageWizard";
+import { AppLayout } from "./components/layout/app-layout";
 import { Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -588,7 +589,9 @@ function AppRoutes() {
         path="/triage"
         element={
           <ProtectedRoute allowedRoles={["PATIENT"]}>
-            <div className="p-4"><TriageWizard /></div>
+            <AppLayout>
+              <div className="p-4"><TriageWizard /></div>
+            </AppLayout>
           </ProtectedRoute>
         }
       />
@@ -888,7 +891,7 @@ function AppRoutes() {
       <Route
         path="/food-database"
         element={
-          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}>
+          <ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}>
             <FoodDatabase />
           </ProtectedRoute>
         }
@@ -1035,10 +1038,10 @@ function AppRoutes() {
             <Route path="/care-gaps" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}><CareGapDashboard /></ProtectedRoute>} />
       <Route path="/medication-adherence" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}><MedicationAdherenceDashboard /></ProtectedRoute>} />
       <Route path="/revenue" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}><RevenueDashboard /></ProtectedRoute>} />
-      <Route path="/food-database" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}><FoodDatabase /></ProtectedRoute>} />
+      <Route path="/food-database" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}><FoodDatabase /></ProtectedRoute>} />
       <Route path="/recipe-library" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR", "THERAPIST"]}><RecipeLibrary /></ProtectedRoute>} />
       <Route path="/workflow-automation" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}><WorkflowAutomation /></ProtectedRoute>} />
-      <Route path="/patient-history" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}><PatientHistory /></ProtectedRoute>} />
+      <Route path="/patient-history" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR", "DOCTOR"]}><PatientHistory /></ProtectedRoute>} />
       <Route path="/patient-health-passport" element={<ProtectedRoute allowedRoles={["ADMIN", "ADMIN_DOCTOR"]}><PatientHealthPassport /></ProtectedRoute>} />
       <Route path="/my-patients" element={<ProtectedRoute allowedRoles={["ADMIN_DOCTOR", "DOCTOR"]}><MyPatients /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />

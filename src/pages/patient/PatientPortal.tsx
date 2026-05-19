@@ -12,14 +12,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Calendar, Pill, FileText, Download, Search, ChevronLeft, ChevronRight,
-  ClipboardList, Activity, ExternalLink, Leaf,
+  Calendar, Pill, FileText, Search, ChevronLeft, ChevronRight,
+  ClipboardList, Activity, ExternalLink, Leaf, TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   communicationApi,
   type PaginationInfo,
-  type PortalDocument,
   type PortalAppointment,
 } from "@/services/communication.service";
 import type { Prescription, VisitSummaryEntry } from "@/types";
@@ -28,6 +27,7 @@ import { FeedbackPromptListener } from "@/components/FeedbackModal";
 import { HomeTherapyFeedbackListener } from "@/components/HomeTherapyFeedbackListener";
 import { HealthReportsTab } from "@/components/patient/HealthReportsTab";
 import { MyTipsTab } from "@/components/patient/MyTipsTab";
+import { MyProgressTab } from "@/components/patient/MyProgressTab";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -278,81 +278,6 @@ function PrescriptionsTab() {
   );
 }
 
-// ── Documents tab ─────────────────────────────────────────────────────────
-
-function DocumentsTab() {
-  const [rows, setRows] = useState<PortalDocument[]>([]);
-  const [page, setPage] = useState(1);
-  const [pagination, setPagination] = useState<PaginationInfo>(DEFAULT_PAGINATION);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await communicationApi.getMyReports({ page, limit: 15 });
-      setRows(res.documents.data);
-      setPagination(res.documents.pagination);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load documents");
-    } finally {
-      setLoading(false);
-    }
-  }, [page]);
-
-  useEffect(() => { load(); }, [load]);
-
-  return (
-    <div>
-      <p className="text-sm text-muted-foreground mb-3">
-        Reports, lab results, and other files shared with you.
-      </p>
-
-      {loading ? (
-        <div className="space-y-2">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
-        </div>
-      ) : rows.length === 0 ? (
-        <EmptyState icon={<FileText className="h-8 w-8" />} text="No documents available." />
-      ) : (
-        <div className="space-y-2">
-          {rows.map((doc) => (
-            <div
-              key={doc.id}
-              className="flex items-center justify-between p-3 rounded-lg border bg-background hover:bg-muted/40 transition-colors"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <FileText className="h-5 w-5 text-teal-500 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{doc.fileName}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <Badge variant="secondary" className="text-[10px] py-0">
-                      {doc.category}
-                    </Badge>
-                    <span className="text-[10px] text-muted-foreground">
-                      {formatDate(doc.createdAt)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              {doc.fileUrl && (
-                <Button
-                  variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0"
-                  onClick={() => window.open(doc.fileUrl, "_blank")}
-                  title="Download"
-                >
-                  <Download className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <PaginationBar pagination={pagination} onPage={setPage} />
-    </div>
-  );
-}
-
 // ── Visit Summaries tab ───────────────────────────────────────────────────
 
 interface VisitSummaryRow extends VisitSummaryEntry {
@@ -452,7 +377,7 @@ export default function PatientPortal() {
       <div className="container mx-auto px-4 py-6 max-w-5xl">
         <PageHeader
           title="My Records"
-          subtitle="Full history of your appointments, prescriptions, and documents."
+          subtitle="Full history of your appointments, prescriptions, and recovery progress."
         >
           <Activity className="h-5 w-5 text-muted-foreground" />
         </PageHeader>
@@ -467,8 +392,8 @@ export default function PatientPortal() {
                 <TabsTrigger value="prescriptions" className="gap-1.5">
                   <Pill className="h-3.5 w-3.5" /> Prescriptions
                 </TabsTrigger>
-                <TabsTrigger value="documents" className="gap-1.5">
-                  <FileText className="h-3.5 w-3.5" /> Documents
+                <TabsTrigger value="progress" className="gap-1.5">
+                  <TrendingUp className="h-3.5 w-3.5" /> My Progress
                 </TabsTrigger>
                 <TabsTrigger value="summaries" className="gap-1.5">
                   <ClipboardList className="h-3.5 w-3.5" /> Visit Summaries
@@ -482,7 +407,7 @@ export default function PatientPortal() {
               </TabsList>
               <TabsContent value="appointments" className="pt-4"><AppointmentsTab /></TabsContent>
               <TabsContent value="prescriptions" className="pt-4"><PrescriptionsTab /></TabsContent>
-              <TabsContent value="documents" className="pt-4"><DocumentsTab /></TabsContent>
+              <TabsContent value="progress" className="pt-4"><MyProgressTab /></TabsContent>
               <TabsContent value="summaries" className="pt-4"><VisitSummariesTab /></TabsContent>
               <TabsContent value="reports" className="pt-4"><HealthReportsTab /></TabsContent>
               <TabsContent value="tips" className="pt-4"><MyTipsTab /></TabsContent>

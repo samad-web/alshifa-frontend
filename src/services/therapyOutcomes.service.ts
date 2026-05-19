@@ -52,6 +52,15 @@ export const therapyOutcomesApi = {
     return data.data.outcomes;
   },
 
+  /** Caller's own outcomes. PATIENT role only — server derives patientId
+   *  from the JWT so the URL carries no id. Powers the My Progress tab. */
+  mine: async (): Promise<TherapyOutcome[]> => {
+    const { data } = await apiClient.get<OutcomeListEnvelope>(
+      "/api/therapy-outcomes/me",
+    );
+    return data.data.outcomes;
+  },
+
   create: async (payload: CreateOutcomePayload): Promise<TherapyOutcome> => {
     const { data } = await apiClient.post<OutcomeEnvelope>(
       "/api/therapy-outcomes",

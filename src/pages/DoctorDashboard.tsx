@@ -263,13 +263,18 @@ export default function DoctorDashboard() {
           </div>
         </header>
 
-        {/* SECTION B — Today at a Glance */}
+        {/* SECTION B — Today at a Glance
+            Each tile drills into the page that backs the metric. Pending
+            Approval pre-selects the PENDING tab on /appointments via the
+            ?tab= param; Patients at Risk and Leaderboard route to their
+            own pages. Active Prescriptions stays static (no detail view
+            distinct from the prescriptions module). */}
         <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard title="Appointments Today" value={summary.stats.appointmentsToday} icon={Calendar} />
-          <StatCard title="Pending Approval" value={summary.stats.pendingApproval} icon={AlertTriangle} variant="attention" />
-          <StatCard title="Patients at Risk" value={summary.stats.patientsAtRisk} icon={Activity} variant="risk" />
-          <StatCard title="Active Prescriptions" value={summary.stats.activePrescriptions} icon={Pill} />
-          <StatCard title="Leaderboard" value={summary.stats.leaderboardRank ? `#${summary.stats.leaderboardRank}` : "—"} icon={Trophy} variant="wellness" />
+          <StatCard title="Appointments Today" value={summary.stats.appointmentsToday} icon={Calendar} href="/appointments" />
+          <StatCard title="Pending Approval" value={summary.stats.pendingApproval} icon={AlertTriangle} variant="attention" href="/appointments?tab=pending" />
+          <StatCard title="Patients at Risk" value={summary.stats.patientsAtRisk} icon={Activity} variant="risk" href="/patients" />
+          <StatCard title="Active Prescriptions" value={summary.stats.activePrescriptions} icon={Pill} href="/prescriptions" />
+          <StatCard title="Leaderboard" value={summary.stats.leaderboardRank ? `#${summary.stats.leaderboardRank}` : "—"} icon={Trophy} variant="wellness" href="/doctor-gamification" />
         </section>
 
         {/* SECTION C — Appointments Queue */}
@@ -334,14 +339,10 @@ export default function DoctorDashboard() {
         />
 
         {/* SECTION D — Care Gap Alerts moved to popup in header. */}
-
-        {/* SECTION D2 — Follow-Up Tasks (Feature 5)
-            Auto-generated from clinical events (triage swelling/high-pain,
-            post-consultation high-pain, low diet adherence, journey phase
-            activation). Doctor's morning panel — overdue / high-priority
-            counts surface in the header chip strip; completing a task
-            earns XP via the existing ClinicianXP pipeline. */}
-        <FollowUpTaskPanel />
+        {/* SECTION D2 — Follow-Up Tasks moved into the two-column row below
+            (My Tasks ‖ Follow-Up Tasks) to match the Admin Doctor dashboard's
+            layout — both task surfaces share the same horizontal band so the
+            doctor's morning panel is one glance, not two stacked sections. */}
 
         {/* SECTION E — Patient Roster */}
         <section className="rounded-xl border bg-card shadow-card overflow-hidden">
@@ -373,11 +374,19 @@ export default function DoctorDashboard() {
           </div>
         </section>
 
-        {/* SECTION F — My Tasks (group sessions + todos)
+        {/* SECTION F — My Tasks + Follow-Up Tasks
             Group sessions surface as date-keyed task cards above the freeform
-            todo list so the doctor sees their full upcoming load in one place. */}
+            todo row so the doctor sees their full upcoming load in one place.
+            The two-column grid pairs the doctor's freeform My Tasks with the
+            auto-generated Follow-Up Tasks (triage swelling/high-pain, post-
+            consultation high-pain, low diet adherence, journey activation).
+            Mirrors the Admin Doctor dashboard's pairing — stacks on smaller
+            screens, side-by-side on lg+. */}
         <GroupSessionsTaskSection sessions={summary.groupSessions || []} />
-        <TodoPanel title="My Tasks" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <TodoPanel title="My Tasks" />
+          <FollowUpTaskPanel />
+        </div>
 
         {/* SECTION F2 — Public thank-you cards from completed journeys.
             Self-hides when no PUBLIC letters exist in the lookback window. */}

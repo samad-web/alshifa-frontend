@@ -37,9 +37,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
-// Auto-logout after this many ms of no user interaction.
-const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
-
 export type SignInErrorKind =
   | "network"
   | "server"
@@ -362,34 +359,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   };
 
-  // Inactivity auto-logout. Resets on any user interaction; fires once
-  // 15 minutes of silence pass while a user is signed in.
-  const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!user) return;
-
-    const triggerLogout = () => {
-      // Surface a one-shot reason flag so the next page load can show a
-      // toast or banner if it wants to.
-      try { sessionStorage.setItem("auth:logout-reason", "inactivity"); } catch { /* storage may be blocked */ }
-      void signOut();
-    };
-    const reset = () => {
-      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
-      inactivityTimerRef.current = setTimeout(triggerLogout, INACTIVITY_TIMEOUT_MS);
-    };
-
-    const events: (keyof DocumentEventMap)[] = [
-      "mousemove", "mousedown", "keydown", "click", "scroll", "touchstart", "visibilitychange",
-    ];
-    events.forEach(evt => document.addEventListener(evt, reset, { passive: true }));
-    reset();
-
-    return () => {
-      events.forEach(evt => document.removeEventListener(evt, reset));
-      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
-    };
-  }, [user]);
+  // Inactivity auto-logout removed: sessions now persist until the user
+  // explicitly clicks Sign out, the JWT hits its 7-day expiry, or the
+  // backend revokes the token. The 15-minute idle timer that lived here
+  // before was the primary source of "I came back from lunch and got
+  // bounced" reports.
 
   return (
     <AuthContext.Provider value={{ user, role, profile, loading, signIn, signOut, refreshProfile: fetchProfile }}>

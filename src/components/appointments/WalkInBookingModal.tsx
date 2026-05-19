@@ -271,20 +271,28 @@ export function WalkInBookingModal({ isOpen, onClose, onBooked }: WalkInBookingM
 
     function renderSlotButton(slot: WalkInSlot) {
         const isSelected = selectedTime === slot.time;
-        const baseTitle = slot.status === 'BOOKED'
-            ? `Booked: ${slot.patientName || 'Patient'}`
-            : slot.status === 'BLOCKED'
-                ? `Blocked: ${slot.blockReason || ''}`
-                : '';
+        const baseTitle = slot.status === 'PAST'
+            ? 'This time has already passed'
+            : slot.status === 'BOOKED'
+                ? `Booked: ${slot.patientName || 'Patient'}`
+                : slot.status === 'BLOCKED'
+                    ? `Blocked: ${slot.blockReason || ''}`
+                    : '';
+        // PAST gets its own explicit branch with line-through so the patient
+        // booking form and the walk-in modal share the same visual grammar.
+        // Without this, PAST slots fell through to the generic disabled-fallback
+        // tile and looked indistinguishable from "no data" / dead rows.
         const cls = isSelected
             ? 'border-teal-600 bg-teal-600 text-white'
             : slot.status === 'AVAILABLE'
                 ? 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
-                : slot.status === 'BOOKED'
-                    ? 'border-gray-200 bg-gray-100 text-gray-500'
-                    : slot.status === 'BLOCKED'
-                        ? 'border-red-100 bg-red-50 text-red-500'
-                        : 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed';
+                : slot.status === 'PAST'
+                    ? 'border-gray-200 bg-gray-100 text-gray-400 line-through cursor-not-allowed'
+                    : slot.status === 'BOOKED'
+                        ? 'border-gray-200 bg-gray-100 text-gray-500'
+                        : slot.status === 'BLOCKED'
+                            ? 'border-red-100 bg-red-50 text-red-500'
+                            : 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed';
         return (
             <button
                 key={slot.time}

@@ -119,13 +119,7 @@ export function CoachComposer({
         if (recorder.isRecording) {
             void (async () => {
                 const blob = await recorder.stopRecording();
-                if (!blob) {
-                    toast.error("Recording too short", {
-                        description: "Tap once to start, then keep talking for at least a second before tapping again to send.",
-                        icon: "🎙",
-                    });
-                    return;
-                }
+                if (!blob) return;
                 if (onSendAudio) await onSendAudio(blob);
             })();
         } else {

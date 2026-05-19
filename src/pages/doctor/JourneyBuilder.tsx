@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
 import { AppLayout } from '@/components/layout/app-layout';
 import { cn } from '@/lib/utils';
+import { PatientPicker, type PatientLite } from '@/components/clinical/PatientPicker';
 
 const TASK_TYPES = [
   { value: 'MEDICATION', label: 'Medication', icon: '💊' },
@@ -85,22 +86,20 @@ export default function JourneyBuilder() {
   const [searchParams] = useSearchParams();
 
   // Pull pre-fill values from either route state (preferred — typed) or URL
-  // query params (so deep-links from emails / external systems also work).
-  // Recognised query keys: patientId, patientName, branchId.
-  const stateNav = (location.state || {}) as { patientId?: string; patientName?: string; branchId?: string };
-  const queryPatientId   = searchParams.get('patientId')   || '';
-  const queryPatientName = searchParams.get('patientName') || '';
-  const queryBranchId    = searchParams.get('branchId')    || '';
-  const initialPatientId   = stateNav.patientId   || queryPatientId   || '';
-  const initialPatientName = stateNav.patientName || queryPatientName || '';
-  const initialBranchId    = stateNav.branchId    || queryBranchId    || '';
+  // query params (so deep-links from emails / patient profile "Build journey"
+  // buttons still work). Recognised key: patientId (Patient.id). The old
+  // patientName / branchId params are accepted for back-compat but ignored —
+  // both come from the PatientPicker now.
+  const stateNav = (location.state || {}) as { patientId?: string };
+  const initialPatientId = stateNav.patientId || searchParams.get('patientId') || '';
 
+  // Roster used to populate the picker. We fetch with assignedToMe=true so a
+  // DOCTOR sees only patients formally assigned to them; ADMIN_DOCTORs bypass
+  // the filter server-side and see everyone in the hospital. The picker
+  // searches by name / phone / id substring, which is why we drop the two
+  // ID-typing inputs the page used to require.
+  const [patients, setPatients] = useState<PatientLite[]>([]);
   const [patientId, setPatientId] = useState(initialPatientId);
-  // Patient name is display-only — surfaced in the form so the doctor can
-  // visually verify the journey is being built for the correct patient.
-  const [patientName, setPatientName] = useState(initialPatientName);
-  const [patientLookupLoading, setPatientLookupLoading] = useState(false);
-  const [branchId, setBranchId] = useState(initialBranchId);
   const [title, setTitle] = useState('');
   const [condition, setCondition] = useState('');
   const [targetDate, setTargetDate] = useState('');
@@ -131,6 +130,24 @@ export default function JourneyBuilder() {
   }, []);
 
   useEffect(() => { loadExistingJourneys(); }, [loadExistingJourneys]);
+
+  // Load the doctor's assigned-patient roster once. Same call as the diet
+  // prescriptions page so a doctor sees the same patient set in both places.
+  useEffect(() => {
+    apiClient
+      .get<PatientLite[]>('/api/user/list-patients', { assignedToMe: 'true' })
+      .then(({ data }) => setPatients(Array.isArray(data) ? data : []))
+      .catch(() => setPatients([]));
+  }, []);
+
+  // Resolve the selected patient's display info (name + branch) from the
+  // roster. branchId is read-only here — the backend re-derives it from the
+  // caller's JWT or the patient's profile, so leaking it onto the form would
+  // just invite drift between what the doctor sees and what the server uses.
+  const selectedPatient = useMemo(
+    () => patients.find((p) => p.id === patientId) || null,
+    [patients, patientId],
+  );
 
   // Mark the journey's current ACTIVE phase as COMPLETED. The backend
   // (PATCH /api/journeys/:id/phases/:phaseId) cascades:
@@ -168,25 +185,6 @@ export default function JourneyBuilder() {
       setCompletingPhaseId(null);
     }
   }
-
-  // If we have an ID but no name (e.g. URL params only carried the ID),
-  // resolve the patient's display name + branch from the API so the form
-  // renders a "Building journey for X" badge and auto-fills branchId.
-  useEffect(() => {
-    if (!patientId || patientName) return;
-    let cancelled = false;
-    setPatientLookupLoading(true);
-    apiClient.get<{ fullName?: string; branchId?: string }>(`/api/user/patient/${patientId}`)
-      .then(({ data }) => {
-        if (cancelled) return;
-        if (data?.fullName) setPatientName(data.fullName);
-        if (data?.branchId && !branchId) setBranchId(data.branchId);
-      })
-      .catch(() => { /* leave fields editable for manual entry */ })
-      .finally(() => { if (!cancelled) setPatientLookupLoading(false); });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientId]);
 
   function addPhase() {
     setPhases(prev => [...prev, {
@@ -237,8 +235,11 @@ export default function JourneyBuilder() {
   }
 
   async function handleSubmit() {
-    if (!patientId || !branchId || !title || !condition) {
-      toast({ title: 'Missing fields', description: 'Please fill in all required fields.', variant: 'destructive' });
+    // branchId is intentionally NOT validated client-side. The backend always
+    // overrides it: forceBranchFromUser pins DOCTOR/THERAPIST to their JWT
+    // branch and resolves it from the patient profile for ADMIN_DOCTOR.
+    if (!patientId || !title || !condition) {
+      toast({ title: 'Missing fields', description: 'Pick a patient and fill in the title + condition.', variant: 'destructive' });
       return;
     }
 
@@ -260,8 +261,9 @@ export default function JourneyBuilder() {
     setSubmitting(true);
     try {
       const payload = {
+        // Patient.id from the picker — the backend normalises this to User.id
+        // for the TreatmentJourney FK and re-derives branchId server-side.
         patientId,
-        branchId,
         title,
         condition,
         targetDate: targetDate || undefined,
@@ -415,49 +417,38 @@ export default function JourneyBuilder() {
       <Card>
         <CardHeader><CardTitle className="text-lg">Journey Details</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {/* Patient context banner — visible when the page was opened from
-              a patient profile or appointment. Confirms whom the journey is
-              being built for so the doctor doesn't have to re-search the
-              patient. Auto-resolved name takes priority over the bare ID. */}
-          {patientId && (
-            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 flex items-center gap-2 text-sm">
+          {/* Patient picker — replaces the old Patient ID / Branch ID text
+              inputs. Searches by name, phone, or id substring; the branch is
+              derived from the picked patient (read-only badge below) and the
+              backend re-validates / overrides on submit so the form never
+              needs to carry branchId in state. */}
+          <div className="space-y-2">
+            <Label>Patient *</Label>
+            <PatientPicker
+              value={patientId}
+              onChange={(id) => setPatientId(id)}
+              patients={patients}
+              placeholder="Search patients by name or phone…"
+            />
+          </div>
+
+          {/* Confirmation banner once a patient is selected. Shows the name
+              the doctor will see in audit logs + the branch the journey will
+              be filed under. Mirrors the existing "Building journey for…"
+              language so deep-link flows feel identical. */}
+          {selectedPatient && (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 flex items-center gap-2 text-sm flex-wrap">
               <UserCheck className="w-4 h-4 text-primary shrink-0" />
               <span className="text-primary/90">
                 Building journey for{' '}
-                <strong className="text-primary">
-                  {patientName || (patientLookupLoading ? 'Loading patient…' : 'patient')}
-                </strong>
-                <span className="ml-2 font-mono text-[11px] text-primary/70">#{patientId}</span>
+                <strong className="text-primary">{selectedPatient.fullName || 'Unnamed patient'}</strong>
               </span>
+              {selectedPatient.phoneNumber && (
+                <span className="text-[11px] text-primary/70">· {selectedPatient.phoneNumber}</span>
+              )}
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Patient ID *</Label>
-              <Input
-                value={patientId}
-                onChange={e => { setPatientId(e.target.value); setPatientName(''); }}
-                placeholder="Patient ID"
-                // When the page receives a patientId via URL/state we still
-                // allow override but mark it as auto-loaded so the doctor
-                // sees they don't need to type it.
-                className={initialPatientId ? 'bg-muted/40' : ''}
-              />
-              {patientName && (
-                <p className="text-xs text-muted-foreground italic">{patientName}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Branch ID *</Label>
-              <Input
-                value={branchId}
-                onChange={e => setBranchId(e.target.value)}
-                placeholder="Branch ID"
-                className={initialBranchId ? 'bg-muted/40' : ''}
-              />
-            </div>
-          </div>
           <div className="space-y-2">
             <Label>Journey Title *</Label>
             <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Knee Osteoarthritis Recovery" />

@@ -44,6 +44,15 @@ export function ClientBookingModal({
     const [branches, setBranches] = useState<any[]>([]);
     const [doctors, setDoctors] = useState<any[]>([]);
     const [availableSlots, setAvailableSlots] = useState<any[]>([]);
+    // Wall-clock awareness for today's bookings — backend now tells us
+    // (a) whether the selected date is today, (b) what time it is, and
+    // (c) the first AVAILABLE slot. We use this for the "Next available
+    // slot today" banner and the empty-state nudge to tomorrow.
+    const [slotsMeta, setSlotsMeta] = useState<{
+        isToday: boolean;
+        currentTime: string | null;
+        nextAvailable: string | null;
+    }>({ isToday: false, currentTime: null, nextAvailable: null });
     const [fetchingSlots, setFetchingSlots] = useState(false);
     const [triageSessionId, setTriageSessionId] = useState<string | null>(null);
     const [triageResult, setTriageResult] = useState<any>(null);
@@ -181,12 +190,24 @@ export function ClientBookingModal({
         try {
             // Send as YYYY-MM-DD (no time / no timezone offset) so the backend always
             // queries the calendar date the user sees, regardless of the server's UTC offset.
+            // Response is now wrapped: { slots, isToday, currentTime, nextAvailable }.
             const dateParam = format(formData.date, "yyyy-MM-dd");
-            const { data: slots } = await apiClient.get<any[]>('/api/appointments/available-slots', { clinicianId: formData.doctorId, date: dateParam });
-            setAvailableSlots(Array.isArray(slots) ? slots : []);
+            const { data } = await apiClient.get<{
+                slots: any[];
+                isToday: boolean;
+                currentTime: string | null;
+                nextAvailable: string | null;
+            }>('/api/appointments/available-slots', { clinicianId: formData.doctorId, date: dateParam });
+            setAvailableSlots(Array.isArray(data?.slots) ? data.slots : []);
+            setSlotsMeta({
+                isToday: !!data?.isToday,
+                currentTime: data?.currentTime ?? null,
+                nextAvailable: data?.nextAvailable ?? null,
+            });
         } catch (error: any) {
             console.error("Failed to fetch slots:", error);
             setAvailableSlots([]);
+            setSlotsMeta({ isToday: false, currentTime: null, nextAvailable: null });
             toast.error(error?.message || "Network error — could not load available time slots.");
         } finally {
             setFetchingSlots(false);
@@ -201,6 +222,25 @@ export function ClientBookingModal({
         if (!formData.doctorId) {
             toast.error("Please choose a doctor before confirming.");
             return;
+        }
+
+        // Final guard against past-time submission. The slot grid already
+        // disables PAST slots, but an edge case (clock tick after selection,
+        // tab left open across midnight, optimistic stale state) could let
+        // a now-past slot slip through. Keep the patient honest at submit.
+        {
+            const [startTime] = formData.slot.split(" - ");
+            const [hh, mm] = startTime.split(":").map(Number);
+            if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                const slotDateTime = new Date(formData.date);
+                slotDateTime.setHours(hh, mm, 0, 0);
+                const bufferTime = new Date(Date.now() + 30 * 60 * 1000);
+                if (slotDateTime <= bufferTime) {
+                    toast.error("This time slot has already passed. Please select a future slot.");
+                    setFormData({ ...formData, slot: "" });
+                    return;
+                }
+            }
         }
 
         setLoading(true);
@@ -605,11 +645,11 @@ export function ClientBookingModal({
                                 </div>
 
                                 {formData.date && (() => {
-                                    // Only AVAILABLE, non-held slots are bookable. We filter
-                                    // here (not inside SlotPicker) so the empty state below
-                                    // fires correctly even when the API returns rows that
-                                    // are all BOOKED/BLOCKED/HELD — the patient should not
-                                    // see disabled tiles for a clinician with no openings.
+                                    // Bookable count drives the right-aligned "N slots
+                                    // available" indicator. Held + non-AVAILABLE + PAST
+                                    // are all filtered out for the count, but PAST/BOOKED/
+                                    // BLOCKED tiles still render so the patient sees why
+                                    // the grid looks sparser today.
                                     const bookableSlots = availableSlots.filter(
                                         (s: any) => s.status === 'AVAILABLE' && !s.isHeld,
                                     );
@@ -634,15 +674,65 @@ export function ClientBookingModal({
                                                 )}
                                             </div>
 
+                                            {/* Today-only "Next available" affordance — surfaces the
+                                                first bookable slot so the patient doesn't have to scan
+                                                a grid full of greyed-out morning hours. */}
+                                            {!fetchingSlots && slotsMeta.isToday && slotsMeta.nextAvailable && (
+                                                <div
+                                                    className="flex items-center justify-between gap-2 p-3 rounded-xl"
+                                                    style={{ background: '#E1F5EE', border: '0.5px solid #9FE1CB' }}
+                                                >
+                                                    <span style={{ color: '#0F6E56', fontSize: 13, fontWeight: 500 }}>
+                                                        Next available slot today: {formatSlotLabel(slotsMeta.nextAvailable)}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setFormData({ ...formData, slot: slotsMeta.nextAvailable! })}
+                                                        style={{
+                                                            background: '#0D6E6E', color: 'white',
+                                                            border: 'none', borderRadius: 6,
+                                                            padding: '3px 10px', fontSize: 12,
+                                                            cursor: 'pointer', fontWeight: 500,
+                                                        }}
+                                                    >
+                                                        Select
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Today AND no slot available → red empty-state with a
+                                                one-tap shortcut to tomorrow. Avoids the dead-end of
+                                                "Doctor not available" when the cause is just timing. */}
+                                            {!fetchingSlots && slotsMeta.isToday && !slotsMeta.nextAvailable && availableSlots.length > 0 && (
+                                                <div className="p-3 rounded-xl" style={{ background: '#FEF2F2', border: '0.5px solid #FCA5A5' }}>
+                                                    <span style={{ color: '#DC2626', fontSize: 13 }}>
+                                                        No slots available for today.{' '}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        className="text-teal-700 underline font-medium text-xs"
+                                                        onClick={() => {
+                                                            const tomorrow = new Date();
+                                                            tomorrow.setDate(tomorrow.getDate() + 1);
+                                                            tomorrow.setHours(0, 0, 0, 0);
+                                                            setFormData({ ...formData, date: tomorrow, slot: "" });
+                                                            setDateDraft(toDDMMYYYY(tomorrow));
+                                                        }}
+                                                    >
+                                                        Book for tomorrow instead
+                                                    </button>
+                                                </div>
+                                            )}
+
                                             {fetchingSlots ? (
                                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" aria-busy="true" aria-label="Loading available time slots">
                                                     {Array.from({ length: 9 }).map((_, i) => (
                                                         <div key={i} className="h-12 rounded-lg bg-muted/40 animate-pulse" />
                                                     ))}
                                                 </div>
-                                            ) : bookableSlots.length > 0 ? (
+                                            ) : availableSlots.length > 0 ? (
                                                 <SlotPicker
-                                                    slots={bookableSlots}
+                                                    slots={availableSlots}
                                                     selected={formData.slot}
                                                     onSelect={(slot) => setFormData({ ...formData, slot })}
                                                 />
@@ -940,9 +1030,10 @@ interface SlotPickerSlot {
     slot?: string;
     time?: string;
     startTime?: string;
-    status?: 'AVAILABLE' | string;
+    status?: 'AVAILABLE' | 'PAST' | 'BOOKED' | 'BLOCKED' | string;
     isNearlyFull?: boolean;
     spotsLeft?: number;
+    isHeld?: boolean;
 }
 
 interface SlotPickerProps {
@@ -1012,9 +1103,29 @@ function SlotPicker({ slots, selected, onSelect }: SlotPickerProps) {
                                     const label = s.label;
                                     const display = formatSlotLabel(label);
                                     const isSelected = selected === label;
+                                    const status = s.status ?? 'AVAILABLE';
+                                    const isBookable = status === 'AVAILABLE' && !s.isHeld;
+                                    const isPast = status === 'PAST';
+                                    const isBooked = status === 'BOOKED';
+                                    const isBlocked = status === 'BLOCKED';
+
+                                    const stateLabel = isPast
+                                        ? 'past'
+                                        : isBooked
+                                            ? 'already booked'
+                                            : isBlocked
+                                                ? 'unavailable'
+                                                : 'available';
                                     const ariaState = isSelected
                                         ? `${display}, selected`
-                                        : `${display}, available${s.isNearlyFull ? ', nearly full' : ''}`;
+                                        : `${display}, ${stateLabel}${s.isNearlyFull ? ', nearly full' : ''}`;
+                                    const titleText = isPast
+                                        ? 'This time has already passed'
+                                        : isBooked
+                                            ? 'Already booked'
+                                            : isBlocked
+                                                ? 'Blocked by doctor'
+                                                : 'Available — click to select';
 
                                     const button = (
                                         <button
@@ -1022,20 +1133,36 @@ function SlotPicker({ slots, selected, onSelect }: SlotPickerProps) {
                                             role="radio"
                                             aria-checked={isSelected}
                                             aria-label={ariaState}
-                                            onClick={() => onSelect(label)}
+                                            aria-disabled={!isBookable}
+                                            title={titleText}
+                                            disabled={!isBookable}
+                                            onClick={() => { if (isBookable) onSelect(label); }}
                                             className={cn(
                                                 "relative h-12 rounded-xl border text-sm font-semibold transition-all",
                                                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
                                                 isSelected
                                                     ? "bg-primary text-primary-foreground border-primary shadow-md ring-2 ring-primary/30"
-                                                    : "bg-background border-border/60 text-foreground hover:border-primary hover:bg-primary/5 hover:-translate-y-0.5 hover:shadow-sm",
+                                                    : isPast
+                                                        ? "bg-gray-100 text-gray-400 border-gray-200 line-through cursor-not-allowed"
+                                                        : isBooked
+                                                            ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                                                            : isBlocked
+                                                                ? "bg-red-50 text-red-300 border-red-200 cursor-not-allowed"
+                                                                : "bg-background border-border/60 text-foreground hover:border-primary hover:bg-primary/5 hover:-translate-y-0.5 hover:shadow-sm",
                                             )}
                                         >
-                                            <span className="flex items-center justify-center gap-1.5">
-                                                {isSelected && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
-                                                <span>{display}</span>
+                                            <span className="flex flex-col items-center justify-center leading-none gap-0.5">
+                                                <span className="flex items-center gap-1.5">
+                                                    {isSelected && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+                                                    <span>{display}</span>
+                                                </span>
+                                                {(isPast || isBooked) && (
+                                                    <span className="text-[10px] font-normal opacity-80">
+                                                        {isPast ? 'Past' : 'Booked'}
+                                                    </span>
+                                                )}
                                             </span>
-                                            {!isSelected && s.isNearlyFull && (
+                                            {!isSelected && isBookable && s.isNearlyFull && (
                                                 <span
                                                     className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-500"
                                                     aria-hidden="true"
@@ -1044,7 +1171,7 @@ function SlotPicker({ slots, selected, onSelect }: SlotPickerProps) {
                                         </button>
                                     );
 
-                                    if (!s.isNearlyFull) return <div key={label}>{button}</div>;
+                                    if (!isBookable || !s.isNearlyFull) return <div key={label}>{button}</div>;
 
                                     return (
                                         <Tooltip key={label}>

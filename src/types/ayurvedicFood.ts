@@ -167,6 +167,26 @@ export interface FoodSuggestion {
   calories?: number | null;
 }
 
+/** Returned by GET /recipes/suggest — typeahead shape for recipes. */
+export interface RecipeSuggestion {
+  id: string;
+  name: string;
+  nameInTamil?: string | null;
+  doshaTargets: string[];
+  mealCategory: MealCategory | string;
+  _count?: { ingredients: number };
+}
+
+/**
+ * Discriminated union used by FoodAutocomplete when it's configured to
+ * surface recipes alongside foods. `kind` lets the consumer route the
+ * pick to the right backend endpoint (POST /meals/:id/foods vs
+ * POST /meals/:id/recipes).
+ */
+export type FoodOrRecipeSuggestion =
+  | ({ kind: 'food' } & FoodSuggestion)
+  | ({ kind: 'recipe' } & RecipeSuggestion);
+
 export interface AllergyConflict {
   foodId: string;
   foodName: string;
