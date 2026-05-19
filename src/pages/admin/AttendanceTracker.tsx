@@ -368,7 +368,14 @@ export default function AttendanceTracker({ embedded = false }: { embedded?: boo
   // and the disabled state of the Clock In / Clock Out buttons. Falls
   // through to the active month's calendar so we don't have to issue an
   // extra request for the same row we already loaded.
-  const todayKey = new Date().toISOString().slice(0, 10);
+  //
+  // `todayKey` MUST use the clinic-local YYYY-MM-DD, not UTC. The previous
+  // `new Date().toISOString().slice(0, 10)` returns the UTC date — between
+  // IST midnight and 05:30 IST, that's still yesterday in UTC, so the
+  // widget would show yesterday's row as "today's" state. Switch to
+  // `toLocaleDateString('en-CA')` which formats the user's local date as
+  // YYYY-MM-DD regardless of timezone. Audit fix #5.
+  const todayKey = new Date().toLocaleDateString('en-CA');
   const todayRecord = calendar?.days.find((d) => d.date === todayKey)?.attendance ?? null;
   const isClockedIn = !!todayRecord?.clockIn && !todayRecord?.clockOut;
   const isClockedOut = !!todayRecord?.clockIn && !!todayRecord?.clockOut;

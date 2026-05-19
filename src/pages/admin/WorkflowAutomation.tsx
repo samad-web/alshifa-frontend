@@ -26,6 +26,7 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 import {
     workflowRuleService,
     type WorkflowRule,
@@ -47,9 +48,15 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
     PHASE_COMPLETED:          "Phase Completed",
 };
 
+// PHASE_COMPLETED intentionally omitted from this list (audit fix #1) —
+// the backend engine never had an event hook for it, so any rule authored
+// with that trigger was silently dead. The TRIGGER_LABELS / describeCondition
+// entries above keep the label + description for any legacy DB rows so
+// existing rules still render readably, but the create dropdown no longer
+// offers it.
 const TRIGGER_ORDER: TriggerType[] = [
     "NO_CHECKIN", "PAIN_NOT_IMPROVING", "DIET_ADHERENCE_LOW",
-    "PHASE_OVERDUE", "PRESCRIPTION_UNCOLLECTED", "PHASE_COMPLETED",
+    "PHASE_OVERDUE", "PRESCRIPTION_UNCOLLECTED",
 ];
 
 const ACTION_PILL: Record<ActionType, string> = {
@@ -107,6 +114,11 @@ function fmtDateTime(iso: string | null): string {
 
 export default function WorkflowAutomation() {
     const qc = useQueryClient();
+    // The backend POST /workflow-rules/evaluate-now route is locked to ADMIN
+    // only (ADMIN_DOCTOR gets 403). Gating the button here keeps the UI from
+    // showing an action it would silently fail on. (Audit fix #8.)
+    const { role } = useAuth();
+    const canEvaluateNow = role === "ADMIN";
     const [builderOpen, setBuilderOpen] = useState(false);
     const [editingRule, setEditingRule] = useState<WorkflowRule | null>(null);
     const [logsRule, setLogsRule] = useState<WorkflowRule | null>(null);
@@ -161,18 +173,20 @@ export default function WorkflowAutomation() {
                         <Zap className="h-5 w-5 text-primary" />
                     </PageHeader>
                     <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline" size="sm"
-                            onClick={() => evaluateMutation.mutate()}
-                            disabled={evaluateMutation.isPending}
-                        >
-                            {evaluateMutation.isPending ? (
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                                <Sparkles className="w-4 h-4 mr-2" />
-                            )}
-                            Evaluate Now
-                        </Button>
+                        {canEvaluateNow && (
+                            <Button
+                                variant="outline" size="sm"
+                                onClick={() => evaluateMutation.mutate()}
+                                disabled={evaluateMutation.isPending}
+                            >
+                                {evaluateMutation.isPending ? (
+                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                    <Sparkles className="w-4 h-4 mr-2" />
+                                )}
+                                Evaluate Now
+                            </Button>
+                        )}
                         <Button
                             size="sm"
                             onClick={() => { setEditingRule(null); setBuilderOpen(true); }}

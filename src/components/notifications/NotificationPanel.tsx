@@ -4,15 +4,172 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Bell, Check, CheckCheck, Trash2, Calendar, FileText, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
+import { useAuth, type AppRole } from '@/hooks/useAuth';
 
 interface NotificationPanelProps {
     onClose?: () => void;
 }
 
+// Map a notification's type → the page to land on when the user clicks it.
+// Returns null when there's no specific destination (the panel will just
+// close in that case). The shape of `data` varies by emitter; we cast
+// loosely and only read the fields we expect for each known type.
+function resolveNotificationRoute(notification: Notification, role: AppRole | null): string | null {
+    const data = (notification.data as Record<string, unknown> | undefined) || {};
+    const conversationId = typeof data.conversationId === 'string' ? data.conversationId : undefined;
+    const appointmentId  = typeof data.appointmentId  === 'string' ? data.appointmentId  : undefined;
+    const summaryId      = typeof data.summaryId      === 'string' ? data.summaryId      : undefined;
+    const handoffId      = typeof data.handoffId      === 'string' ? data.handoffId      : undefined;
+    const patientId      = typeof data.patientId      === 'string' ? data.patientId      : undefined;
+
+    const isPatient   = role === 'PATIENT';
+    const isClinician = role === 'DOCTOR' || role === 'THERAPIST' || role === 'ADMIN_DOCTOR';
+    const isAdmin     = role === 'ADMIN' || role === 'ADMIN_DOCTOR' || role === 'BRANCH_ADMIN';
+
+    switch (notification.type) {
+        // ── Chat ────────────────────────────────────────────────────────────
+        case 'NEW_MESSAGE':
+            return conversationId ? `/chat?conversation=${conversationId}` : '/chat';
+
+        // ── Appointments ────────────────────────────────────────────────────
+        case 'NEW_APPOINTMENT':
+        case 'APPOINTMENT_BOOKED':
+        case 'APPOINTMENT_CANCELLED':
+        case 'APPOINTMENT_REMINDER':
+        case 'appointment_confirmed':
+        case 'appointment_cancelled':
+            return '/appointments';
+
+        // ── Handoff notes ───────────────────────────────────────────────────
+        case 'HANDOFF_ASSIGNED':
+        case 'handoff_received':
+            return handoffId ? `/handoff-notes?id=${handoffId}` : '/handoff-notes';
+
+        // ── Visit summary ───────────────────────────────────────────────────
+        case 'VISIT_SUMMARY':
+        case 'visit_summary':
+            return summaryId ? `/visit-summary?id=${summaryId}` : '/visit-summary';
+
+        // ── Todos ───────────────────────────────────────────────────────────
+        case 'TODO_ASSIGNED':
+        case 'TODO_REMINDER':
+        case 'TODO_DUE_SOON':
+        case 'todo:assigned':
+            // No dedicated page — TodoPanel lives on the role dashboard.
+            if (role === 'DOCTOR' || role === 'ADMIN_DOCTOR') return '/doctor';
+            if (role === 'THERAPIST') return '/therapist';
+            return null;
+
+        // ── Prescriptions ───────────────────────────────────────────────────
+        case 'PRESCRIPTION_DISCONTINUED':
+        case 'PRESCRIPTION_EXPIRY':
+        case 'PRESCRIPTION_EXPIRY_CLINICIAN':
+            return '/prescriptions';
+        case 'PRESCRIPTION_READY':
+            return isPatient ? '/patient' : '/pharmacy/orders';
+
+        // ── Journey ─────────────────────────────────────────────────────────
+        case 'JOURNEY_CREATED':
+            if (isClinician) return patientId ? `/patients/${patientId}/timeline` : '/journey-builder';
+            return '/patient';
+        case 'JOURNEY_FEEDBACK_AVAILABLE':
+        case 'JOURNEY_FEEDBACK_REMINDER':
+            return '/patient';
+
+        // ── Home therapy ────────────────────────────────────────────────────
+        case 'HOME_THERAPY_BRIEF':
+            return role === 'THERAPIST' ? '/therapist/home-therapy' : '/admin/home-therapy';
+        case 'HOME_THERAPY_BRIEF_ADMIN':
+            return '/admin/home-therapy';
+
+        // ── Self exam ───────────────────────────────────────────────────────
+        case 'SELF_EXAM_SUBMITTED':
+            return isClinician ? '/self-exam-review' : '/self-exam';
+
+        // ── Care gaps & critical journey ────────────────────────────────────
+        case 'CARE_GAP_NO_VISIT':
+        case 'CARE_GAP_INCOMPLETE_TRIAGE':
+        case 'CARE_GAP_LOW_ADHERENCE':
+        case 'CARE_GAP_WELLNESS_DECLINE':
+        case 'CARE_GAP_OVERDUE_PHASE':
+        case 'CARE_GAP_OVERDUE_PHASE_DOCTOR':
+        case 'CARE_GAP_HIGH_PAIN':
+            return '/care-gaps';
+        case 'MISSED_MEDICATION':
+        case 'MISSED_VITAL_UPLOAD':
+        case 'MISSED_DAILY_CHECKIN':
+        case 'MISSED_FOLLOWUP':
+        case 'FOLLOWUP_MISSED':
+            return isPatient ? '/patient' : '/critical-journey';
+
+        // ── Triage escalation ───────────────────────────────────────────────
+        case 'TRIAGE_ESCALATION':
+            return role === 'SUPER_ADMIN' ? '/super-admin/triage' : null;
+
+        // ── Bulk patient import ─────────────────────────────────────────────
+        case 'PATIENT_IMPORT':
+            return '/manage-users';
+
+        // ── Gamification (patient) ──────────────────────────────────────────
+        case 'AVATAR_LEVEL_UP':
+            return '/health-avatar';
+        case 'ACHIEVEMENT':
+        case 'achievement_unlocked':
+            return '/achievement-showcase';
+        case 'FAMILY_MEMBER_JOINED':
+            return '/family-leaderboard';
+        case 'QUEST_COMPLETE':
+        case 'quest_completed':
+            return '/health-quests';
+        case 'level_up':
+            return isPatient ? '/health-avatar' : '/xp-dashboard';
+        case 'badge_earned':
+            return isPatient ? '/achievement-showcase' : '/xp-dashboard';
+
+        // ── Referrals ───────────────────────────────────────────────────────
+        case 'REFERRAL_COMPLETED':
+            return '/referrals';
+        case 'REFERRAL_TIER':
+            return '/referral-rewards';
+
+        // ── Mentor sessions ─────────────────────────────────────────────────
+        case 'mentor_session_scheduled':
+            return '/mentor-hub';
+
+        // ── Announcements ───────────────────────────────────────────────────
+        // ANNOUNCEMENT (uppercase) is the canonical type written by the
+        // announcement service's notification fan-out (one row per targeted
+        // user — what makes doctor / patient bells light up at all). The
+        // lowercase legacy variant stays for back-compat with any older
+        // rows already in the DB.
+        case 'ANNOUNCEMENT':
+        case 'new_announcement':
+            return '/announcements';
+
+        // ── Reward store ────────────────────────────────────────────────────
+        case 'reward_redeemed':
+        case 'redemption_processed':
+            return '/reward-store';
+
+        // ── Appointment side-channel (used in legacy code paths) ────────────
+        case 'APPOINTMENT':
+            return appointmentId ? `/consultation/${appointmentId}` : '/appointments';
+
+        default:
+            // Unknown type — fall back to a role-appropriate dashboard so
+            // the click still feels responsive.
+            if (isPatient)   return '/patient';
+            if (isAdmin)     return role === 'ADMIN_DOCTOR' ? '/doctor-admin' : '/admin';
+            if (isClinician) return role === 'THERAPIST' ? '/therapist' : '/doctor';
+            return null;
+    }
+}
+
 export function NotificationPanel({ onClose }: NotificationPanelProps) {
     const { notifications, unreadCount, markAsRead, markAllAsRead, clearNotifications } = useNotifications();
     const { role } = useAuth();
+    const navigate = useNavigate();
     const isPatient = role === 'PATIENT';
 
     const getPriorityStyles = (priority: string) => {
@@ -56,6 +213,10 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
         if (!notification.read) {
             markAsRead(notification.id);
         }
+        const route = resolveNotificationRoute(notification, role);
+        if (route) navigate(route);
+        // Always close the panel after a click — the user has acted on it.
+        onClose?.();
     };
 
     return (

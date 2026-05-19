@@ -51,8 +51,10 @@ export default function TreatmentPackagesPage() {
     const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
     // Concrete branch the page is currently displaying. Stays "" in the
     // admin "All Branches" view; non-admins fall back to the first branch.
+    // Note: this no longer narrows the package LIST — the catalogue is
+    // always cross-branch. It only seeds defaults for the Create form
+    // and scopes the enrol-modal's patient picker.
     const [branchId, setBranchId] = useState("");
-    const isCrossBranch = isAdmin && !branchIdParam;
     const [packages, setPackages] = useState<TreatmentPackage[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -93,12 +95,14 @@ export default function TreatmentPackagesPage() {
     }, [branchId]);
 
     const reload = useCallback(async () => {
-        // Admin cross-branch mode: branchId is "" — backend returns every
-        // branch in the hospital. Non-admin: wait for first branch.
-        if (!branchId && !isAdmin) return;
+        // Treatment packages are listed cross-branch for every role — a
+        // doctor at Theni still needs to see (and clone for their own
+        // branch) packages authored at Madurai. Per-card `<Building2 />`
+        // badges still tell the reader which branch each package belongs
+        // to. The navbar branch selector no longer narrows this view.
         setLoading(true);
-        try { setPackages(await iwisApi.listPackages(branchId || undefined)); } finally { setLoading(false); }
-    }, [branchId, isAdmin]);
+        try { setPackages(await iwisApi.listPackages(undefined)); } finally { setLoading(false); }
+    }, []);
 
     useEffect(() => { reload(); }, [reload]);
 
@@ -174,23 +178,6 @@ export default function TreatmentPackagesPage() {
                     )}
                 </PageHeader>
 
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Building2 className="w-4 h-4" />
-                    {isCrossBranch ? (
-                        <>
-                            Branch: <span className="font-semibold text-foreground">All branches</span>
-                            <span className="text-xs">(narrow via navbar)</span>
-                        </>
-                    ) : (
-                        <>
-                            Branch: <span className="font-semibold text-foreground">
-                                {branches.find((b) => b.id === branchId)?.name || "—"}
-                            </span>
-                            <span className="text-xs">(switch via navbar)</span>
-                        </>
-                    )}
-                </div>
-
                 {loading ? (
                     <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
                 ) : packages.length === 0 ? (
@@ -235,9 +222,10 @@ export default function TreatmentPackagesPage() {
                             >
                                 <Panel title={pkg.name} className="hover:shadow-elevated transition-all">
                                     <div className="space-y-4">
-                                        {/* Branch label only matters in cross-branch mode — when
-                                            a single branch is scoped, every card belongs to it. */}
-                                        {isCrossBranch && pkg.branch?.name && (
+                                        {/* The list is always cross-branch now, so every card
+                                            needs a badge so the reader knows which branch the
+                                            package was authored at. */}
+                                        {pkg.branch?.name && (
                                             <Badge variant="outline" className="gap-1 text-[11px]">
                                                 <Building2 className="w-3 h-3" /> {pkg.branch.name}
                                             </Badge>

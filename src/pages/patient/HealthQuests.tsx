@@ -81,10 +81,14 @@ export default function HealthQuests() {
       await patientGamificationApi.startQuest(questId);
       toast({ title: "Quest Started!", description: "Good luck on your journey!" });
       await loadQuests();
-    } catch {
+    } catch (err) {
+      // Surface the real reason. Common backend messages: "Quest already
+      // in progress", "Quest already completed", "Quest is no longer
+      // active". The previous catch{} hid all of these behind a generic
+      // "Failed to start quest" which made the failure mode unclear.
       toast({
-        title: "Error",
-        description: "Failed to start quest.",
+        title: "Couldn't start quest",
+        description: err instanceof Error && err.message ? err.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -108,10 +112,10 @@ export default function HealthQuests() {
         toast({ title: "Task Completed!", description: "Keep going!" });
       }
       await loadQuests();
-    } catch {
+    } catch (err) {
       toast({
-        title: "Error",
-        description: "Failed to complete task.",
+        title: "Couldn't record progress",
+        description: err instanceof Error && err.message ? err.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -169,7 +173,11 @@ export default function HealthQuests() {
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <Target className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                  <p>No new quests available right now. Check back later!</p>
+                  {completedQuests.length > 0 ? (
+                    <p>You&apos;ve completed every available quest. New ones coming soon!</p>
+                  ) : (
+                    <p>No quests are available yet. Your clinic will add them soon.</p>
+                  )}
                 </CardContent>
               </Card>
             ) : (
@@ -242,9 +250,16 @@ export default function HealthQuests() {
               </Card>
             ) : (
               activeQuests.map((quest) => {
-                const completedTasks =
-                  quest.progress?.tasksCompleted?.length || 0;
                 const totalTasks = quest.tasks.length;
+                // A task is finished when its count reaches its target.
+                // Earlier this used tasksCompleted.length, which counted
+                // started tasks not finished ones — quests with target > 1
+                // could never report progress past the first click.
+                const completedTasks = (quest.progress?.tasksCompleted ?? [])
+                  .filter((c) => {
+                    const t = quest.tasks[c.taskIndex];
+                    return c.count >= (t?.target ?? 1);
+                  }).length;
                 const progressPercent =
                   totalTasks > 0
                     ? Math.round((completedTasks / totalTasks) * 100)
@@ -255,9 +270,6 @@ export default function HealthQuests() {
                       quest.durationDays
                     )
                   : quest.durationDays;
-                const completedIndices = new Set(
-                  quest.progress?.tasksCompleted?.map((t) => t.taskIndex) || []
-                );
 
                 return (
                   <Card key={quest.id} className="border-primary/30">
@@ -302,7 +314,17 @@ export default function HealthQuests() {
 
                       <div className="space-y-2">
                         {quest.tasks.map((task, idx) => {
-                          const isCompleted = completedIndices.has(idx);
+                          // Look up this task's current count from the
+                          // progress JSON. The backend increments count on
+                          // each POST; the row is "done" when it reaches
+                          // target. Without this, target > 1 was unreachable
+                          // and no quest could ever complete.
+                          const entry = quest.progress?.tasksCompleted?.find(
+                            (c) => c.taskIndex === idx,
+                          );
+                          const count = entry?.count ?? 0;
+                          const target = task.target ?? 1;
+                          const isCompleted = count >= target;
                           const loadKey = `${quest.id}-${idx}`;
                           return (
                             <div
@@ -326,15 +348,22 @@ export default function HealthQuests() {
                                 {TASK_ICONS[task.type] || (
                                   <Target className="h-4 w-4" />
                                 )}
-                                <span
-                                  className={`text-sm ${
-                                    isCompleted
-                                      ? "line-through text-muted-foreground"
-                                      : "font-medium"
-                                  }`}
-                                >
-                                  {task.title}
-                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <span
+                                    className={`text-sm ${
+                                      isCompleted
+                                        ? "line-through text-muted-foreground"
+                                        : "font-medium"
+                                    }`}
+                                  >
+                                    {task.title}
+                                  </span>
+                                  {target > 1 && (
+                                    <div className="text-xs text-muted-foreground mt-0.5 tabular-nums">
+                                      {count} of {target}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                               {!isCompleted && (
                                 <Button
@@ -348,6 +377,8 @@ export default function HealthQuests() {
                                 >
                                   {actionLoading === loadKey ? (
                                     <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : target > 1 ? (
+                                    "+1"
                                   ) : (
                                     "Complete"
                                   )}

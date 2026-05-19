@@ -148,7 +148,15 @@ export default function PatientHistory() {
                             return (
                                 <div
                                     key={r.id}
-                                    onClick={() => navigate(`/admin/patient-history/${r.id}`)}
+                                    onClick={() => {
+                                        // Navigate to the patient's full profile + chronological
+                                        // history. Falls back to the legacy /admin/patient-history
+                                        // route if the joined patient row is missing (shouldn't
+                                        // happen — backend always includes it — but defensive).
+                                        const pid = r.patient?.id || r.patientId;
+                                        if (pid) navigate(`/patients/${pid}/timeline`);
+                                        else navigate(`/patient-history`);
+                                    }}
                                     className="flex items-center justify-between p-4 bg-white border border-border/60 rounded-2xl cursor-pointer hover:border-primary/50 transition-colors"
                                 >
                                     <div className="flex items-start gap-3 min-w-0 flex-1">

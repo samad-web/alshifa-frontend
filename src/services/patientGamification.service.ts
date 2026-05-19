@@ -31,8 +31,30 @@ export const patientGamificationApi = {
   },
 
   async getMyQuests(params?: { status?: string }): Promise<HealthQuest[]> {
-    const { data } = await apiClient.get<HealthQuest[]>('/api/patient-gamification/quests/mine', params);
-    return data;
+    // Backend returns raw PatientQuestProgress rows with the quest
+    // template nested under `.quest`. The UI expects HealthQuest with
+    // progress nested under `.progress`, so flatten here. Without this,
+    // the Active and Completed tabs always render empty.
+    type RawProgressRow = {
+      id: string;
+      patientId: string;
+      questId: string;
+      status: HealthQuest['progress'] extends { status: infer S } | undefined ? S : never;
+      tasksCompleted: NonNullable<HealthQuest['progress']>['tasksCompleted'];
+      startedAt: string;
+      completedAt: string | null;
+      pointsAwarded: boolean;
+      quest: Omit<HealthQuest, 'progress'>;
+    };
+    const { data } = await apiClient.get<RawProgressRow[]>('/api/patient-gamification/quests/mine', params);
+    return data.map((row) => ({
+      ...row.quest,
+      progress: {
+        status: row.status,
+        tasksCompleted: row.tasksCompleted,
+        startedAt: row.startedAt,
+      },
+    }));
   },
 
   // ── Health Avatar (Feature 22) ────────────────────────────────────────────

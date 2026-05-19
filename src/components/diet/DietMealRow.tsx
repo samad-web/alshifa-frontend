@@ -23,7 +23,7 @@ import { AllergyConflictAlert } from "./AllergyConflictAlert";
 import type {
   AllergyConflictResponse,
   DoshaTarget,
-  FoodSuggestion,
+  FoodOrRecipeSuggestion,
   MealFoodLinks,
   DietMealFoodLink,
 } from "@/types/ayurvedicFood";
@@ -76,8 +76,10 @@ export function DietMealRow({ prescriptionId, meal, canManage, onChanged, patien
   // ── Feature 1: structured Food links + allergy check ──────────────────────
 
   // Linker panel state — collapsed by default; expanded by + Link Food.
+  // `picked` holds either a food or a recipe; the mutation switches on
+  // `kind` to call the right backend endpoint.
   const [linkPanelOpen, setLinkPanelOpen] = useState(false);
-  const [pickedFood, setPickedFood]       = useState<FoodSuggestion | null>(null);
+  const [picked, setPicked]               = useState<FoodOrRecipeSuggestion | null>(null);
   const [linkQty, setLinkQty]             = useState<string>("");
   const [linkUnit, setLinkUnit]           = useState<string>("grams");
   const [linkIsAvoid, setLinkIsAvoid]     = useState(false);
@@ -119,11 +121,21 @@ export function DietMealRow({ prescriptionId, meal, canManage, onChanged, patien
 
   const linkMutation = useMutation({
     mutationFn: async () => {
-      if (!meal.id || !pickedFood) throw new Error("Pick a food first");
+      if (!meal.id || !picked) throw new Error("Pick a food or recipe first");
+      if (picked.kind === "recipe") {
+        // Recipe → backend expands every ingredient into its own food link
+        // row. Quantity / unit fields are ignored at this stage (the recipe
+        // already carries per-ingredient quantities).
+        const { data } = await apiClient.post<{ added: number; recipeName: string }>(
+          `/api/ayurvedic-foods/meals/${meal.id}/recipes`,
+          { recipeId: picked.id, isAvoid: linkIsAvoid },
+        );
+        return data;
+      }
       const { data } = await apiClient.post<DietMealFoodLink>(
         `/api/ayurvedic-foods/meals/${meal.id}/foods`,
         {
-          foodId: pickedFood.id,
+          foodId: picked.id,
           quantity: linkQty.trim() === "" ? null : Number(linkQty),
           unit: linkUnit || null,
           isAvoid: linkIsAvoid,
@@ -131,16 +143,24 @@ export function DietMealRow({ prescriptionId, meal, canManage, onChanged, patien
       );
       return data;
     },
-    onSuccess: () => {
-      toast({ title: linkIsAvoid ? "Avoid-food linked" : "Food linked" });
+    onSuccess: (result) => {
+      if (picked?.kind === "recipe" && result && "added" in result) {
+        const r = result as { added: number; recipeName: string };
+        toast({
+          title: linkIsAvoid ? "Recipe ingredients added as Avoid" : "Recipe ingredients linked",
+          description: `${r.added} food${r.added === 1 ? "" : "s"} from "${r.recipeName}" added to this meal.`,
+        });
+      } else {
+        toast({ title: linkIsAvoid ? "Avoid-food linked" : "Food linked" });
+      }
       qc.invalidateQueries({ queryKey: linksKey });
       // Reset linker
-      setPickedFood(null); setLinkQty(""); setLinkUnit("grams"); setLinkIsAvoid(false);
+      setPicked(null); setLinkQty(""); setLinkUnit("grams"); setLinkIsAvoid(false);
       setLinkPanelOpen(false);
     },
     onError: (err) => {
       toast({
-        title: "Could not link food",
+        title: "Could not link",
         description: err instanceof Error ? err.message : "Unknown error",
         variant: "destructive",
       });
@@ -330,44 +350,70 @@ export function DietMealRow({ prescriptionId, meal, canManage, onChanged, patien
                     <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
                       <FoodAutocomplete
                         doshaTarget={doshaTarget}
-                        onSelect={(food) => setPickedFood(food)}
-                        placeholder="Search the food database…"
+                        includeRecipes
+                        onSelect={(p) => setPicked(p)}
+                        placeholder="Search foods or recipes…"
                       />
-                      {pickedFood && (
-                        <div className="text-[11px] text-muted-foreground">
-                          Selected: <span className="font-semibold text-foreground">{pickedFood.name}</span>
-                          {pickedFood.nameInTamil ? <> · {pickedFood.nameInTamil}</> : null}
+                      {picked && (
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                          {picked.kind === "recipe" && (
+                            <span className="inline-flex items-center text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">
+                              Recipe
+                            </span>
+                          )}
+                          Selected: <span className="font-semibold text-foreground">{picked.name}</span>
+                          {picked.nameInTamil ? <> · {picked.nameInTamil}</> : null}
+                          {picked.kind === "recipe" && (
+                            <span>
+                              {" "}— {picked._count?.ingredients ?? 0} ingredient{(picked._count?.ingredients ?? 0) === 1 ? "" : "s"} will be linked
+                            </span>
+                          )}
                         </div>
                       )}
-                      <div className="grid grid-cols-[80px_1fr_auto] gap-2 items-center">
-                        <Input
-                          type="number" step="any" min="0"
-                          value={linkQty}
-                          onChange={(e) => setLinkQty(e.target.value)}
-                          placeholder="Qty"
-                          className="h-8 text-xs"
-                        />
-                        <Select value={linkUnit} onValueChange={setLinkUnit}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {UNIT_OPTIONS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                      {/* Qty / unit only make sense for individual foods —
+                          recipes already carry per-ingredient quantities,
+                          so we hide them on a recipe pick. */}
+                      {(!picked || picked.kind === "food") && (
+                        <div className="grid grid-cols-[80px_1fr_auto] gap-2 items-center">
+                          <Input
+                            type="number" step="any" min="0"
+                            value={linkQty}
+                            onChange={(e) => setLinkQty(e.target.value)}
+                            placeholder="Qty"
+                            className="h-8 text-xs"
+                          />
+                          <Select value={linkUnit} onValueChange={setLinkUnit}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {UNIT_OPTIONS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={linkIsAvoid}
+                              onChange={(e) => setLinkIsAvoid(e.target.checked)}
+                            />
+                            Mark as Avoid
+                          </label>
+                        </div>
+                      )}
+                      {picked?.kind === "recipe" && (
                         <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={linkIsAvoid}
                             onChange={(e) => setLinkIsAvoid(e.target.checked)}
                           />
-                          Mark as Avoid
+                          Mark all ingredients as Avoid
                         </label>
-                      </div>
+                      )}
                       <div className="flex items-center justify-end gap-1.5 pt-1">
                         <Button
                           type="button" variant="ghost" size="sm" className="h-7 text-xs"
                           onClick={() => {
                             setLinkPanelOpen(false);
-                            setPickedFood(null); setLinkQty(""); setLinkUnit("grams"); setLinkIsAvoid(false);
+                            setPicked(null); setLinkQty(""); setLinkUnit("grams"); setLinkIsAvoid(false);
                           }}
                           disabled={linkMutation.isPending}
                         >
@@ -375,11 +421,11 @@ export function DietMealRow({ prescriptionId, meal, canManage, onChanged, patien
                         </Button>
                         <Button
                           type="button" size="sm" className="h-7 text-xs"
-                          disabled={!pickedFood || linkMutation.isPending}
+                          disabled={!picked || linkMutation.isPending}
                           onClick={() => linkMutation.mutate()}
                         >
                           {linkMutation.isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
-                          Add
+                          {picked?.kind === "recipe" ? "Link Recipe" : "Add"}
                         </Button>
                       </div>
                     </div>

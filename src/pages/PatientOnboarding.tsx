@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   Settings2,
-  AlertCircle,
   Clock
 } from "lucide-react";
 import { Button } from "@/components/common/button";
@@ -17,7 +16,6 @@ import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BodyMap } from "@/components/ui/BodyMap";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
@@ -38,8 +36,6 @@ export default function PatientOnboarding() {
     sleepBedtime: "",
     sleepWakeTime: "",
     sleepDuration: 7,
-    painLevel: 0,
-    painLocations: [] as string[],
   });
 
   const toggleTherapyType = (type: string) => {
@@ -79,11 +75,6 @@ export default function PatientOnboarding() {
       subtitle: "Sleep is crucial for your healing journey",
       icon: Moon,
     },
-    {
-      title: "Pain Assessment",
-      subtitle: "Tell us where it hurts and how much",
-      icon: AlertCircle,
-    }
   ];
 
   // Gate the Next button on Step 0 — same pattern as the existing toast-on-
@@ -314,37 +305,6 @@ export default function PatientOnboarding() {
               </div>
             )}
 
-            {currentStep === 2 && (
-              <div className="space-y-10 animate-in fade-in duration-500">
-                <div className="space-y-6">
-                  <div className="flex justify-between items-end">
-                    <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground">Pain Severity</Label>
-                    <span className={cn(
-                      "font-black text-4xl",
-                      formData.painLevel > 7 ? "text-destructive" : (formData.painLevel > 4 ? "text-amber-500" : "text-wellness")
-                    )}>{formData.painLevel} <span className="text-sm">/ 10</span></span>
-                  </div>
-                  <Slider
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={[formData.painLevel]}
-                    onValueChange={(v) => setFormData({ ...formData, painLevel: v[0] })}
-                  />
-                </div>
-                <div className="space-y-6 pt-4 border-t border-border/50">
-                  <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground block text-center lg:text-left">Targeted Pain Regions</Label>
-                  <div className="flex justify-center lg:justify-start">
-                    <div className="w-full max-w-sm">
-                      <BodyMap
-                        selectedRegions={formData.painLocations}
-                        onChange={(regions) => setFormData({ ...formData, painLocations: regions })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="flex gap-4">

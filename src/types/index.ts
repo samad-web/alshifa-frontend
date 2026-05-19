@@ -863,7 +863,7 @@ export interface HealthQuest {
   difficulty: string;
   progress?: {
     status: QuestStatus;
-    tasksCompleted: { taskIndex: number; completedAt: string }[];
+    tasksCompleted: { taskIndex: number; count: number; completedAt: string }[];
     startedAt: string;
   };
 }

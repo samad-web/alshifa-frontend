@@ -80,12 +80,9 @@ function clearTokens(): void {
   localStorage.removeItem('refreshToken');
 }
 
-// Pulled from useAuth so concurrent 401-retries share one in-flight POST to
-// /api/auth/refresh. The shared singleton is critical: without it, two
-// simultaneously-failing requests both refresh, the second refresh trips the
-// backend's reuse-detection (refresh tokens are single-use), and BOTH
-// sessions get nuked.
-import { refreshAccessTokenShared } from '@/hooks/useAuth';
+// Note: `refreshAccessTokenShared` is still exported from useAuth for any
+// caller that wants to renew proactively. The api-client no longer triggers
+// it on 401 — see the simplified handler below.
 
 // ── Core fetch wrapper ────────────────────────────────────────────────────────
 
@@ -133,24 +130,14 @@ async function request<T>(
       return request<T>(path, options, params, _retryCount + 1);
     }
 
-    // 401 → access token expired (or missing). If we have a refresh token,
-    // try once to get a new access token and retry the original request.
-    // Only on the second 401 (or when refresh fails) do we clear tokens
-    // and bounce the user. We guard with `_retryCount` so a refresh that
-    // itself returns 401 doesn't loop.
-    if (response.status === 401 && token && _retryCount === 0) {
-      const refreshed = await refreshAccessTokenShared(API_BASE_URL);
-      if (refreshed) {
-        // Retry the same call with a fresh access token. The token-helper
-        // pulls from localStorage on each call so the retry picks up the
-        // new value automatically.
-        return request<T>(path, options, params, _retryCount + 1);
-      }
-      // Refresh failed — fall through to logout.
-      clearTokens();
-      window.dispatchEvent(new CustomEvent('auth:session-expired'));
-    } else if (response.status === 401 && token) {
-      // Already retried once (or no refresh token). Hard logout.
+    // 401 → the access token is genuinely invalid or has expired (after
+    // the 7-day TTL). We no longer attempt a silent refresh here: the
+    // shorter 15-min window that made silent refresh useful is gone, and
+    // a 401 with a 7-day token almost always means the user has been
+    // revoked, logged out elsewhere, or the token is malformed. Clear
+    // tokens and let useAuth's `auth:session-expired` listener route the
+    // user back to /login.
+    if (response.status === 401 && token) {
       clearTokens();
       window.dispatchEvent(new CustomEvent('auth:session-expired'));
     }

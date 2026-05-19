@@ -1,22 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, BookOpen } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { DoshaEffectBadge } from "./DoshaEffectBadge";
-import type { DoshaTarget, FoodSuggestion } from "@/types/ayurvedicFood";
+import type {
+  DoshaTarget,
+  FoodSuggestion,
+  RecipeSuggestion,
+  FoodOrRecipeSuggestion,
+} from "@/types/ayurvedicFood";
 
-interface Props {
+// Overloaded prop shape: when `includeRecipes` is true the consumer must
+// accept a `FoodOrRecipeSuggestion` (discriminated by `kind`). Without
+// the flag, the component behaves like before and emits `FoodSuggestion`.
+interface BaseProps {
   /** Optional dosha target — pacifying matches are bumped to the top. */
   doshaTarget?: DoshaTarget;
-  /** Fired when the user picks a row. */
-  onSelect: (food: FoodSuggestion) => void;
   /** Initial value rendered into the input. Useful when editing an existing link. */
   initialValue?: string;
   placeholder?: string;
   className?: string;
 }
+type Props =
+  | (BaseProps & {
+      includeRecipes?: false;
+      onSelect: (food: FoodSuggestion) => void;
+    })
+  | (BaseProps & {
+      includeRecipes: true;
+      onSelect: (picked: FoodOrRecipeSuggestion) => void;
+    });
 
 /**
  * Typeahead input over /api/ayurvedic-foods/suggest.
@@ -28,7 +43,9 @@ interface Props {
  *  - Doesn't know about the parent's controlled state; the parent decides
  *    what to do with the picked food (link to meal, add as ingredient, …)
  */
-export function FoodAutocomplete({ doshaTarget, onSelect, initialValue = "", placeholder, className }: Props) {
+export function FoodAutocomplete(props: Props) {
+  const { doshaTarget, initialValue = "", placeholder, className } = props;
+  const includeRecipes = props.includeRecipes === true;
   const [text, setText] = useState(initialValue);
   const [debounced, setDebounced] = useState(initialValue);
   const [open, setOpen] = useState(false);
@@ -39,7 +56,7 @@ export function FoodAutocomplete({ doshaTarget, onSelect, initialValue = "", pla
     return () => clearTimeout(t);
   }, [text]);
 
-  const { data, isLoading } = useQuery({
+  const foodQuery = useQuery({
     queryKey: ["ayurvedic-food-suggest", debounced, doshaTarget ?? null],
     queryFn: async () => {
       const params: Record<string, string | number> = { limit: 8 };
@@ -52,10 +69,53 @@ export function FoodAutocomplete({ doshaTarget, onSelect, initialValue = "", pla
     staleTime: 30_000,
   });
 
-  const items = useMemo(() => data ?? [], [data]);
+  // Recipe results run in parallel. We deliberately fire both queries on
+  // every keystroke (within debounce) so the dropdown can show a mixed
+  // list without one source blocking the other.
+  const recipeQuery = useQuery({
+    queryKey: ["ayurvedic-recipe-suggest", debounced, doshaTarget ?? null],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { limit: 5 };
+      if (debounced.trim()) params.query = debounced.trim();
+      if (doshaTarget) params.doshaTarget = doshaTarget;
+      const { data } = await apiClient.get<RecipeSuggestion[]>("/api/ayurvedic-foods/recipes/suggest", params);
+      return data;
+    },
+    enabled: open && includeRecipes,
+    staleTime: 30_000,
+  });
 
-  function pick(food: FoodSuggestion) {
-    onSelect(food);
+  const isLoading = foodQuery.isLoading || (includeRecipes && recipeQuery.isLoading);
+
+  // Merge foods + recipes into one list. Recipes are surfaced FIRST when
+  // the user is actively searching (typed query) — clinicians usually
+  // remember a recipe by name and the bulk-add value is high. With an
+  // empty query we keep the original "browse foods" feel and show foods
+  // first instead.
+  const items: FoodOrRecipeSuggestion[] = useMemo(() => {
+    const foods: FoodOrRecipeSuggestion[] = (foodQuery.data ?? []).map((f) => ({ kind: "food" as const, ...f }));
+    if (!includeRecipes) return foods;
+    const recipes: FoodOrRecipeSuggestion[] = (recipeQuery.data ?? []).map((r) => ({ kind: "recipe" as const, ...r }));
+    const querying = debounced.trim().length > 0;
+    return querying ? [...recipes, ...foods] : [...foods, ...recipes];
+  }, [foodQuery.data, recipeQuery.data, includeRecipes, debounced]);
+
+  function pick(item: FoodOrRecipeSuggestion) {
+    if (item.kind === "recipe") {
+      // The `includeRecipes` guard at the type level ensures we only
+      // emit recipe picks when the parent opted in. Narrow with cast.
+      (props.onSelect as (picked: FoodOrRecipeSuggestion) => void)(item);
+    } else {
+      // Strip the discriminator before handing back a plain FoodSuggestion
+      // so the back-compat onSelect signature stays clean.
+      const { kind: _kind, ...food } = item;
+      void _kind;
+      if (includeRecipes) {
+        (props.onSelect as (picked: FoodOrRecipeSuggestion) => void)(item);
+      } else {
+        (props.onSelect as (food: FoodSuggestion) => void)(food);
+      }
+    }
     setText("");
     setOpen(false);
   }
@@ -90,33 +150,51 @@ export function FoodAutocomplete({ doshaTarget, onSelect, initialValue = "", pla
             </div>
           ) : items.length === 0 ? (
             <div className="px-3 py-3 text-xs text-muted-foreground italic">
-              No matching foods. Add one in the Food Database.
+              {includeRecipes
+                ? "No matching foods or recipes. Add one from the Food Database + Recipes page."
+                : "No matching foods. Add one in the Food Database."}
             </div>
           ) : (
             <ul className="py-1">
-              {items.map((f) => (
-                <li key={f.id}>
+              {items.map((item) => (
+                <li key={`${item.kind}:${item.id}`}>
                   <button
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => pick(f)}
+                    onClick={() => pick(item)}
                     className="w-full text-left px-3 py-2 hover:bg-muted flex items-center justify-between gap-2"
                   >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {f.name}
-                        {f.nameInTamil ? <span className="text-xs text-muted-foreground ml-1.5">· {f.nameInTamil}</span> : null}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                        {item.kind === "recipe" && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200 shrink-0">
+                            <BookOpen className="w-2.5 h-2.5" /> Recipe
+                          </span>
+                        )}
+                        <span className="truncate">{item.name}</span>
+                        {item.nameInTamil ? <span className="text-xs text-muted-foreground">· {item.nameInTamil}</span> : null}
                       </div>
                       <div className="text-[11px] text-muted-foreground">
-                        {f.category}
-                        {f.calories != null ? ` · ${Math.round(f.calories)} kcal` : ""}
+                        {item.kind === "food" ? (
+                          <>
+                            {item.category}
+                            {item.calories != null ? ` · ${Math.round(item.calories)} kcal` : ""}
+                          </>
+                        ) : (
+                          <>
+                            {item._count?.ingredients ?? 0} ingredient{(item._count?.ingredients ?? 0) === 1 ? "" : "s"}
+                            {item.mealCategory && item.mealCategory !== "GENERAL" ? ` · ${item.mealCategory}` : ""}
+                          </>
+                        )}
                       </div>
                     </div>
-                    <DoshaEffectBadge
-                      vata={f.doshaEffectVata}
-                      pitta={f.doshaEffectPitta}
-                      kapha={f.doshaEffectKapha}
-                    />
+                    {item.kind === "food" && (
+                      <DoshaEffectBadge
+                        vata={item.doshaEffectVata}
+                        pitta={item.doshaEffectPitta}
+                        kapha={item.doshaEffectKapha}
+                      />
+                    )}
                   </button>
                 </li>
               ))}
