@@ -42,6 +42,7 @@ export function PatientRecordReviewTracker({ patientId }: PatientRecordReviewTra
   const claimedRef = useRef(false);
 
   const eligibleRole = role === "DOCTOR" || role === "ADMIN_DOCTOR";
+  const [dismissed, setDismissed] = useState(false);
 
   // Debug: mounted-state log so the user can verify in DevTools that the
   // tracker actually rendered on the page they're testing on.
@@ -49,6 +50,20 @@ export function PatientRecordReviewTracker({ patientId }: PatientRecordReviewTra
     // eslint-disable-next-line no-console
     console.log("[PatientRecordReviewTracker] mounted", { patientId, role, eligibleRole });
   }, [patientId, role, eligibleRole]);
+
+  // Auto-dismiss the chip a few seconds after it reaches a terminal state
+  // so it stops blocking the right-column content (Retention Checklist /
+  // Quick Templates) once its job is done. The toast already gives a
+  // persistent ack for the same event.
+  useEffect(() => {
+    if (status === "awarded" || status === "already" || status === "excluded" || status === "error") {
+      const t = setTimeout(() => setDismissed(true), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [status]);
+
+  // Reset dismissal when the patient changes (new appointment → new tracker).
+  useEffect(() => { setDismissed(false); }, [patientId]);
 
   // Tick every second so the chip shows live progress.
   useEffect(() => {
@@ -111,7 +126,7 @@ export function PatientRecordReviewTracker({ patientId }: PatientRecordReviewTra
     }
   }
 
-  if (!eligibleRole || !patientId) return null;
+  if (!eligibleRole || !patientId || dismissed) return null;
 
   const remaining = Math.max(0, REVIEW_THRESHOLD_SECS - elapsed);
 
@@ -119,7 +134,7 @@ export function PatientRecordReviewTracker({ patientId }: PatientRecordReviewTra
     <div
       className={cn(
         "fixed bottom-4 right-4 z-[9999] rounded-2xl shadow-lg border-2 border-primary/40 bg-card text-foreground",
-        "px-4 py-3 flex items-center gap-3 text-sm min-w-[280px] animate-in slide-in-from-right-2",
+        "px-3 py-2 flex items-center gap-3 text-sm min-w-[220px] max-w-[260px] animate-in slide-in-from-right-2",
       )}
       role="status"
       aria-live="polite"

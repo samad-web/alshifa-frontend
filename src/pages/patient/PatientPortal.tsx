@@ -14,6 +14,7 @@ import {
 import {
   Calendar, Pill, FileText, Search, ChevronLeft, ChevronRight,
   ClipboardList, Activity, ExternalLink, Leaf, TrendingUp,
+  HeartPulse,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -26,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { FeedbackPromptListener } from "@/components/FeedbackModal";
 import { HomeTherapyFeedbackListener } from "@/components/HomeTherapyFeedbackListener";
 import { HealthReportsTab } from "@/components/patient/HealthReportsTab";
+import { MyVitalsTab } from "@/components/patient/MyVitalsTab";
 import { MyTipsTab } from "@/components/patient/MyTipsTab";
 import { MyProgressTab } from "@/components/patient/MyProgressTab";
 
@@ -385,12 +387,15 @@ export default function PatientPortal() {
         <Card>
           <CardContent className="p-4 sm:p-6">
             <Tabs defaultValue="appointments" className="w-full">
-              <TabsList className="grid w-full grid-cols-6">
+              <TabsList className="grid w-full grid-cols-7">
                 <TabsTrigger value="appointments" className="gap-1.5">
                   <Calendar className="h-3.5 w-3.5" /> Appointments
                 </TabsTrigger>
                 <TabsTrigger value="prescriptions" className="gap-1.5">
                   <Pill className="h-3.5 w-3.5" /> Prescriptions
+                </TabsTrigger>
+                <TabsTrigger value="vitals" className="gap-1.5">
+                  <HeartPulse className="h-3.5 w-3.5" /> My Vitals
                 </TabsTrigger>
                 <TabsTrigger value="progress" className="gap-1.5">
                   <TrendingUp className="h-3.5 w-3.5" /> My Progress
@@ -407,6 +412,7 @@ export default function PatientPortal() {
               </TabsList>
               <TabsContent value="appointments" className="pt-4"><AppointmentsTab /></TabsContent>
               <TabsContent value="prescriptions" className="pt-4"><PrescriptionsTab /></TabsContent>
+              <TabsContent value="vitals" className="pt-4"><MyVitalsTab /></TabsContent>
               <TabsContent value="progress" className="pt-4"><MyProgressTab /></TabsContent>
               <TabsContent value="summaries" className="pt-4"><VisitSummariesTab /></TabsContent>
               <TabsContent value="reports" className="pt-4"><HealthReportsTab /></TabsContent>
