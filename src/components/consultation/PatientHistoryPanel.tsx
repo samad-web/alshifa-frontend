@@ -23,6 +23,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatClinicianName } from "@/lib/clinician-name";
 import {
   consultationContextApi,
   type ConsultationContextResponse,
@@ -195,7 +196,9 @@ function PrescriptionsTab({ data }: { data: ConsultationContextResponse }) {
               <span className="text-[10px] text-muted-foreground shrink-0">{formatDDMMYYYY(p.createdAt)}</span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              {p.doctor?.fullName ? `Dr. ${p.doctor.fullName}` : p.therapist?.fullName || "—"}
+              {p.doctor?.fullName
+                ? formatClinicianName(p.doctor.fullName, { isDoctor: true })
+                : formatClinicianName(p.therapist?.fullName)}
             </div>
             <button
               type="button"
@@ -230,7 +233,9 @@ function AppointmentsTab({ data }: { data: ConsultationContextResponse }) {
             <div className="min-w-0">
               <p className="text-xs font-semibold truncate">{a.consultationType} · {a.consultationMode}</p>
               <p className="text-[10px] text-muted-foreground">
-                {a.doctor?.fullName ? `Dr. ${a.doctor.fullName}` : a.therapist?.fullName || "—"}
+                {a.doctor?.fullName
+                  ? formatClinicianName(a.doctor.fullName, { isDoctor: true })
+                  : formatClinicianName(a.therapist?.fullName)}
               </p>
             </div>
             <div className="flex items-center gap-1 shrink-0">

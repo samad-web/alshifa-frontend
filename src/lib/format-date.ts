@@ -57,6 +57,13 @@ export function formatDateTime(input: DateInput, fallback = "—"): string {
     return `${formatDate(d)}, ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
 }
 
+/** "5:30 PM" — 12-hour clock with am/pm, en-IN. Used for appointment times. */
+export function formatTime(input: DateInput, fallback = "—"): string {
+    const d = toDate(input);
+    if (!d) return fallback;
+    return d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
 /** "22/04/2026 → 25/04/2026" — date range (single date if start === end). */
 export function formatDateRange(start: DateInput, end: DateInput, fallback = ""): string {
     const s = formatDate(start, "");

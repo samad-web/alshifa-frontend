@@ -1,9 +1,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
-import { Panel } from "@/components/ui/panel";
 import { apiClient } from "@/lib/api-client";
 import {
     Video,
@@ -19,6 +19,11 @@ import {
     Salad,
     ClipboardCheck,
     Loader2,
+    AlertTriangle,
+    Shield,
+    Activity,
+    Plus,
+    Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ChatWrapper } from "@/components/chat/ChatWrapper";
@@ -26,7 +31,7 @@ import { RetentionChecklistModal } from "@/components/RetentionChecklistModal";
 import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerModal";
 import { PatientHistoryPanel } from "@/components/consultation/PatientHistoryPanel";
 import { GenerateReportButton } from "@/components/consultation/GenerateReportButton";
-import { PainMapCard } from "@/components/patient/PainMapCard";
+import { RecordIntakeModal } from "@/components/consultation/RecordIntakeModal";
 import { PatientRecordReviewTracker } from "@/components/doctor/PatientRecordReviewTracker";
 import { VisitSummaryModal } from "@/components/consultation/VisitSummaryModal";
 import { videoSessionService } from "@/services/videoSession.service";
@@ -36,6 +41,201 @@ import { iwisApi, type DietPrescription } from "@/services/iwis.service";
 import { communicationApi } from "@/services/communication.service";
 import { ApiClientError } from "@/lib/api-client";
 import type { VisitSummaryEntry } from "@/types";
+import { formatTime } from "@/lib/format-date";
+import { roleToDashboard } from "@/lib/role-routes";
+
+// ── Inline Patient Snapshot ─────────────────────────────────────────────
+// Inlined here (rather than as a separate component file) because Vite's
+// HMR was repeatedly failing to re-bundle the standalone component file
+// (OneDrive sync confusing chokidar). Defining it in the same file as the
+// parent guarantees it reloads whenever ConsultationRoom does.
+
+interface VitalReading { value: number; unit: string; recordedAt: string; source: string | "clinician" | "self-reported" }
+interface HealthSummary {
+    patientId: string;
+    latestVitals: Record<string, VitalReading>;
+    height: { cm: number; source: string } | null;
+    weight: { kg: number; recordedAt: string } | null;
+    bmi: { value: number; category: string } | null;
+    idealWeight: { kg: number } | null;
+    prakriti: { type: string; display: string; satvaRating: number | null; agniType: string | null; assessedAt: string; assessedBy: string | null } | null;
+    lifestyle: { sleepQuality: number | null; stressLevel: number | null; exerciseFrequency: string | null; dietType: string | null; recordedAt: string; source: string } | null;
+    painRegions: Array<{ region?: string; regionLabel?: string; intensity?: number }>;
+}
+
+function relTime(iso: string | null | undefined): string {
+    if (!iso) return "";
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.round(h / 24);
+    if (d < 30) return `${d}d ago`;
+    return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// Build a compact "5m ago · self" sub-label including source provenance for
+// the snapshot rows. "self" means patient self-reported (DailyCheckIn);
+// clinician readings show just the timestamp.
+function vitalSub(reading: VitalReading | undefined): string | undefined {
+    if (!reading) return undefined;
+    const time = relTime(reading.recordedAt);
+    if (reading.source === 'self-reported') return `${time} · self`;
+    return time;
+}
+
+// Defined at module scope so React doesn't recreate it on every parent
+// render — repeatedly recreated inline components cause the child subtree
+// to remount on every render, which can manifest as a visible "flash and
+// disappear" of the wrapping card.
+function SnapshotRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
+    return (
+        <div className="flex items-baseline justify-between gap-2 py-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">{label}</span>
+            <span className="text-xs font-semibold tabular-nums truncate text-right">
+                {value}
+                {sub && <span className="ml-1 text-[10px] font-normal text-muted-foreground">{sub}</span>}
+            </span>
+        </div>
+    );
+}
+
+function InlinePatientSnapshot({ patientId, onRecord }: { patientId: string; onRecord: () => void }) {
+    const { data, isLoading, isError, refetch } = useQuery<HealthSummary>({
+        queryKey: ["health-summary", patientId],
+        queryFn: async () => {
+            const { data } = await apiClient.get<HealthSummary>(`/api/patients/${patientId}/health-summary`);
+            return data;
+        },
+        enabled: !!patientId,
+    });
+
+    // `shrink-0` on every render branch is LOAD-BEARING — do not remove.
+    // The right column is `flex flex-col` with `overflow-y-auto min-h-0`,
+    // which lets flex children be compressed. The Notes textarea has
+    // `min-h-[200px]` so it claims its space; without `shrink-0` this
+    // snapshot gets squeezed to 0 height and becomes invisible. Reproduced
+    // and traced in the long debug saga; see commit history for context.
+    if (isLoading) {
+        return (
+            <div className="shrink-0 rounded-2xl border border-border bg-secondary/30 p-4 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-xs text-muted-foreground">Loading patient snapshot…</span>
+            </div>
+        );
+    }
+    if (isError || !data) {
+        return (
+            <div className="shrink-0 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs">
+                <p className="font-semibold text-amber-900 mb-1 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5" />
+                    Patient Snapshot
+                </p>
+                <p className="text-amber-800">Couldn't load summary. <button type="button" onClick={() => refetch()} className="text-primary hover:underline">Retry</button></p>
+            </div>
+        );
+    }
+
+    // Defensive accessors — the API contract says all these fields are present,
+    // but a malformed response (304 cache race, server bug, etc.) could leave
+    // them undefined. Accessing `.length` on undefined throws, which would
+    // surface as the snapshot "loading then disappearing". Default everything
+    // to safe values so the render is bulletproof.
+    const latestVitals = (data.latestVitals ?? {}) as Record<string, { value: number; recordedAt: string } | undefined>;
+    const painRegions  = Array.isArray(data.painRegions) ? data.painRegions : [];
+    const pain   = latestVitals.PAIN_SCORE;
+    const sleep  = latestVitals.SLEEP_HOURS;
+    const mood   = latestVitals.MOOD;
+    const weight = data.weight;
+    const height = data.height;
+
+    return (
+        <div className="shrink-0 rounded-2xl border border-border bg-secondary/30 shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border flex items-center justify-between bg-secondary/60">
+                <h3 className="text-xs font-black uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-primary" />
+                    Patient Snapshot
+                </h3>
+                <Button size="sm" variant="outline" onClick={onRecord} className="h-7 px-2.5 text-[10px] gap-1 bg-card">
+                    <Plus className="w-3 h-3" /> Record
+                </Button>
+            </div>
+
+            <div className="px-4 py-3 grid grid-cols-2 gap-x-4 gap-y-1">
+                <div className="space-y-0.5">
+                    <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Vitals
+                    </p>
+                    <SnapshotRow label="Height" value={height ? `${height.cm} cm` : "—"} />
+                    <SnapshotRow label="Weight" value={weight ? `${weight.kg} kg` : "—"} sub={weight ? relTime(weight.recordedAt) : undefined} />
+                    {data.bmi && <SnapshotRow label="BMI" value={String(data.bmi.value)} sub={data.bmi.category} />}
+                    <SnapshotRow label="Pain"   value={pain  ? `${pain.value}/10`  : "—"} sub={vitalSub(pain)} />
+                    <SnapshotRow label="Sleep"  value={sleep ? `${sleep.value} hrs` : "—"} sub={vitalSub(sleep)} />
+                    <SnapshotRow label="Mood"   value={mood  ? `${mood.value}/5`   : "—"} sub={vitalSub(mood)} />
+                </div>
+                <div className="space-y-0.5">
+                    <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                        <Salad className="w-3 h-3" /> Clinical
+                    </p>
+                    <SnapshotRow label="Prakriti" value={data.prakriti?.display ?? "—"} sub={data.prakriti?.agniType ? `Agni: ${data.prakriti.agniType}` : undefined} />
+                    <SnapshotRow label="Sleep Q"  value={data.lifestyle?.sleepQuality != null ? `${data.lifestyle.sleepQuality}/5` : "—"} />
+                    <SnapshotRow label="Stress"   value={data.lifestyle?.stressLevel  != null ? `${data.lifestyle.stressLevel}/10` : "—"} />
+                    <SnapshotRow label="Diet"     value={data.lifestyle?.dietType ?? "—"} />
+                    <SnapshotRow label="Exercise" value={data.lifestyle?.exerciseFrequency ?? "—"} />
+                    <SnapshotRow label="Pain rgns" value={painRegions.length > 0 ? String(painRegions.length) : "—"} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Generate Health Report is hidden only for statuses where there is no
+// consultation to report on yet — pending approval, still being scheduled,
+// or cancelled. Anything else (CONFIRMED/ACCEPTED/IN_PROGRESS/COMPLETED/
+// NO_SHOW/etc.) renders the button, including statuses added later.
+const REPORT_HIDDEN_STATUSES = new Set([
+    "PENDING",
+    "PENDING_DOCTOR_APPROVAL",
+    "PENDING_THERAPIST_APPROVAL",
+    "SCHEDULED",
+    "CANCELLED",
+]);
+
+// Statuses where the patient can no longer "be late" — either it's done,
+// it never happened, or it was abandoned. The header late-badge stays
+// hidden for these so we don't render absurd "Late by 6 hours" for a row
+// that's already been marked NO_SHOW.
+const LATENESS_TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED", "NO_SHOW"]);
+
+// Maps `Appointment.arrivalStatus` (defaulted on every row, mirrored
+// from QueueEntry) to a human label + tone for the right-column card.
+function describeQueueStatus(
+    arrivalStatus: string | null | undefined,
+    queuePosition: number | null | undefined,
+): { label: string; tone: "muted" | "ok" | "warn" | "attention" } {
+    switch (arrivalStatus) {
+        case "ARRIVED":
+            return queuePosition === 1
+                ? { label: "Up next", tone: "ok" }
+                : queuePosition && queuePosition > 1
+                    ? { label: `Position ${queuePosition} in queue`, tone: "ok" }
+                    : { label: "Arrived — waiting", tone: "ok" };
+        case "IN_CONSULTATION": return { label: "In consultation now", tone: "ok" };
+        case "COMPLETED":       return { label: "Completed", tone: "muted" };
+        case "ABSENT":          return { label: "Marked absent", tone: "attention" };
+        case "CONTACTED":       return { label: "Contacted — pending", tone: "warn" };
+        case "NOT_ARRIVED":
+        default:                return { label: "Not arrived yet", tone: "muted" };
+    }
+}
+
+const queueToneClass: Record<"muted" | "ok" | "warn" | "attention", string> = {
+    muted:     "text-muted-foreground",
+    ok:        "text-wellness",
+    warn:      "text-amber-600",
+    attention: "text-red-600",
+};
 
 export default function ConsultationRoom() {
     const { appointmentId } = useParams();
@@ -48,6 +248,7 @@ export default function ConsultationRoom() {
     const [isSaving, setIsSaving] = useState(false);
     const [showChecklist, setShowChecklist] = useState(false);
     const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+    const [showIntakeModal, setShowIntakeModal] = useState(false);
     const [completing, setCompleting] = useState(false);
 
     // Visit summary + active diet prescription drive the right column.
@@ -61,16 +262,40 @@ export default function ConsultationRoom() {
         fetchAppointment();
     }, [appointmentId]);
 
+    const [savedNotes, setSavedNotes] = useState("");
+
     const fetchAppointment = async () => {
         try {
             const { data } = await apiClient.get<any>(`/api/appointments/${appointmentId}`);
             setAppointment(data);
             setNotes(data.sessionNotes || "");
+            setSavedNotes(data.sessionNotes || "");
         } catch (error) {
             toast.error("Failed to fetch appointment details");
         } finally {
             setLoading(false);
         }
+    };
+
+    // Dirty-notes guard — warn before tab close / refresh if the textarea
+    // diverges from the last persisted value. SPA navigation via in-page
+    // back/forward is guarded separately in `safeBack()`. (Full router-level
+    // blocking would require migrating from <BrowserRouter> to a data router.)
+    const isDirty = notes !== savedNotes;
+    useEffect(() => {
+        if (!isDirty) return;
+        const handler = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = "";
+        };
+        window.addEventListener("beforeunload", handler);
+        return () => window.removeEventListener("beforeunload", handler);
+    }, [isDirty]);
+
+    const dashboardPath = roleToDashboard(role);
+    const safeBack = () => {
+        if (isDirty && !window.confirm("You have unsaved notes. Leave without saving?")) return;
+        navigate(dashboardPath);
     };
 
     const patientId: string | undefined = appointment?.patient?.id;
@@ -112,13 +337,18 @@ export default function ConsultationRoom() {
         return () => { cancelled = true; };
     }, [patientId]);
 
+    // Re-throws on failure so callers (submitCompletion) can abort before
+    // POSTing /complete — previously the catch swallowed the error and
+    // completion proceeded with notes silently lost.
     const handleSaveNotes = async () => {
         setIsSaving(true);
         try {
             await apiClient.post(`/api/consultations/session/${appointmentId}/notes`, { sessionNotes: notes });
+            setSavedNotes(notes);
             toast.success("Notes saved successfully");
         } catch (error) {
             toast.error("Failed to save notes");
+            throw error;
         } finally {
             setIsSaving(false);
         }
@@ -129,20 +359,28 @@ export default function ConsultationRoom() {
     // submitting that modal is what actually POSTs /complete with the
     // follow-up payload.
     const handleCompleteSession = () => {
+        if (notes.trim() === "" &&
+            !window.confirm("No clinical notes have been written. Complete the session anyway?")) {
+            return;
+        }
         setShowFollowUpModal(true);
     };
 
     const submitCompletion = async (followUp: FollowUpPayload) => {
         setCompleting(true);
         try {
-            // Save notes first so they persist even if the completion
-            // request fails for any reason.
-            await handleSaveNotes();
+            // Save notes first; if the save fails we abort here so completion
+            // never runs with un-persisted notes.
+            try {
+                await handleSaveNotes();
+            } catch {
+                return;
+            }
 
             await apiClient.post(`/api/consultations/session/${appointmentId}/complete`, { followUp });
             toast.success("Session completed — follow-up saved");
             setShowFollowUpModal(false);
-            navigate("/therapist");
+            navigate(dashboardPath);
         } catch (error) {
             const msg = error instanceof Error ? error.message : "Failed to complete session";
             toast.error(msg);
@@ -162,26 +400,50 @@ export default function ConsultationRoom() {
             )}
             <div className="h-[calc(100vh-4rem)] flex flex-col">
                 {/* Session Header */}
-                <div className="px-6 py-4 bg-card border-b border-border/50 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-4">
-                        <Button variant="ghost" size="icon" onClick={() => navigate("/therapist")}>
+                <div className="px-6 py-4 bg-card border-b border-border/50 flex items-center justify-between shrink-0 gap-4">
+                    <div className="flex items-center gap-4 min-w-0">
+                        <Button variant="ghost" size="icon" onClick={safeBack} className="shrink-0">
                             <ArrowLeft className="w-5 h-5" />
                         </Button>
-                        <div>
-                            <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-                                Session with {appointment.patient?.fullName || "Patient"}
+                        <div className="min-w-0">
+                            <h2 className="text-xl font-bold text-foreground flex items-center gap-2 truncate">
+                                <span className="truncate">Session with {appointment.patient?.fullName || "Patient"}</span>
                                 {appointment.consultationMode === "ONLINE" && (
-                                    <span className="text-[10px] px-2 py-0.5 bg-primary/10 text-primary rounded-full uppercase tracking-wider">Online</span>
+                                    <span className="text-[10px] px-2 py-0.5 bg-primary/10 text-primary rounded-full uppercase tracking-wider shrink-0">Online</span>
                                 )}
                             </h2>
-                            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
                                 <span className="flex items-center gap-1"><User className="w-3 h-3" /> {appointment.patient?.gender || "NA"}, {appointment.patient?.age || "NA"}Y</span>
-                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Scheduled for {new Date(appointment.date).toLocaleTimeString()}</span>
+                                {typeof appointment.patient?.age === "number" && appointment.patient.age < 18 && (
+                                    <span
+                                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider"
+                                        title="Patient is a minor — parental consent and guardian contact may be required."
+                                    >
+                                        <Shield className="w-3 h-3" /> Minor
+                                    </span>
+                                )}
+                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Scheduled for {formatTime(appointment.date)}</span>
+                                {(() => {
+                                    if (!appointment.date) return null;
+                                    if (appointment.arrivedAt) return null;
+                                    if (LATENESS_TERMINAL_STATUSES.has(appointment.status)) return null;
+                                    const lateMs = Date.now() - new Date(appointment.date).getTime();
+                                    const lateMin = Math.floor(lateMs / 60000);
+                                    if (lateMin < 5) return null;
+                                    const display = lateMin >= 60
+                                        ? `${Math.floor(lateMin / 60)}h ${lateMin % 60}m late`
+                                        : `Late by ${lateMin} min`;
+                                    return (
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider">
+                                            {display}
+                                        </span>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 shrink-0">
                         <Button variant="outline" size="sm" onClick={handleSaveNotes} disabled={isSaving}>
                             <Save className="w-4 h-4 mr-2" />
                             {isSaving ? "Saving..." : "Save Notes"}
@@ -192,8 +454,7 @@ export default function ConsultationRoom() {
                             exists. */}
                         {(role === "DOCTOR" || role === "ADMIN_DOCTOR") &&
                          appointment.patient?.id &&
-                         (appointment.status === "COMPLETED" ||
-                          true) && (
+                         !REPORT_HIDDEN_STATUSES.has(appointment.status) && (
                             <GenerateReportButton
                                 appointmentId={appointment.id}
                                 patientId={appointment.patient.id}
@@ -211,6 +472,28 @@ export default function ConsultationRoom() {
                         </Button>
                     </div>
                 </div>
+
+                {/* Allergy strip — pinned directly under the header so it can't
+                    be missed before prescribing or selecting templates. Sourced
+                    from `Patient.allergies` (intake form). Hidden entirely when
+                    the patient has no recorded allergies — clinicians need the
+                    space, not a "none" sticker. */}
+                {appointment.patient?.allergies?.length > 0 && (
+                    <div className="px-6 py-2 bg-red-50 border-b border-red-200 flex items-center gap-2 shrink-0">
+                        <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-red-700 shrink-0">Allergies</span>
+                        <div className="flex flex-wrap gap-1.5">
+                            {appointment.patient.allergies.map((a: string) => (
+                                <span
+                                    key={a}
+                                    className="px-2 py-0.5 rounded-md bg-red-100 text-red-800 text-xs font-bold"
+                                >
+                                    {a}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Main Split View — patient history rail | consultation | docs */}
                 <div className="flex-1 flex overflow-hidden">
@@ -259,11 +542,29 @@ export default function ConsultationRoom() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="p-4 bg-card border border-border/50 rounded-xl text-left">
                                             <p className="text-xs font-bold text-muted-foreground uppercase">Clinic Location</p>
-                                            <p className="text-sm font-medium text-foreground">Main Branch - Room 402</p>
+                                            <p className="text-sm font-medium text-foreground">
+                                                {appointment.branch?.name || "—"}
+                                                {appointment.therapyRoomBooking?.room?.name && (
+                                                    <>
+                                                        <span className="text-muted-foreground"> · </span>
+                                                        {appointment.therapyRoomBooking.room.name}
+                                                    </>
+                                                )}
+                                            </p>
                                         </div>
                                         <div className="p-4 bg-card border border-border/50 rounded-xl text-left">
                                             <p className="text-xs font-bold text-muted-foreground uppercase">Queue Status</p>
-                                            <p className="text-sm font-medium text-wellness font-bold">Active Now</p>
+                                            {(() => {
+                                                const { label, tone } = describeQueueStatus(
+                                                    appointment.arrivalStatus,
+                                                    appointment.queuePosition,
+                                                );
+                                                return (
+                                                    <p className={`text-sm font-bold ${queueToneClass[tone]}`}>
+                                                        {label}
+                                                    </p>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 </div>
@@ -271,32 +572,59 @@ export default function ConsultationRoom() {
                         )}
                     </div>
 
-                    {/* Right: Documentation Area */}
-                    <div className="w-96 bg-card border-l border-border/50 p-6 flex flex-col space-y-6 shrink-0">
-                        {showPainMap && appointment.patient?.id && (
-                            <PainMapCard patientId={appointment.patient.id} />
-                        )}
+                    {/* Right: Documentation Area.
+                        `overflow-y-auto min-h-0` lets this column scroll
+                        independently when the stacked sections (PainMap +
+                        Notes + Visit Summary + Diet + Templates + Retention)
+                        exceed the viewport — previously they were clipped
+                        because the column was a fixed-height flex child with
+                        no scroll. */}
+                    <div className="w-96 bg-card border-l border-border/50 p-6 flex flex-col space-y-6 shrink-0 overflow-y-auto min-h-0">
+                        {/* ── 1. Clinical Notes ─────────────────────────────────────
+                            Doctor's primary work surface — typed all session. Quick
+                            Templates live inline (chips above the textarea) instead
+                            of as a standalone card lower down, since they only ever
+                            modify the textarea below them. */}
+                        <div className="space-y-2">
+                            <div className="space-y-1">
+                                <h3 className="text-sm font-black text-foreground flex items-center gap-2 uppercase tracking-tight">
+                                    <FileText className="w-4 h-4 text-primary" />
+                                    Clinical Notes
+                                </h3>
+                                <p className="text-xs text-muted-foreground">Notes are visible to the assigned clinical team.</p>
+                            </div>
 
-                        <div className="space-y-1">
-                            <h3 className="text-sm font-black text-foreground flex items-center gap-2 uppercase tracking-tight">
-                                <FileText className="w-4 h-4 text-primary" />
-                                Clinical Notes
-                            </h3>
-                            <p className="text-xs text-muted-foreground">Notes are visible to the assigned clinical team.</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 px-2 text-[10px] font-medium"
+                                    onClick={() => setNotes(prev => prev + "\n[CBT Framework Applied]: Motivation check, Core belief identification.")}
+                                >
+                                    + CBT Framework
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 px-2 text-[10px] font-medium"
+                                    onClick={() => setNotes(prev => prev + "\n[Progress Evaluation]: Stable, showing improved emotional regulation.")}
+                                >
+                                    + Progress Note
+                                </Button>
+                            </div>
+
+                            <textarea
+                                className="min-h-[200px] w-full bg-secondary/30 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 p-4 text-sm font-medium leading-relaxed resize-y transition-all"
+                                placeholder="Document observations, therapeutic interventions, and patient progress..."
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                            />
                         </div>
 
-                        <textarea
-                            className="flex-1 w-full bg-secondary/30 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 p-4 text-sm font-medium leading-relaxed resize-none transition-all"
-                            placeholder="Document observations, therapeutic interventions, and patient progress..."
-                            value={notes}
-                            onChange={(e) => setNotes(e.target.value)}
-                        />
-
-                        {/* Visit Summary — post-consultation document for the
-                            patient. Click "Edit" / "Create" to open the full
-                            modal where the doctor authors diagnosis,
-                            prescriptions, exercise plan, etc. and optionally
-                            sends to the patient portal. */}
+                        {/* ── 2. Visit Summary ─────────────────────────────────────
+                            Post-consultation document for the patient. Open the
+                            modal to author diagnosis, prescriptions, exercise plan,
+                            and optionally send to the patient portal. */}
                         <div className="space-y-2">
                             <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                                 <ClipboardCheck className="w-4 h-4 text-primary" />
@@ -333,9 +661,29 @@ export default function ConsultationRoom() {
                             )}
                         </div>
 
-                        {/* Diet Prescription — patient's active plan. Distinct
-                            from diet *packages* (templates); this is the
-                            instantiated prescription currently in effect. */}
+                        {/* ── 3. Patient Snapshot ──────────────────────────────────
+                            Inlined (see InlinePatientSnapshot above) because the
+                            standalone component file kept getting served stale
+                            by Vite's HMR — likely OneDrive timestamps. The
+                            `showPainMap` role gate was removed: the snapshot
+                            is useful to every clinician role in the room
+                            (DOCTOR, ADMIN_DOCTOR, THERAPIST) and the +Record
+                            action is itself role-gated server-side. */}
+                        {appointment.patient?.id && (
+                            <InlinePatientSnapshot
+                                patientId={appointment.patient.id}
+                                onRecord={() => setShowIntakeModal(true)}
+                            />
+                        )}
+
+                        {/* Subtle separator — informational sections above, action
+                            items below. Mirrors the conceptual grouping. */}
+                        <div className="border-t border-border/50" />
+
+                        {/* ── 4. Diet Prescription ─────────────────────────────────
+                            Patient's active plan. Distinct from diet *packages*
+                            (templates); this is the instantiated prescription
+                            currently in effect. */}
                         <div className="space-y-2">
                             <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                                 <Salad className="w-4 h-4 text-wellness" />
@@ -357,29 +705,8 @@ export default function ConsultationRoom() {
                             )}
                         </div>
 
-                        <Panel title="Quick Templates" subtitle="Therapeutic frameworks">
-                            <div className="space-y-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full text-left justify-start text-[10px] h-auto p-3"
-                                    onClick={() => setNotes(prev => prev + "\n[CBT Framework Applied]: Motivation check, Core belief identification.")}
-                                >
-                                    Apply CBT Framework
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full text-left justify-start text-[10px] h-auto p-3"
-                                    onClick={() => setNotes(prev => prev + "\n[Progress Evaluation]: Stable, showing improved emotional regulation.")}
-                                >
-                                    Standard Progress Note
-                                </Button>
-                            </div>
-                        </Panel>
-
-                        {/* Retention Checklist — follow-up adherence tracking */}
-                        <div className="space-y-2 pt-2 border-t border-border/50">
+                        {/* ── 5. Retention Checklist — follow-up adherence ─────── */}
+                        <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-black text-foreground uppercase tracking-tight flex items-center gap-1.5">
@@ -430,6 +757,15 @@ export default function ConsultationRoom() {
                             patientName={appointment?.patient?.fullName}
                             submitLabel="Complete Session"
                         />
+
+                        {appointment.patient?.id && (
+                            <RecordIntakeModal
+                                open={showIntakeModal}
+                                onOpenChange={setShowIntakeModal}
+                                patientId={appointment.patient.id}
+                                patientGender={appointment.patient?.gender}
+                            />
+                        )}
                     </div>
                 </div>
             </div>
