@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
     Dialog,
     DialogContent,
@@ -10,7 +10,6 @@ import {
 import { Button } from "@/components/common/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Smile,
@@ -18,11 +17,14 @@ import {
     Frown,
     Moon,
     AlertCircle,
-    Award
+    Award,
+    Camera,
+    Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
+import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 
 interface DailyCheckInProps {
     isOpen: boolean;
@@ -30,7 +32,32 @@ interface DailyCheckInProps {
     onSuccess: (pointsAwarded: number) => void;
 }
 
+interface CheckInResponse {
+    message: string;
+    data: { id: string };
+}
+
+interface TongueAnalysisResponse {
+    id: string;
+    doshaIndication: string | null;
+    confidence: number | null;
+    analysisNotes: string | null;
+    alertEmitted: boolean;
+}
+
+// F03 dosha colours — match F04's DoshaForecastPanel theme.
+const DOSHA_THEME: Record<string, { bg: string; label: string }> = {
+    VATA:     { bg: "bg-[#7c3aed] text-white", label: "VATA" },
+    PITTA:    { bg: "bg-[#ea580c] text-white", label: "PITTA" },
+    KAPHA:    { bg: "bg-[#0d9488] text-white", label: "KAPHA" },
+    BALANCED: { bg: "bg-emerald-600 text-white", label: "BALANCED" },
+    TRIDOSHA: { bg: "bg-slate-600 text-white", label: "TRIDOSHA" },
+};
+
 export function DailyCheckIn({ isOpen, onClose, onSuccess }: DailyCheckInProps) {
+    const { has } = useTenantFeatures();
+    const tongueOn = has("MULTIMODAL_DIAGNOSTIC_AI");
+
     const [loading, setLoading] = useState(false);
     const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
@@ -40,19 +67,52 @@ export function DailyCheckIn({ isOpen, onClose, onSuccess }: DailyCheckInProps) 
         notes: "",
     });
 
+    // F03 — Step 3 state. The check-in is saved BEFORE the wizard reaches
+    // Step 3, so cancelling / skipping the photo has zero effect on the
+    // submitted check-in.
+    const [savedCheckInId, setSavedCheckInId] = useState<string | null>(null);
+    const [photoFile, setPhotoFile] = useState<File | null>(null);
+    const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+    const [analysing, setAnalysing] = useState(false);
+    const [analysisResult, setAnalysisResult] = useState<TongueAnalysisResponse | null>(null);
+    const [analysisFailed, setAnalysisFailed] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const moods = [
         { id: "SAD", icon: Frown, label: "Sad", color: "text-destructive" },
         { id: "NEUTRAL", icon: Meh, label: "Neutral", color: "text-muted-foreground" },
         { id: "HAPPY", icon: Smile, label: "Happy", color: "text-wellness" },
     ];
 
+    function resetAndClose() {
+        // Always reset internal state before closing so the next open is
+        // a clean wizard, not a stale one.
+        setStep(1);
+        setFormData({ painLevel: 0, sleepHours: 7, mood: "NEUTRAL", notes: "" });
+        setSavedCheckInId(null);
+        setPhotoFile(null);
+        setPhotoPreview(null);
+        setAnalysing(false);
+        setAnalysisResult(null);
+        setAnalysisFailed(false);
+        onClose();
+    }
+
     const handleSubmit = async () => {
         setLoading(true);
         try {
-            await apiClient.post('/api/wellness/check-in', formData);
+            const resp = await apiClient.post<CheckInResponse>('/api/wellness/check-in', formData);
             toast.success("Daily check-in completed! +10 Zen Points");
             onSuccess(10);
-            onClose();
+            const newId = resp.data?.data?.id ?? null;
+            // F03 — advance to Step 3 only when the tongue feature is on.
+            // Otherwise close immediately so the existing UX is unchanged.
+            if (tongueOn && newId) {
+                setSavedCheckInId(newId);
+                setStep(3);
+            } else {
+                resetAndClose();
+            }
         } catch (error: any) {
             console.error("Submission error:", error);
             toast.error(error?.message || "Failed to submit check-in");
@@ -61,8 +121,44 @@ export function DailyCheckIn({ isOpen, onClose, onSuccess }: DailyCheckInProps) 
         }
     };
 
+    function onPickPhoto(file: File | null) {
+        setPhotoFile(file);
+        setPhotoPreview(file ? URL.createObjectURL(file) : null);
+        setAnalysisResult(null);
+        setAnalysisFailed(false);
+    }
+
+    async function handleAnalyse() {
+        if (!photoFile || !savedCheckInId) return;
+        setAnalysing(true);
+        setAnalysisFailed(false);
+        try {
+            const fd = new FormData();
+            fd.append("photo", photoFile);
+            fd.append("checkInId", savedCheckInId);
+            // apiClient.post defaults to JSON; use a one-off fetch so the
+            // browser sets the multipart boundary header itself.
+            const token = localStorage.getItem("token") || "";
+            const resp = await fetch(`/api/wellness/check-in/tongue-photo`, {
+                method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                body: fd,
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const body = (await resp.json()) as TongueAnalysisResponse;
+            setAnalysisResult(body);
+        } catch (err) {
+            // Per spec: never block the check-in flow. The check-in is
+            // already saved; the photo step is purely additive.
+            console.warn("[tongue] analyse failed:", err);
+            setAnalysisFailed(true);
+        } finally {
+            setAnalysing(false);
+        }
+    }
+
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
+        <Dialog open={isOpen} onOpenChange={resetAndClose}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>Daily Wellness Check-in</DialogTitle>
@@ -163,6 +259,116 @@ export function DailyCheckIn({ isOpen, onClose, onSuccess }: DailyCheckInProps) 
                                 >
                                     {loading ? "Submitting..." : "Complete Check-in"}
                                 </Button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* F03 — Step 3: optional Tongue Check. Reached only when
+                        MULTIMODAL_DIAGNOSTIC_AI is enabled AND step 2 saved
+                        successfully. Skipping is a no-op for the check-in. */}
+                    {step === 3 && (
+                        <div className="space-y-5 animate-in fade-in slide-in-from-right-4">
+                            <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles className="w-4 h-4 text-primary" />
+                                    <h3 className="text-base font-semibold">Tongue Check (Optional)</h3>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    A quick photo helps your doctor track your Ayurvedic health trends.
+                                </p>
+                            </div>
+
+                            {!photoPreview && (
+                                <button
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full h-40 rounded-xl border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-2 hover:bg-muted/30 transition"
+                                >
+                                    <Camera className="w-8 h-8 text-muted-foreground" />
+                                    <span className="text-xs text-muted-foreground">Tap to take a tongue photo</span>
+                                </button>
+                            )}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                className="hidden"
+                                onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+                            />
+
+                            {photoPreview && (
+                                <div className="space-y-2">
+                                    <img
+                                        src={photoPreview}
+                                        alt="Tongue preview"
+                                        className="w-full h-40 object-cover rounded-xl border border-border"
+                                    />
+                                    {!analysisResult && !analysisFailed && (
+                                        <button
+                                            type="button"
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="text-[11px] text-primary hover:underline"
+                                        >
+                                            Retake photo
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {analysing && (
+                                <div className="space-y-2 text-xs text-muted-foreground">
+                                    <div className="h-3 w-2/3 bg-muted rounded animate-pulse" />
+                                    <div className="h-3 w-1/2 bg-muted rounded animate-pulse" />
+                                    <p>Analysing tongue image…</p>
+                                </div>
+                            )}
+
+                            {analysisResult && (
+                                <div className="rounded-xl border border-border bg-card p-3 space-y-2 text-xs">
+                                    {analysisResult.doshaIndication && (
+                                        <div className="flex items-center gap-2">
+                                            <span
+                                                className={cn(
+                                                    "px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wide",
+                                                    DOSHA_THEME[analysisResult.doshaIndication]?.bg ?? "bg-muted text-foreground",
+                                                )}
+                                            >
+                                                {DOSHA_THEME[analysisResult.doshaIndication]?.label ?? analysisResult.doshaIndication}
+                                            </span>
+                                            {typeof analysisResult.confidence === "number" && (
+                                                <span className="text-muted-foreground">
+                                                    {Math.round(analysisResult.confidence * 100)}% confidence
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                    {analysisResult.analysisNotes && (
+                                        <p className="leading-snug">{analysisResult.analysisNotes}</p>
+                                    )}
+                                    <p className="text-[11px] text-emerald-700">✓ Shared with your doctor</p>
+                                </div>
+                            )}
+
+                            {analysisFailed && (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                                    Photo saved — analysis unavailable. Your doctor can still review the image.
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <Button variant="outline" className="flex-1" onClick={resetAndClose}>
+                                    {analysisResult || analysisFailed ? "Done" : "Skip"}
+                                </Button>
+                                {photoFile && !analysisResult && !analysisFailed && (
+                                    <Button
+                                        className="flex-[2] h-12"
+                                        onClick={handleAnalyse}
+                                        disabled={analysing}
+                                    >
+                                        {analysing ? "Analysing…" : "Analyse"}
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     )}

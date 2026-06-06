@@ -32,6 +32,9 @@ import { FollowUpSchedulerModal } from "@/components/followup/FollowUpSchedulerM
 import { PatientHistoryPanel } from "@/components/consultation/PatientHistoryPanel";
 import { GenerateReportButton } from "@/components/consultation/GenerateReportButton";
 import { RecordIntakeModal } from "@/components/consultation/RecordIntakeModal";
+import { DoshaForecastPanel } from "@/components/consultation/DoshaForecastPanel";
+import { TongueTrendChart } from "@/components/consultation/TongueTrendChart";
+import { DigitalTwinPanel } from "@/components/consultation/DigitalTwinPanel";
 import { PatientRecordReviewTracker } from "@/components/doctor/PatientRecordReviewTracker";
 import { VisitSummaryModal } from "@/components/consultation/VisitSummaryModal";
 import { videoSessionService } from "@/services/videoSession.service";
@@ -669,12 +672,25 @@ export default function ConsultationRoom() {
                             is useful to every clinician role in the room
                             (DOCTOR, ADMIN_DOCTOR, THERAPIST) and the +Record
                             action is itself role-gated server-side. */}
+                        {/* F01 — Digital Twin (top of column). Renders nothing
+                            when feature off or fetch fails. Sits ABOVE the
+                            patient snapshot per spec. */}
+                        <DigitalTwinPanel patientId={appointment.patient?.id ?? null} />
+
                         {appointment.patient?.id && (
                             <InlinePatientSnapshot
                                 patientId={appointment.patient.id}
                                 onRecord={() => setShowIntakeModal(true)}
                             />
                         )}
+
+                        {/* F04 — Dosha Forecast (renders nothing when flag is off
+                            or the patient has no forecast history yet). */}
+                        <DoshaForecastPanel patientId={appointment.patient?.id ?? null} />
+
+                        {/* F03 — Tongue Pariksha trend (renders nothing when
+                            flag is off or no observations exist). */}
+                        <TongueTrendChart patientId={appointment.patient?.id ?? null} />
 
                         {/* Subtle separator — informational sections above, action
                             items below. Mirrors the conceptual grouping. */}
