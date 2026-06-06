@@ -18,10 +18,12 @@ import {
 } from "@/components/ui/select";
 import {
   AlertTriangle, Search, ArrowRight, Activity, ClipboardList,
-  TrendingDown, Clock, CheckCircle2,
+  TrendingDown, Clock, CheckCircle2, Sparkles,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
+import { ExplainabilityPopover } from "@/components/triage/ExplainabilityPopover";
+import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 
 interface CareGap {
   id: string;
@@ -34,6 +36,12 @@ interface CareGap {
   detail: string;
   assignedDoctorName: string;
   suggestedAction: string;
+  // F08 popover anchor — populated by backend on INCOMPLETE_TRIAGE rows so
+  // we can mount the ExplainabilityPopover inline. Other gap types omit.
+  triageSessionId?: string | null;
+  // F04 — set by the doctor dashboard fetcher when the patient also has
+  // an active DoshaForecast; renders as an inline chip.
+  hasDoshaForecast?: boolean;
 }
 
 interface CareGapResponse {
@@ -113,6 +121,9 @@ function severityBadge(severity: CareGap["severity"]) {
 
 export default function CareGapDashboard() {
   const navigate = useNavigate();
+  const { has } = useTenantFeatures();
+  const explainabilityOn = has("EXPLAINABLE_AI");
+  const doshaOn          = has("PREDICTIVE_DOSHA_ENGINE");
   const [data, setData] = useState<CareGapResponse["data"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [gapType, setGapType] = useState<string>("ALL");
@@ -304,13 +315,38 @@ export default function CareGapDashboard() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge
-                            variant="outline"
-                            className={`gap-1 ${GAP_TYPE_TONE[g.gapType]}`}
-                          >
-                            <Icon className="w-3 h-3" />
-                            {GAP_TYPE_LABEL[g.gapType]}
-                          </Badge>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge
+                              variant="outline"
+                              className={`gap-1 ${GAP_TYPE_TONE[g.gapType]}`}
+                            >
+                              <Icon className="w-3 h-3" />
+                              {GAP_TYPE_LABEL[g.gapType]}
+                            </Badge>
+                            {/* F08 — popover surfaces the triage scoring
+                                rationale on INCOMPLETE_TRIAGE rows (other
+                                gap types have no originating triage). */}
+                            {explainabilityOn && g.triageSessionId && (
+                              <ExplainabilityPopover triageSessionId={g.triageSessionId} />
+                            )}
+                            {/* F04 — Dosha-forecast chip for patients with
+                                an active forecast; clicking opens the
+                                ConsultationRoom where the full panel lives. */}
+                            {doshaOn && g.hasDoshaForecast && g.patientId && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/patients/${g.patientId}/timeline`);
+                                }}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-medium hover:underline"
+                                title="Dosha imbalance forecast active"
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                Dosha forecast
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={severityBadge(g.severity)}>
