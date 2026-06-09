@@ -27,8 +27,6 @@ import { useQueueSocket } from "@/hooks/useQueueSocket";
 import TodoPanel from "@/components/todo/TodoPanel";
 import { FollowUpTaskPanel } from "@/components/doctor/FollowUpTaskPanel";
 import { SelfExamBundlePanel, urgencyBadge } from "@/components/dashboard/SelfExamBundlePanel";
-import { ExplainabilityPopover } from "@/components/triage/ExplainabilityPopover";
-import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { RecognitionPanel } from "@/components/journey-feedback/RecognitionPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -439,7 +437,6 @@ function PendingApprovalCard({
   onDecline: () => void;
 }) {
   const tri = appt.triageSession;
-  const { has: hasFeature } = useTenantFeatures();
   return (
     <div className="px-5 py-3 space-y-2">
       <div className="flex items-start justify-between gap-3">
@@ -447,9 +444,6 @@ function PendingApprovalCard({
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-medium text-sm">{appt.patient?.fullName || "Unknown"}</span>
             {tri?.urgencyLevel && urgencyBadge(tri.urgencyLevel)}
-            {tri?.id && hasFeature("EXPLAINABLE_AI") && (
-              <ExplainabilityPopover triageSessionId={tri.id} />
-            )}
             <Badge variant="outline" className="text-[10px]">{appt.consultationMode}</Badge>
           </div>
           <div className="text-xs text-muted-foreground">

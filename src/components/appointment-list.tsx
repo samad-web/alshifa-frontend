@@ -11,6 +11,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
+import { ExplainabilityPopover } from "@/components/triage/ExplainabilityPopover";
+import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 
 const CONSULTATION_ROOM_ROLES = ["DOCTOR", "ADMIN_DOCTOR", "THERAPIST"];
 
@@ -95,6 +97,7 @@ export function AppointmentList({
 }: AppointmentListProps) {
     const { role } = useAuth();
     const navigate = useNavigate();
+    const { has: hasFeature } = useTenantFeatures();
     const canEnterConsultationRoom = CONSULTATION_ROOM_ROLES.includes(role ?? "");
     const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
     const [reportData, setReportData] = useState<any>(null);
@@ -318,14 +321,23 @@ export function AppointmentList({
                                                 <Activity className="w-3.5 h-3.5" />
                                                 Triage Summary
                                             </p>
-                                            <Badge variant="outline" className={cn(
-                                                "text-[10px] font-black uppercase",
-                                                appointment.triageSession.severity === 'EMERGENCY' || appointment.triageSession.severity === 'HIGH'
-                                                    ? "bg-risk/10 text-risk border-risk/20"
-                                                    : "bg-wellness/10 text-wellness border-wellness/20"
-                                            )}>
-                                                {appointment.triageSession.severity}
-                                            </Badge>
+                                            <div className="flex items-center gap-1.5">
+                                                <Badge variant="outline" className={cn(
+                                                    "text-[10px] font-black uppercase",
+                                                    appointment.triageSession.severity === 'EMERGENCY' || appointment.triageSession.severity === 'HIGH'
+                                                        ? "bg-risk/10 text-risk border-risk/20"
+                                                        : "bg-wellness/10 text-wellness border-wellness/20"
+                                                )}>
+                                                    {appointment.triageSession.severity}
+                                                </Badge>
+                                                {/* F08 — Explainable AI popover. Shows the score
+                                                    breakdown, red flags, and routing-quality context
+                                                    that drove this triage's urgency. Gated by the
+                                                    EXPLAINABLE_AI hospital feature flag. */}
+                                                {hasFeature("EXPLAINABLE_AI") && appointment.triageSession.id && (
+                                                    <ExplainabilityPopover triageSessionId={appointment.triageSession.id} />
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-muted/30 p-3 rounded-lg border border-border/40">
                                             <div className="space-y-1">

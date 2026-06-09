@@ -27,6 +27,30 @@ function resolveNotificationRoute(notification: Notification, role: AppRole | nu
     const isClinician = role === 'DOCTOR' || role === 'THERAPIST' || role === 'ADMIN_DOCTOR';
     const isAdmin     = role === 'ADMIN' || role === 'ADMIN_DOCTOR' || role === 'BRANCH_ADMIN';
 
+    // Notifications can carry an explicit `link` in their data payload (the
+    // backend uses this as a generic destination hint — e.g. FOLLOW_UP_TASK_CREATED
+    // ships "/doctor?tab=follow-up-tasks"). When present, prefer it over
+    // type-based routing so we don't have to maintain a case for every new
+    // notification type the backend adds.
+    //
+    // SECURITY GATE: enforce that the link is reachable for the recipient's
+    // role. A patient must never be routed into `/admin/*`, `/doctor/*`,
+    // `/critical-journey`, `/super-admin/*`, etc. — even if the backend
+    // accidentally (or maliciously) ships that link. The matching set
+    // mirrors the route guards in App.tsx; widen cautiously.
+    if (typeof data.link === 'string' && data.link.startsWith('/')) {
+        const link = data.link;
+        const isClinicianOnlyPrefix =
+            /^\/(doctor|doctor-admin|therapist|admin|admin\/|branch-admin|critical-journey|care-gaps|super-admin|pharmacy|appointments|consultation|patients|self-exam-review|handoff-notes|reports|xp-dashboard)(\/|$|\?)/i
+                .test(link);
+        if (isPatient && isClinicianOnlyPrefix) {
+            // Fall through to the type-based switch which has patient-safe
+            // defaults; do NOT honour the unsafe link.
+        } else {
+            return link;
+        }
+    }
+
     switch (notification.type) {
         // ── Chat ────────────────────────────────────────────────────────────
         case 'NEW_MESSAGE':
@@ -104,8 +128,46 @@ function resolveNotificationRoute(notification: Notification, role: AppRole | nu
             return isPatient ? '/patient' : '/critical-journey';
 
         // ── Triage escalation ───────────────────────────────────────────────
+        // Fires when a CRITICAL / URGENT triage hits an admin-doctor's queue.
+        // Land them on the Pending appointments tab so they can act on the
+        // auto-held slot. Super admins keep their dedicated cross-hospital
+        // view.
         case 'TRIAGE_ESCALATION':
-            return role === 'SUPER_ADMIN' ? '/super-admin/triage' : null;
+            if (role === 'SUPER_ADMIN') return '/super-admin/triage';
+            if (isClinician || isAdmin) return '/appointments?status=PENDING';
+            return null;
+
+        // ── Follow-up tasks (auto-generated from CRITICAL triage flow) ──────
+        // Backend ships data.link='/doctor?tab=follow-up-tasks'; this case is
+        // a fallback for older rows that pre-date the data.link convention.
+        case 'FOLLOW_UP_TASK_CREATED':
+        case 'FOLLOW_UP_TASK_REMINDER':
+            if (role === 'DOCTOR' || role === 'ADMIN_DOCTOR') return '/doctor?tab=follow-up-tasks';
+            if (role === 'THERAPIST') return '/therapist?tab=follow-up-tasks';
+            return null;
+
+        // ── F07 · Multi-Agent Orchestration notifications ───────────────────
+        // careGapAgent — patient added to the critical monitor watch list.
+        // Lands on Critical Journey so the clinician sees the new flag row.
+        case 'CRITICAL_TRIAGE':
+            return isPatient ? '/patient' : '/critical-journey';
+        // dashboardSummariser — consolidated briefing card for the held
+        // slot. Best landing surface is the Pending appointments queue
+        // where the auto-held slot sits awaiting approval.
+        case 'CRITICAL_TRIAGE_SUMMARY':
+            return '/appointments?status=PENDING';
+        // pharmacyAgent + platform-wide low-stock alerts. Canonical type
+        // is LOW_STOCK_ALERT (see notification.service.sendLowStockAlert);
+        // 'LOW_STOCK' kept as alias for back-compat with any older rows.
+        case 'LOW_STOCK':
+        case 'LOW_STOCK_ALERT':
+            return '/pharmacy/inventory';
+
+        // ── F04 · Predictive Dosha forecast alert ───────────────────────────
+        // Surfaced on Critical Journey alongside the PatientCriticalFlag
+        // row the cron upserted.
+        case 'DOSHA_FORECAST_ALERT':
+            return isPatient ? '/patient' : '/critical-journey';
 
         // ── Bulk patient import ─────────────────────────────────────────────
         case 'PATIENT_IMPORT':

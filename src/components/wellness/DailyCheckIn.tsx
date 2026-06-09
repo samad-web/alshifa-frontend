@@ -133,20 +133,19 @@ export function DailyCheckIn({ isOpen, onClose, onSuccess }: DailyCheckInProps) 
         setAnalysing(true);
         setAnalysisFailed(false);
         try {
+            // Use apiClient.upload so the JWT auth header is injected
+            // correctly (the bare-fetch with localStorage.getItem('token')
+            // approach we used before is the wrong key — this app stores
+            // the access token under a different key resolved via
+            // getAccessToken in api-client.ts).
             const fd = new FormData();
             fd.append("photo", photoFile);
             fd.append("checkInId", savedCheckInId);
-            // apiClient.post defaults to JSON; use a one-off fetch so the
-            // browser sets the multipart boundary header itself.
-            const token = localStorage.getItem("token") || "";
-            const resp = await fetch(`/api/wellness/check-in/tongue-photo`, {
-                method: "POST",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-                body: fd,
-            });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const body = (await resp.json()) as TongueAnalysisResponse;
-            setAnalysisResult(body);
+            const resp = await apiClient.upload<TongueAnalysisResponse>(
+                "/api/wellness/check-in/tongue-photo",
+                fd,
+            );
+            setAnalysisResult(resp.data);
         } catch (err) {
             // Per spec: never block the check-in flow. The check-in is
             // already saved; the photo step is purely additive.
