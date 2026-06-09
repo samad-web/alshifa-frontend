@@ -1,13 +1,32 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/common/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Minus, Plus, Droplet, Activity, Moon, X, Loader2 } from "lucide-react";
+import { Minus, Plus, Droplet, Activity, Moon, X, Loader2, Camera, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { wellnessService } from "@/services/wellness.service";
 import { dailyTrackingService } from "@/services/dailyTracking.service";
+import { useTenantFeatures } from "@/hooks/useTenantFeatures";
+import { apiClient } from "@/lib/api-client";
+
+// F03 dosha colours — match F04's DoshaForecastPanel theme.
+const DOSHA_THEME: Record<string, { bg: string; label: string }> = {
+  VATA:     { bg: "bg-[#7c3aed] text-white", label: "VATA" },
+  PITTA:    { bg: "bg-[#ea580c] text-white", label: "PITTA" },
+  KAPHA:    { bg: "bg-[#0d9488] text-white", label: "KAPHA" },
+  BALANCED: { bg: "bg-emerald-600 text-white", label: "BALANCED" },
+  TRIDOSHA: { bg: "bg-slate-600 text-white", label: "TRIDOSHA" },
+};
+
+interface TongueAnalysisResponse {
+  id: string;
+  doshaIndication: string | null;
+  confidence: number | null;
+  analysisNotes: string | null;
+  alertEmitted: boolean;
+}
 
 // Daily check-in popup for the patient dashboard. 4-step wizard collecting
 // mood / sleep / water / activity, fanning out client-side to the existing
@@ -33,6 +52,9 @@ const MOODS = [
 ];
 
 export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPopupProps) {
+  const { has } = useTenantFeatures();
+  const tongueOn = has("MULTIMODAL_DIAGNOSTIC_AI");
+
   const [step, setStep] = useState(1);
   const [mood, setMood] = useState<string | null>(null);
   const [sleepHours, setSleepHours] = useState<number>(7);
@@ -40,6 +62,18 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
   const [activityDone, setActivityDone] = useState<boolean | null>(null);
   const [activityNotes, setActivityNotes] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+
+  // F03 — Step 5 state. Filled only when the tongue feature is enabled and
+  // the main check-in saved successfully.
+  const [savedCheckInId, setSavedCheckInId] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [analysing, setAnalysing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<TongueAnalysisResponse | null>(null);
+  const [analysisFailed, setAnalysisFailed] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const TOTAL_STEPS = tongueOn ? 5 : 4;
 
   const reset = () => {
     setStep(1);
@@ -49,6 +83,12 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
     setActivityDone(null);
     setActivityNotes("");
     setSubmitting(false);
+    setSavedCheckInId(null);
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setAnalysing(false);
+    setAnalysisResult(null);
+    setAnalysisFailed(false);
   };
 
   const handleClose = () => {
@@ -71,13 +111,17 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
     setSubmitting(true);
 
     // Mood/sleep is the primary log; if it fails (e.g. already submitted), bail.
+    // F03 — capture the returned check-in id so step 5 can attach the tongue
+    // photo to the right row.
+    let newCheckInId: string | null = null;
     try {
-      await wellnessService.submitCheckIn({
+      const resp = await wellnessService.submitCheckIn({
         painLevel: 0,
         sleepHours,
         mood,
         notes: undefined,
       });
+      newCheckInId = resp.data?.data?.id ?? null;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Check-in failed. Try again.";
       toast.error(message);
@@ -111,9 +155,52 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
 
     toast.success("✨ Daily check-in saved! +10 Zen Points");
     onSuccess?.();
+    // F03 — when the tongue feature is on and we know the check-in id,
+    // advance to the optional Step 5 (tongue photo) instead of closing.
+    // Skipping step 5 has zero effect on the saved check-in.
+    if (tongueOn && newCheckInId) {
+      setSavedCheckInId(newCheckInId);
+      setSubmitting(false);
+      setStep(5);
+      return;
+    }
     reset();
     onClose();
   };
+
+  // F03 — Step 5 handlers.
+  function onPickPhoto(file: File | null) {
+    setPhotoFile(file);
+    setPhotoPreview(file ? URL.createObjectURL(file) : null);
+    setAnalysisResult(null);
+    setAnalysisFailed(false);
+  }
+
+  async function handleAnalyse() {
+    if (!photoFile || !savedCheckInId) return;
+    setAnalysing(true);
+    setAnalysisFailed(false);
+    try {
+      // Use the shared apiClient.upload for multipart — it injects the
+      // correct Authorization header (the bare fetch() approach above used
+      // localStorage.getItem("token") which is NOT the key this app stores
+      // the JWT under, yielding 401 Unauthorized).
+      const fd = new FormData();
+      fd.append("photo", photoFile);
+      fd.append("checkInId", savedCheckInId);
+      const resp = await apiClient.upload<TongueAnalysisResponse>(
+        "/api/wellness/check-in/tongue-photo",
+        fd,
+      );
+      setAnalysisResult(resp.data);
+    } catch (err) {
+      // Never blocks the check-in flow — check-in is already saved.
+      console.warn("[tongue] analyse failed:", err);
+      setAnalysisFailed(true);
+    } finally {
+      setAnalysing(false);
+    }
+  }
 
   return (
     <Dialog
@@ -137,7 +224,7 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
               Daily check-in
             </DialogTitle>
             <p className="text-xs text-muted-foreground mt-1">
-              Step {step} of 4 • Earn +10 Zen Points
+              Step {step} of {TOTAL_STEPS} • Earn +10 Zen Points
             </p>
           </div>
           <button
@@ -153,7 +240,7 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
 
         {/* Progress dots */}
         <div className="px-6 pb-3 flex items-center gap-1.5">
-          {[1, 2, 3, 4].map((n) => (
+          {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map((n) => (
             <div
               key={n}
               className={cn("h-1.5 flex-1 rounded-full transition-colors")}
@@ -328,9 +415,106 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
             </div>
           )}
 
+          {/* F03 — Step 5: optional Jihva Pariksha tongue photo. Reached only
+              when MULTIMODAL_DIAGNOSTIC_AI is enabled AND step 4's submit
+              saved successfully. Skipping is a no-op for the check-in. */}
+          {step === 5 && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <p className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" style={{ color: "#0D6E6E" }} />
+                  Tongue Check <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  A quick photo helps your doctor track your Ayurvedic health trends.
+                </p>
+              </div>
+
+              {!photoPreview && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full h-40 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-2 hover:bg-gray-50 transition"
+                >
+                  <Camera className="w-8 h-8 text-gray-400" />
+                  <span className="text-xs text-gray-500">Tap to take a tongue photo</span>
+                </button>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+              />
+
+              {photoPreview && (
+                <div className="space-y-2">
+                  <img
+                    src={photoPreview}
+                    alt="Tongue preview"
+                    className="w-full h-40 object-cover rounded-xl border border-gray-200"
+                  />
+                  {!analysisResult && !analysisFailed && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-[11px] text-[#0D6E6E] hover:underline"
+                    >
+                      Retake photo
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {analysing && (
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  <div className="h-3 w-2/3 bg-gray-100 rounded animate-pulse" />
+                  <div className="h-3 w-1/2 bg-gray-100 rounded animate-pulse" />
+                  <p>Analysing tongue image…</p>
+                </div>
+              )}
+
+              {analysisResult && (
+                <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2 text-xs">
+                  {analysisResult.doshaIndication && (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wide",
+                          DOSHA_THEME[analysisResult.doshaIndication]?.bg ?? "bg-gray-100 text-gray-800",
+                        )}
+                      >
+                        {DOSHA_THEME[analysisResult.doshaIndication]?.label ?? analysisResult.doshaIndication}
+                      </span>
+                      {typeof analysisResult.confidence === "number" && (
+                        <span className="text-muted-foreground">
+                          {Math.round(analysisResult.confidence * 100)}% confidence
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {analysisResult.analysisNotes && (
+                    <p className="leading-snug">{analysisResult.analysisNotes}</p>
+                  )}
+                  <p className="text-[11px] text-emerald-700">✓ Shared with your doctor</p>
+                </div>
+              )}
+
+              {analysisFailed && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  Photo saved — analysis unavailable. Your doctor can still review the image.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Footer buttons */}
           <div className="flex gap-2 pt-2">
-            {step > 1 && (
+            {/* Back is only meaningful on steps 2-4; step 5 doesn't go back
+                because the check-in is already saved. */}
+            {step > 1 && step < 5 && (
               <Button
                 variant="outline"
                 onClick={back}
@@ -366,6 +550,36 @@ export function DailyCheckInPopup({ isOpen, onClose, onSuccess }: DailyCheckInPo
                   "Submit"
                 )}
               </Button>
+            )}
+            {/* F03 — Step 5 footer: Skip closes immediately; Analyse posts
+                the photo (only when a photo is selected and not yet analysed). */}
+            {step === 5 && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={handleClose}
+                  className="flex-1"
+                >
+                  {analysisResult || analysisFailed ? "Done" : "Skip"}
+                </Button>
+                {photoFile && !analysisResult && !analysisFailed && (
+                  <Button
+                    onClick={handleAnalyse}
+                    disabled={analysing}
+                    className="flex-1 text-white"
+                    style={{ background: !analysing ? "#0D6E6E" : undefined }}
+                  >
+                    {analysing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                        Analysing…
+                      </>
+                    ) : (
+                      "Analyse"
+                    )}
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
