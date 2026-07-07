@@ -1,5 +1,7 @@
 
-import { createContext, useContext, useEffect, useState, useRef, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { AuthUser as SupabaseAuthUser } from "@supabase/supabase-js";
 
 export type AppRole = "SUPER_ADMIN" | "ADMIN" | "ADMIN_DOCTOR" | "BRANCH_ADMIN" | "DOCTOR" | "THERAPIST" | "PATIENT" | "PHARMACIST";
 
@@ -12,9 +14,6 @@ interface AuthProfile {
   id: string;
   email: string;
   role: AppRole;
-  // Flat branchId for branch-scoped role checks (BRANCH_ADMIN, DOCTOR, THERAPIST,
-  // PHARMACIST). Mirrors User.branchId on the backend; null for SUPER_ADMIN /
-  // ADMIN-style global roles that aren't pinned to a branch.
   branchId?: string | null;
   branch?: { id: string; name: string; address?: string } | null;
   doctor?: unknown;
@@ -53,8 +52,8 @@ export interface SignInError extends Error {
   code?: string;
 }
 
-function classifySignInError(status: number, data: { error?: string; code?: string } | null): SignInErrorKind {
-  if (status === 0) return "network";
+function classifySignInError(status: number | null, data: { error?: string; code?: string } | null): SignInErrorKind {
+  if (status === null || status === 0) return "network";
   if (status >= 500) return "server";
   if (status === 429) return "rate_limited";
   if (status === 403) {
@@ -74,86 +73,15 @@ function makeSignInError(kind: SignInErrorKind, message: string, status?: number
   return err;
 }
 
-function getStoredTokens() {
-  const access = localStorage.getItem("accessToken");
-  const refresh = localStorage.getItem("refreshToken");
-  // Treat the literal strings "undefined" / "null" as absent — older builds
-  // could write these by accident when the login response was malformed.
-  return {
-    accessToken: access && access !== "undefined" && access !== "null" ? access : null,
-    refreshToken: refresh && refresh !== "undefined" && refresh !== "null" ? refresh : null,
-  };
-}
-
-function storeTokens(accessToken: unknown, refreshToken: unknown): boolean {
-  // Reject anything that isn't a non-empty string. This used to silently
-  // write `undefined` into localStorage when the login response shape was
-  // wrong, leaving the app in a state where every request 401'd.
-  if (typeof accessToken !== "string" || accessToken.length === 0) return false;
-  if (typeof refreshToken !== "string" || refreshToken.length === 0) return false;
-  localStorage.setItem("accessToken", accessToken);
-  localStorage.setItem("refreshToken", refreshToken);
-  return true;
-}
-
-function clearTokens() {
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
-}
-
-/** Decode a JWT payload without verifying the signature (client-side only check). */
-function decodeJwtPayload(token: string): { exp?: number } | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    // atob throws on non-base64 characters — guard against corrupted tokens
-    // by wrapping the whole decode in the catch below.
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-/** Returns true if the token is expired (with a 30-second buffer). */
-function isTokenExpired(token: string): boolean {
-  const payload = decodeJwtPayload(token);
-  if (!payload?.exp) return true;
-  return payload.exp * 1000 < Date.now() + 30_000;
-}
-
-// Single-flight refresh guard. Multiple parallel requests that all hit a 401
-// at the same moment used to each fire their own /refresh call — duplicating
-// load and (with reuse-detection on the server) sometimes nuking valid
-// sessions. Now a refresh in progress is shared by all callers.
 let inFlightRefresh: Promise<boolean> | null = null;
 
-// Exported so api-client.ts can call it on 401 to attempt a transparent
-// retry before clearing tokens and bouncing the user to /login.
-export async function refreshAccessTokenShared(apiBase: string): Promise<boolean> {
+export async function refreshAccessTokenShared(): Promise<boolean> {
   if (inFlightRefresh) return inFlightRefresh;
   inFlightRefresh = (async () => {
-    const { refreshToken } = getStoredTokens();
-    if (!refreshToken) { clearTokens(); return false; }
     try {
-      const res = await fetch(`${apiBase}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
-      });
-      if (!res.ok) { clearTokens(); return false; }
-      const data = await res.json();
-      if (typeof data?.accessToken !== 'string' || data.accessToken.length === 0) {
-        clearTokens();
-        return false;
-      }
-      localStorage.setItem('accessToken', data.accessToken);
-      // Some backends rotate the refresh token on every refresh — store the
-      // new one when it's present, keep the existing one when it isn't.
-      if (typeof data.refreshToken === 'string' && data.refreshToken.length > 0) {
-        localStorage.setItem('refreshToken', data.refreshToken);
-      }
-      return true;
+      const { data, error } = await supabase.auth.refreshSession();
+      if (error) return false;
+      return !!data.session;
     } catch {
       return false;
     } finally {
@@ -169,55 +97,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Attempt to renew the access token using the stored refresh token. Routes
-  // through the module-level singleton so concurrent callers share the same
-  // in-flight request.
-  const refreshAccessToken = (): Promise<boolean> => refreshAccessTokenShared(API_BASE_URL);
-
-  // Fetch user profile from backend
   const fetchProfile = async (shouldThrow = false) => {
-    let { accessToken } = getStoredTokens();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
 
-    if (!accessToken) {
-      setUser(null);
-      setRole(null);
-      setProfile(null);
-      setLoading(false);
-      return;
-    }
-
-    // Proactively refresh if the stored token is already expired
-    if (isTokenExpired(accessToken)) {
-      const refreshed = await refreshAccessToken();
-      if (!refreshed) {
-        setUser(null); setRole(null); setProfile(null); setLoading(false);
+      if (!session?.user) {
+        setUser(null);
+        setRole(null);
+        setProfile(null);
+        setLoading(false);
         return;
       }
-      accessToken = localStorage.getItem('accessToken')!;
-    }
 
-    try {
+      // Fetch full profile from backend using Supabase token
+      const token = session.access_token;
       const res = await fetch(`${API_BASE_URL}/api/user/me`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
-      // On auth failures, attempt a silent token refresh and retry once.
       if (res.status === 401 || res.status === 403) {
-        const refreshed = await refreshAccessToken();
-        if (refreshed) {
-          const newToken = localStorage.getItem('accessToken');
-          const retryRes = await fetch(`${API_BASE_URL}/api/user/me`, {
-            headers: { Authorization: `Bearer ${newToken}` },
-          });
-          if (!retryRes.ok) throw new Error(`Profile fetch failed: ${retryRes.status}`);
-          const retryData: AuthProfile = await retryRes.json();
-          setUser({ id: retryData.id, email: retryData.email });
-          setRole(retryData.role);
-          setProfile(retryData);
-          setLoading(false);
-          return;
-        }
-        clearTokens();
+        await supabase.auth.signOut();
         setUser(null); setRole(null); setProfile(null); setLoading(false);
         return;
       }
@@ -225,8 +124,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!res.ok) {
         throw new Error(`Profile fetch failed: ${res.status}`);
       }
-      const data: AuthProfile = await res.json();
 
+      const data: AuthProfile = await res.json();
       setUser({ id: data.id, email: data.email });
       setRole(data.role);
       setProfile(data);
@@ -243,127 +142,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    // Wrap fetchProfile so state updates are no-ops if the component unmounted
     const init = async () => {
+      // Listen for Supabase auth changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (!cancelled) {
+          if (session?.user) {
+            await fetchProfile();
+          } else {
+            setUser(null);
+            setRole(null);
+            setProfile(null);
+            setLoading(false);
+          }
+        }
+      });
+
+      // Initial load
       await fetchProfile();
-      // (fetchProfile already guards individual setters, but guard top-level too)
-      if (cancelled) {
-        setLoading(false);
-      }
-    };
-    init();
 
-    const handleSessionExpired = () => {
-      if (!cancelled) {
-        setUser(null); setRole(null); setProfile(null); setLoading(false);
-      }
+      return () => subscription?.unsubscribe();
     };
-    window.addEventListener('auth:session-expired', handleSessionExpired);
 
+    const unsubscribe = init();
     return () => {
       cancelled = true;
-      window.removeEventListener('auth:session-expired', handleSessionExpired);
+      unsubscribe.then(u => u?.());
     };
   }, []);
 
   const signIn = async (email: string, password: string) => {
     setLoading(true);
-    let res: Response;
     try {
-      res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-    } catch {
-      setLoading(false);
-      return { error: makeSignInError("network", "Can't reach the server. Check your connection and try again.") };
-    }
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (!res.ok) {
-      let data: { error?: string; code?: string } | null = null;
-      try { data = await res.json(); } catch { /* ignore non-JSON body */ }
-      setLoading(false);
-      const kind = classifySignInError(res.status, data);
-      return { error: makeSignInError(kind, data?.error || "Login failed", res.status, data?.code) };
-    }
+      if (error) {
+        const kind = classifySignInError(null, { error: error.message, code: error.code });
+        return { error: makeSignInError(kind, error.message, undefined, error.code) };
+      }
 
-    let data: {
-      mfaRequired?: boolean;
-      tempToken?: string;
-      accessToken?: unknown;
-      refreshToken?: unknown;
-    };
-    try {
-      data = await res.json();
-    } catch {
-      setLoading(false);
-      return { error: makeSignInError("server", "The server returned an invalid response. Please try again.") };
-    }
+      if (!data.session) {
+        return { error: makeSignInError("server", "Login succeeded but no session was created.") };
+      }
 
-    if (data.mfaRequired) {
-      // Stash the short-lived temp token so the (forthcoming) MFA challenge
-      // page can submit it to /mfa/validate. Stored in sessionStorage so it
-      // doesn't outlive the browser tab.
+      // Fetch profile after successful login
       try {
-        if (typeof data.tempToken === "string" && data.tempToken.length > 0) {
-          sessionStorage.setItem("auth:mfa-temp-token", data.tempToken);
-        }
-      } catch { /* storage may be blocked */ }
-      setLoading(false);
-      return { error: makeSignInError("mfa_required", "MFA verification required", 200) };
-    }
-
-    if (!storeTokens(data.accessToken, data.refreshToken)) {
-      setLoading(false);
-      return { error: makeSignInError("server", "Login succeeded but the server's response was malformed. Please try again.") };
-    }
-
-    // If the profile fetch fails, the partial state would otherwise be:
-    // tokens stored but no user/role → ProtectedRoute thinks we're logged in
-    // (token present) but every screen reads `useAuth().user` and bounces
-    // back to /login. Roll back the tokens and surface the failure.
-    try {
-      await fetchProfile(true);
-      return { error: null };
+        await fetchProfile(true);
+        return { error: null };
+      } catch (err) {
+        await supabase.auth.signOut();
+        setUser(null); setRole(null); setProfile(null); setLoading(false);
+        const message = err instanceof Error ? err.message : "We couldn't load your profile. Please try again.";
+        return { error: makeSignInError("server", message) };
+      }
     } catch (err) {
-      clearTokens();
-      setUser(null); setRole(null); setProfile(null); setLoading(false);
-      const message = err instanceof Error ? err.message : "We couldn't load your profile. Please try again.";
-      return { error: makeSignInError("server", message) };
+      setLoading(false);
+      const message = err instanceof Error ? err.message : "Login failed. Please try again.";
+      return { error: makeSignInError("network", message) };
     }
   };
 
   const signOut = async () => {
-    // Best-effort revoke on the server. We deliberately don't await this on
-    // the UI critical path — even if the network is dead, the local logout
-    // must still complete so the user isn't trapped in an authenticated UI.
-    const { accessToken, refreshToken } = getStoredTokens();
-    if (accessToken) {
-      void fetch(`${API_BASE_URL}/api/auth/logout`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ refreshToken: refreshToken ?? undefined }),
-        // keepalive lets the request finish even if this tab is closing.
-        keepalive: true,
-      }).catch(() => { /* swallow — local sign-out still proceeds */ });
-    }
-    clearTokens();
-    try { sessionStorage.removeItem("auth:mfa-temp-token"); } catch { /* ignore */ }
+    await supabase.auth.signOut();
     setUser(null);
     setRole(null);
     setProfile(null);
     setLoading(false);
   };
-
-  // Inactivity auto-logout removed: sessions now persist until the user
-  // explicitly clicks Sign out, the JWT hits its 7-day expiry, or the
-  // backend revokes the token. The 15-minute idle timer that lived here
-  // before was the primary source of "I came back from lunch and got
-  // bounced" reports.
 
   return (
     <AuthContext.Provider value={{ user, role, profile, loading, signIn, signOut, refreshProfile: fetchProfile }}>
